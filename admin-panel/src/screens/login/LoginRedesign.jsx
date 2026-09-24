@@ -229,7 +229,7 @@ function LoginRedesign() {
           </p>
         </div>
 
-        <p className="cc-login-copyright">© {new Date().getFullYear()} Capital Care</p>
+        <p className="cc-login-copyright">© {new Date().getFullYear()} Trusting Brains. All rights reserved.</p>
       </section>
     </main>
   );
