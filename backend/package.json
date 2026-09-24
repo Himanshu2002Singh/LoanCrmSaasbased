@@ -1,0 +1,43 @@
+{
+  "name": "capitalcare-saas-crm-backend",
+  "version": "2.0.0",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "nodemon app.js",
+    "db:sync": "node syncDb.js"
+  },
+  "keywords": [
+    "crm",
+    "saas",
+    "loan-crm",
+    "multi-tenant",
+    "express",
+    "sequelize",
+    "mysql"
+  ],
+  "author": "CapitalCare CRM Team",
+  "license": "ISC",
+  "description": "Multi-Tenant SaaS Loan CRM Backend API",
+  "dependencies": {
+    "aws-sdk": "^2.1692.0",
+    "bcrypt": "^6.0.0",
+    "compression": "^1.8.0",
+    "cors": "^2.8.5",
+    "date-fns": "^4.1.0",
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.1",
+    "multer": "^2.0.1",
+    "mysql2": "^3.14.1",
+    "node-schedule": "^2.1.1",
+    "nodemailer": "^7.0.3",
+    "nodemon": "^3.1.10",
+    "sequelize": "^6.37.7",
+    "uuid": "^11.1.0",
+    "xlsx": "^0.18.5"
+  }
+}

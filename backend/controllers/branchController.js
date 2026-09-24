@@ -1,0 +1,310 @@
+const { Branch, User } = require("../models");
+const { buildQuery, paginated } = require("../utils/query");
+const { logActivity, diffFields } = require("../utils/activity");
+const { companyScope, belongsToScope } = require("../middlewares/auth");
+const {
+  WORK_START_TIME,
+  WORK_END_TIME,
+  LATE_THRESHOLD_MINUTES,
+} = require("../config/attendanceRules");
+
+const SEARCHABLE = ["name", "city", "state"];
+const SORTABLE = ["name", "city", "createdAt"];
+
+const EDITABLE = [
+  "name",
+  "city",
+  "state",
+  "address",
+  "officeLat",
+  "officeLng",
+  "geoRadiusMeters",
+  "workStartTime",
+  "workEndTime",
+  "lateBufferMinutes",
+  "halfDayHours",
+];
+
+const BRANCH_ALIASES = {
+  office_lat: "officeLat",
+  office_lng: "officeLng",
+  geo_radius_meters: "geoRadiusMeters",
+  work_start_time: "workStartTime",
+  work_end_time: "workEndTime",
+  late_buffer_minutes: "lateBufferMinutes",
+  half_day_hours: "halfDayHours",
+};
+
+const pick = (body, fields, aliases = BRANCH_ALIASES) => {
+  const data = {};
+  const source = { ...body };
+  for (const [from, to] of Object.entries(aliases)) {
+    if (source[from] !== undefined && source[to] === undefined) source[to] = source[from];
+  }
+  for (const field of fields) {
+    if (source[field] === undefined) continue;
+    data[field] = typeof source[field] === "string" ? source[field].trim() : source[field];
+  }
+  return data;
+};
+
+const validateGeo = (data) => {
+  if (data.officeLat !== undefined && data.officeLat !== null && Math.abs(Number(data.officeLat)) > 90) {
+    return "officeLat must be between -90 and 90";
+  }
+  if (data.officeLng !== undefined && data.officeLng !== null && Math.abs(Number(data.officeLng)) > 180) {
+    return "officeLng must be between -180 and 180";
+  }
+  if (data.geoRadiusMeters !== undefined && data.geoRadiusMeters !== null && Number(data.geoRadiusMeters) < 10) {
+    return "geoRadiusMeters must be at least 10";
+  }
+  return null;
+};
+
+/**
+ * GET /api/branches
+ */
+exports.getBranches = async (req, res) => {
+  try {
+    const { limit, offset, order, where, page } = buildQuery(req.query, {
+      searchable: SEARCHABLE,
+      sortable: SORTABLE,
+      defaultSort: ["name", "ASC"],
+      defaultLimit: 100,
+    });
+
+    Object.assign(where, companyScope(req));
+
+    const { count, rows } = await Branch.findAndCountAll({ where, limit, offset, order });
+    return res.status(200).json(paginated({ count, rows, page, limit }));
+  } catch (error) {
+    console.error("[branches] getBranches error:", error);
+    return res.status(500).json({ message: "Internal Server Error", error: error.message });
+  }
+};
+
+/**
+ * GET /api/branches/:id
+ */
+exports.getBranchById = async (req, res) => {
+  try {
+    const branch = await Branch.findByPk(req.params.id);
+    if (!branch || !belongsToScope(req, branch)) {
+      return res.status(404).json({ message: "Branch not found" });
+    }
+    return res.status(200).json({ message: "success", data: branch });
+  } catch (error) {
+    console.error("[branches] getBranchById error:", error);
+    return res.status(500).json({ message: "Internal Server Error", error: error.message });
+  }
+};
+
+/**
+ * POST /api/branches
+ */
+exports.createBranch = async (req, res) => {
+  try {
+    const data = pick(req.body, EDITABLE);
+    if (!data.name) {
+      return res.status(400).json({ message: "name is required" });
+    }
+
+    const geoError = validateGeo(data);
+    if (geoError) return res.status(400).json({ message: geoError });
+
+    const companyId = req.user.companyId || parseInt(req.body.companyId, 10);
+    if (!companyId) {
+      return res.status(400).json({ message: "companyId is required" });
+    }
+
+    const branch = await Branch.create({ ...data, companyId });
+
+    await logActivity(req, {
+      recordType: "Branch",
+      recordId: branch.id,
+      action: "CREATED",
+      newValue: { name: branch.name, city: branch.city },
+      companyId,
+    });
+
+    return res.status(201).json({ message: "Branch created", data: branch });
+  } catch (error) {
+    console.error("[branches] createBranch error:", error);
+    return res.status(500).json({ message: "Internal Server Error", error: error.message });
+  }
+};
+
+/**
+ * PUT /api/branches/:id
+ * Also the write path for the settings screen: the office location and the
+ * allowed radius are branch properties.
+ */
+exports.updateBranch = async (req, res) => {
+  try {
+    const branch = await Branch.findByPk(req.params.id);
+    if (!branch || !belongsToScope(req, branch)) {
+      return res.status(404).json({ message: "Branch not found" });
+    }
+
+    const data = pick(req.body, EDITABLE);
+    const geoError = validateGeo(data);
+    if (geoError) return res.status(400).json({ message: geoError });
+
+    const before = { ...branch.get({ plain: true }) };
+    await branch.update(data);
+
+    const diff = diffFields(before, { ...branch.get({ plain: true }) }, EDITABLE);
+    if (diff) {
+      await logActivity(req, {
+        recordType: "Branch",
+        recordId: branch.id,
+        action: "UPDATED",
+        ...diff,
+        companyId: branch.companyId,
+      });
+    }
+
+    return res.status(200).json({ message: "Branch updated", data: branch });
+  } catch (error) {
+    console.error("[branches] updateBranch error:", error);
+    return res.status(500).json({ message: "Internal Server Error", error: error.message });
+  }
+};
+
+/**
+ * DELETE /api/branches/:id - refused while staff are still posted there,
+ * since users.branch_id would silently null out.
+ */
+exports.deleteBranch = async (req, res) => {
+  try {
+    const branch = await Branch.findByPk(req.params.id);
+    if (!branch || !belongsToScope(req, branch)) {
+      return res.status(404).json({ message: "Branch not found" });
+    }
+
+    const staffCount = await User.count({ where: { branchId: branch.id } });
+    if (staffCount) {
+      return res.status(409).json({ message: `${staffCount} user(s) are assigned to this branch` });
+    }
+
+    await logActivity(req, {
+      recordType: "Branch",
+      recordId: branch.id,
+      action: "DELETED",
+      oldValue: { name: branch.name, city: branch.city },
+      companyId: branch.companyId,
+    });
+
+    await branch.destroy();
+    return res.status(200).json({ message: "Branch deleted" });
+  } catch (error) {
+    console.error("[branches] deleteBranch error:", error);
+    return res.status(500).json({ message: "Internal Server Error", error: error.message });
+  }
+};
+
+/**
+ * GET /api/settings
+ *
+ * Kept in the old flat shape the settings screen already reads. The location
+ * comes from the branch (?branchId= picks one, otherwise the caller's own);
+ * the timings come from the shared attendance rules and cannot be edited here.
+ */
+exports.getSettings = async (req, res) => {
+  try {
+    const branchId = parseInt(req.query.branchId, 10) || req.user.branchId;
+    const branch = branchId
+      ? await Branch.findByPk(branchId)
+      : await Branch.findOne({ where: companyScope(req), order: [["id", "ASC"]] });
+
+    if (!branch || !belongsToScope(req, branch)) {
+      return res.status(404).json({ message: "No branch configured" });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        branch_id: branch.id,
+        branch_name: branch.name,
+        office_location: {
+          lat: branch.officeLat,
+          lng: branch.officeLng,
+          radius: branch.geoRadiusMeters,
+        },
+        office_timings: {
+          in_time: branch.workStartTime || WORK_START_TIME,
+          out_time: branch.workEndTime || WORK_END_TIME,
+          late_buffer: branch.lateBufferMinutes !== null && branch.lateBufferMinutes !== undefined ? branch.lateBufferMinutes : LATE_THRESHOLD_MINUTES,
+        },
+        office_timings_editable: true,
+      },
+    });
+  } catch (error) {
+    console.error("[settings] getSettings error:", error);
+    return res.status(500).json({ success: false, message: "Internal Server Error" });
+  }
+};
+
+/**
+ * PUT /api/settings - accepts location and timings to update branch configuration.
+ */
+exports.updateSettings = async (req, res) => {
+  try {
+    const { office_location: location, office_timings: timings, branch_id: bodyBranchId } = req.body;
+
+    const branchId = parseInt(bodyBranchId, 10) || req.user.branchId;
+    const branch = branchId
+      ? await Branch.findByPk(branchId)
+      : await Branch.findOne({ where: companyScope(req), order: [["id", "ASC"]] });
+
+    if (!branch || !belongsToScope(req, branch)) {
+      return res.status(404).json({ message: "No branch configured" });
+    }
+
+    const data = {};
+    if (location) {
+      if (location.lat !== undefined) data.officeLat = location.lat;
+      if (location.lng !== undefined) data.officeLng = location.lng;
+      if (location.radius !== undefined) data.geoRadiusMeters = location.radius;
+    }
+
+    if (timings) {
+      if (timings.in_time !== undefined) data.workStartTime = timings.in_time;
+      if (timings.out_time !== undefined) data.workEndTime = timings.out_time;
+      if (timings.late_buffer !== undefined) data.lateBufferMinutes = Number(timings.late_buffer);
+    }
+
+    const geoError = validateGeo(data);
+    if (geoError) return res.status(400).json({ success: false, message: geoError });
+
+    const before = { ...branch.get({ plain: true }) };
+    await branch.update(data);
+
+    const diff = diffFields(before, { ...branch.get({ plain: true }) }, EDITABLE);
+    if (diff) {
+      await logActivity(req, {
+        recordType: "Branch",
+        recordId: branch.id,
+        action: "UPDATED",
+        ...diff,
+        remarks: "Branch location / timings updated via settings",
+        companyId: branch.companyId,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Settings updated successfully",
+      data: {
+        office_timings: {
+          in_time: branch.workStartTime || WORK_START_TIME,
+          out_time: branch.workEndTime || WORK_END_TIME,
+          late_buffer: branch.lateBufferMinutes !== null && branch.lateBufferMinutes !== undefined ? branch.lateBufferMinutes : LATE_THRESHOLD_MINUTES,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("[settings] updateSettings error:", error);
+    return res.status(500).json({ success: false, message: "Internal Server Error" });
+  }
+};

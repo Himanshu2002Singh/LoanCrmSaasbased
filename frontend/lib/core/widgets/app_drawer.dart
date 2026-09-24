@@ -1,0 +1,217 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import '../constants/app_colors.dart';
+import '../widgets/status_badge.dart';
+import '../../features/auth/providers/auth_provider.dart';
+
+class AppDrawer extends ConsumerWidget {
+  const AppDrawer({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final userState = ref.watch(currentUserProvider);
+    final user = userState.value;
+    final currentRoute = GoRouterState.of(context).uri.toString();
+
+    return Drawer(
+      backgroundColor: Colors.white,
+      child: Column(
+        children: [
+          // Drawer Header
+          Container(
+            padding: EdgeInsets.only(
+              top: MediaQuery.of(context).padding.top + 20,
+              bottom: 20,
+              left: 20,
+              right: 20,
+            ),
+            decoration: const BoxDecoration(
+              color: AppColors.primary,
+            ),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 28,
+                  backgroundColor: Colors.white.withValues(alpha: 0.12),
+                  child: Text(
+                    user != null && user.name.isNotEmpty ? user.name[0].toUpperCase() : 'U',
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        user?.name ?? 'User',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        user?.company?.name ?? 'Capital Care CRM',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.7),
+                          fontSize: 12,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 6),
+                      if (user != null)
+                        StatusBadge(
+                          status: user.role,
+                          fontSize: 10,
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Menu List
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              children: [
+                _buildMenuItem(
+                  context,
+                  icon: Icons.dashboard_rounded,
+                  title: 'Dashboard',
+                  path: '/dashboard',
+                  isSelected: currentRoute == '/dashboard',
+                ),
+                _buildMenuItem(
+                  context,
+                  icon: Icons.people_alt_rounded,
+                  title: 'Leads Pipeline',
+                  path: '/leads',
+                  isSelected: currentRoute == '/leads',
+                ),
+                _buildMenuItem(
+                  context,
+                  icon: Icons.person_add_rounded,
+                  title: 'Add New Lead',
+                  path: '/leads/add',
+                  isSelected: currentRoute == '/leads/add' || currentRoute == '/add-lead',
+                ),
+                _buildMenuItem(
+                  context,
+                  icon: Icons.dialpad_rounded,
+                  title: 'Smart Dialer',
+                  path: '/dialer',
+                  isSelected: currentRoute == '/dialer',
+                ),
+                _buildMenuItem(
+                  context,
+                  icon: Icons.phone_in_talk_rounded,
+                  title: 'Call Logs',
+                  path: '/calls',
+                  isSelected: currentRoute == '/calls',
+                ),
+                _buildMenuItem(
+                  context,
+                  icon: Icons.alarm_rounded,
+                  title: 'Follow-ups & Reminders',
+                  path: '/followups',
+                  isSelected: currentRoute == '/followups',
+                ),
+                _buildMenuItem(
+                  context,
+                  icon: Icons.assignment_turned_in_rounded,
+                  title: 'Tasks',
+                  path: '/tasks',
+                  isSelected: currentRoute == '/tasks',
+                ),
+                _buildMenuItem(
+                  context,
+                  icon: Icons.location_on_rounded,
+                  title: 'GPS Attendance',
+                  path: '/attendance',
+                  isSelected: currentRoute == '/attendance',
+                ),
+                _buildMenuItem(
+                  context,
+                  icon: Icons.folder_shared_rounded,
+                  title: 'Loan Applications',
+                  path: '/applications',
+                  isSelected: currentRoute == '/applications',
+                ),
+                const Divider(height: 16),
+                _buildMenuItem(
+                  context,
+                  icon: Icons.person_rounded,
+                  title: 'My Profile',
+                  path: '/profile',
+                  isSelected: currentRoute == '/profile',
+                ),
+              ],
+            ),
+          ),
+
+          // Footer
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text(
+              'Capital Care CRM v2.0',
+              style: TextStyle(
+                fontSize: 11,
+                color: AppColors.textMuted.withValues(alpha: 0.8),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMenuItem(
+    BuildContext context, {
+    required IconData icon,
+    required String title,
+    required String path,
+    required bool isSelected,
+  }) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+      decoration: BoxDecoration(
+        color: isSelected ? AppColors.secondary.withValues(alpha: 0.08) : Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: ListTile(
+        leading: Icon(
+          icon,
+          size: 20,
+          color: isSelected ? AppColors.secondary : AppColors.textSecondary,
+        ),
+        title: Text(
+          title,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+            color: isSelected ? AppColors.secondary : AppColors.textPrimary,
+          ),
+        ),
+        dense: true,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        onTap: () {
+          Navigator.pop(context); // close drawer
+          context.go(path);
+        },
+      ),
+    );
+  }
+}
