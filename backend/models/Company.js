@@ -63,6 +63,12 @@ const Company = sequelize.define(
       allowNull: true,
       field: "subscription_expires_at",
     },
+    rolePermissions: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      field: "role_permissions",
+      comment: "Company customized role permissions overrides for MANAGER, OPS, BANKER, EMPLOYEE",
+    },
   },
   {
     tableName: "companies",

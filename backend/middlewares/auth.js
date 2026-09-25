@@ -2,6 +2,7 @@ const jwt = require("jsonwebtoken");
 const { User, Company, Plan } = require("../models");
 const { ROLES, USER_STATUSES } = require("../constants/roles");
 const { subscriptionBlock } = require("../services/provisioning");
+const { resolveUserPermissions } = require("../constants/permissions");
 
 const SECRET_KEY = process.env.SECRET_KEY || "capitalcare-dev-secret";
 
@@ -15,9 +16,10 @@ const SECRET_KEY = process.env.SECRET_KEY || "capitalcare-dev-secret";
  * off is one status change and takes effect on their next call.
  *
  * Populates:
- *   req.user      - the User instance
- *   req.company   - their Company with its Plan, null for SUPERADMIN
- *   req.companyId - company scope, null for SUPERADMIN acting platform-wide
+ *   req.user        - the User instance with effectivePermissions
+ *   req.permissions - effective resolved boolean permissions
+ *   req.company     - their Company with its Plan, null for SUPERADMIN
+ *   req.companyId   - company scope, null for SUPERADMIN acting platform-wide
  */
 const isAuthenticated = async (req, res, next) => {
   try {
@@ -63,7 +65,10 @@ const isAuthenticated = async (req, res, next) => {
       }
     }
 
+    const effectivePermissions = resolveUserPermissions(user);
+    user.setDataValue("effectivePermissions", effectivePermissions);
     req.user = user;
+    req.permissions = effectivePermissions;
     req.company = user.company || null;
     req.companyId = user.companyId;
     return next();
@@ -71,6 +76,28 @@ const isAuthenticated = async (req, res, next) => {
     console.error("[auth] isAuthenticated error:", error);
     return res.status(500).json({ message: "Internal Server Error" });
   }
+};
+
+/**
+ * Permission-based access control. Usage: requirePermission("viewPayouts")
+ * SUPERADMIN and COMPANY_ADMIN bypass every check.
+ */
+const requirePermission = (permissionKey) => (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ message: "Authentication required" });
+  }
+  if (req.user.role === ROLES.SUPERADMIN || req.user.role === ROLES.COMPANY_ADMIN) {
+    return next();
+  }
+  const permissions = req.permissions || resolveUserPermissions(req.user);
+  if (permissions && permissions[permissionKey]) {
+    return next();
+  }
+  return res.status(403).json({
+    code: "PERMISSION_DENIED",
+    permission: permissionKey,
+    message: `Access restricted: You do not have '${permissionKey}' permission. Please contact your company administrator.`,
+  });
 };
 
 /**
@@ -140,6 +167,7 @@ const belongsToScope = (req, record) => {
 module.exports = {
   isAuthenticated,
   requireRole,
+  requirePermission,
   requireSuperAdmin,
   requirePlanFeature,
   companyScope,

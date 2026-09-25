@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { isAuthenticated } = require("../middlewares/auth");
+const { isAuthenticated, requirePermission } = require("../middlewares/auth");
 const {
   getExpenses,
   getExpenseSummary,
@@ -12,11 +12,11 @@ const {
 
 router.use(isAuthenticated);
 
-router.get("/summary", getExpenseSummary);
-router.get("/categories", getCategories);
-router.get("/", getExpenses);
-router.post("/", createExpense);
-router.put("/:id", updateExpense);
-router.delete("/:id", deleteExpense);
+router.get("/summary", requirePermission("viewExpenses"), getExpenseSummary);
+router.get("/categories", requirePermission("viewExpenses"), getCategories);
+router.get("/", requirePermission("viewExpenses"), getExpenses);
+router.post("/", requirePermission("manageExpenses"), createExpense);
+router.put("/:id", requirePermission("manageExpenses"), updateExpense);
+router.delete("/:id", requirePermission("manageExpenses"), deleteExpense);
 
 module.exports = router;

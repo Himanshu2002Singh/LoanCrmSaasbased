@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { isAuthenticated } = require("../middlewares/auth");
+const { isAuthenticated, requirePermission } = require("../middlewares/auth");
 const {
   getPartyPayoutSummary,
   getPartyLedgerDetail,
@@ -10,11 +10,11 @@ const {
   linkLeadToParty,
 } = require("../controllers/partyPayoutController");
 
-router.get("/summary", isAuthenticated, getPartyPayoutSummary);
-router.get("/leads/search", isAuthenticated, searchCompanyLeads);
-router.get("/:partyName/ledger", isAuthenticated, getPartyLedgerDetail);
-router.post("/:partyName/link-lead", isAuthenticated, linkLeadToParty);
-router.post("/payments", isAuthenticated, recordPartyPayment);
-router.delete("/payments/:id", isAuthenticated, deletePartyPayment);
+router.get("/summary", isAuthenticated, requirePermission("viewConnectors"), getPartyPayoutSummary);
+router.get("/leads/search", isAuthenticated, requirePermission("viewConnectors"), searchCompanyLeads);
+router.get("/:partyName/ledger", isAuthenticated, requirePermission("viewConnectors"), getPartyLedgerDetail);
+router.post("/:partyName/link-lead", isAuthenticated, requirePermission("manageConnectors"), linkLeadToParty);
+router.post("/payments", isAuthenticated, requirePermission("manageConnectors"), recordPartyPayment);
+router.delete("/payments/:id", isAuthenticated, requirePermission("manageConnectors"), deletePartyPayment);
 
 module.exports = router;

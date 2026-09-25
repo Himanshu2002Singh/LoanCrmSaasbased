@@ -71,13 +71,17 @@ async function runMarketingSeeder() {
         { configType: "LOAN_PRODUCT", label: "Mutual Fund", value: "Mutual Fund", orderIndex: 80 },
         { configType: "LOAN_PRODUCT", label: "Insurance", value: "Insurance", orderIndex: 90 },
 
-        // Lead Sources
-        { configType: "LEAD_SOURCE", label: "Google Ads", value: "Google Ads", orderIndex: 10 },
-        { configType: "LEAD_SOURCE", label: "Facebook / Instagram Ads", value: "Facebook Ads", orderIndex: 20 },
-        { configType: "LEAD_SOURCE", label: "Website Referral", value: "Website", orderIndex: 30 },
-        { configType: "LEAD_SOURCE", label: "DSA Direct Partner", value: "DSA Partner", orderIndex: 40 },
-        { configType: "LEAD_SOURCE", label: "Direct Inward Calling", value: "Direct Call", orderIndex: 50 },
-        { configType: "LEAD_SOURCE", label: "Bank Referral Channel", value: "Bank Referral", orderIndex: 60 },
+        // Lead Sources / Connectors with party codes and commission percentages
+        { configType: "LEAD_SOURCE", label: "Self / Direct Walkin", value: "Direct Walkin", code: "DIR-001", commissionPercent: 0.0, colorCode: "#10B981", orderIndex: 10 },
+        { configType: "LEAD_SOURCE", label: "DSA Direct Partner", value: "DSA Partner", code: "PTY-001", commissionPercent: 1.50, colorCode: "#F59E0B", orderIndex: 20 },
+        { configType: "LEAD_SOURCE", label: "Sharma & Associates (DSA)", value: "Sharma DSA", code: "PTY-002", commissionPercent: 1.25, colorCode: "#3B82F6", orderIndex: 30 },
+        { configType: "LEAD_SOURCE", label: "Pooja Financial Consultancy", value: "Pooja Finance", code: "PTY-003", commissionPercent: 1.20, colorCode: "#8B5CF6", orderIndex: 40 },
+        { configType: "LEAD_SOURCE", label: "FinTech Connectors Network", value: "FinTech Connect", code: "PTY-004", commissionPercent: 1.40, colorCode: "#EC4899", orderIndex: 50 },
+        { configType: "LEAD_SOURCE", label: "Bank Referral Channel", value: "Bank Referral", code: "PTY-005", commissionPercent: 1.00, colorCode: "#06B6D4", orderIndex: 60 },
+        { configType: "LEAD_SOURCE", label: "QuickLoan Associates", value: "QuickLoan DSA", code: "PTY-006", commissionPercent: 1.10, colorCode: "#14B8A6", orderIndex: 70 },
+        { configType: "LEAD_SOURCE", label: "Google Ads Online", value: "Google Ads", code: "PTY-007", commissionPercent: 0.80, colorCode: "#6366F1", orderIndex: 80 },
+        { configType: "LEAD_SOURCE", label: "Facebook / Instagram Ads", value: "Facebook Ads", code: "PTY-008", commissionPercent: 0.80, colorCode: "#A855F7", orderIndex: 90 },
+        { configType: "LEAD_SOURCE", label: "Website Referral Portal", value: "Website", code: "PTY-009", commissionPercent: 0.50, colorCode: "#0EA5E9", orderIndex: 100 },
 
         // Doc Types
         { configType: "DOC_TYPE", label: "PAN Card", value: "PAN", orderIndex: 10 },
@@ -90,10 +94,20 @@ async function runMarketingSeeder() {
       ];
 
       for (const item of masterConfigsList) {
-        await db.MasterConfig.findOrCreate({
+        const [cfg, created] = await db.MasterConfig.findOrCreate({
           where: { companyId, configType: item.configType, value: item.value },
           defaults: { companyId, ...item },
         });
+        if (!created) {
+          await cfg.update({
+            label: item.label,
+            colorCode: item.colorCode || cfg.colorCode,
+            orderIndex: item.orderIndex || cfg.orderIndex,
+            code: item.code !== undefined ? item.code : cfg.code,
+            commissionPercent: item.commissionPercent !== undefined ? item.commissionPercent : cfg.commissionPercent,
+            isActive: true,
+          });
+        }
       }
 
       // 2. BRANCHES
@@ -437,20 +451,31 @@ async function runMarketingSeeder() {
       ];
 
       const statusDistribution = [
-        "NEW", "NEW", "NEW", "NEW",
+        "DISBURSED", "DISBURSED", "DISBURSED", "DISBURSED", "DISBURSED", "DISBURSED", "DISBURSED", "DISBURSED", "DISBURSED", "DISBURSED", "DISBURSED", "DISBURSED", "DISBURSED", "DISBURSED",
+        "SANCTIONED", "SANCTIONED", "SANCTIONED", "SANCTIONED", "SANCTIONED", "SANCTIONED", "SANCTIONED", "SANCTIONED",
+        "PASSED_TO_OPS", "PASSED_TO_OPS", "PASSED_TO_OPS", "PASSED_TO_OPS",
+        "FILE_LOGIN", "FILE_LOGIN", "FILE_LOGIN", "FILE_LOGIN",
+        "DOCS_PENDING", "DOCS_PENDING", "DOCS_PENDING",
         "INTERESTED", "INTERESTED", "INTERESTED", "INTERESTED", "INTERESTED",
         "FOLLOW_UP", "FOLLOW_UP", "FOLLOW_UP", "FOLLOW_UP",
         "CALL_BACK", "CALL_BACK", "CALL_BACK",
-        "DOCS_PENDING", "DOCS_PENDING", "DOCS_PENDING",
-        "FILE_LOGIN", "FILE_LOGIN", "FILE_LOGIN",
-        "PASSED_TO_OPS", "PASSED_TO_OPS", "PASSED_TO_OPS", "PASSED_TO_OPS",
-        "SANCTIONED", "SANCTIONED", "SANCTIONED",
-        "DISBURSED", "DISBURSED", "DISBURSED", "DISBURSED",
+        "NEW", "NEW", "NEW", "NEW",
         "REJECTED", "REJECTED",
         "NOT_CONNECTED", "NOT_PICKED"
       ];
 
-      const sourcePool = ["Google Ads", "Facebook Ads", "Website", "DSA Partner", "Direct Call", "Bank Referral"];
+      const sourcePool = [
+        { source: "DSA Partner", comm: 1.50 },
+        { source: "Sharma DSA", comm: 1.25 },
+        { source: "Pooja Finance", comm: 1.20 },
+        { source: "FinTech Connect", comm: 1.40 },
+        { source: "Bank Referral", comm: 1.00 },
+        { source: "QuickLoan DSA", comm: 1.10 },
+        { source: "Google Ads", comm: 0.80 },
+        { source: "Facebook Ads", comm: 0.80 },
+        { source: "Website", comm: 0.50 },
+        { source: "Direct Walkin", comm: 0.0 },
+      ];
 
       const createdLeads = [];
       const createdCustomers = [];
@@ -475,7 +500,9 @@ async function runMarketingSeeder() {
         const reqAmt = Math.round(randInt(prod.minAmt, prod.maxAmt) / 50000) * 50000;
         const status = statusDistribution[idx % statusDistribution.length];
         const priority = idx % 4 === 0 ? "HIGH" : idx % 3 === 0 ? "LOW" : "MEDIUM";
-        const leadSrc = sourcePool[idx % sourcePool.length];
+        const srcItem = sourcePool[idx % sourcePool.length];
+        const leadSrc = srcItem.source;
+        const leadComm = srcItem.comm;
 
         // Realistic date spread over past 40 days
         const daysPast = Math.min(38, Math.floor((idx * 38) / customersData.length));
@@ -518,11 +545,13 @@ async function runMarketingSeeder() {
             status: status,
             priority: priority,
             nextFollowupDate: nextFollowup,
+            commissionPercent: leadComm,
             createdAt: createdAtDate,
             updatedAt: new Date(createdAtDate.getTime() + 1000 * 60 * randInt(30, 400)),
           });
         } else {
           await lead.update({
+            leadSource: leadSrc,
             loanType: prod.type,
             requiredAmount: reqAmt,
             assignedEmployeeId: assignedEmp.id,
@@ -530,10 +559,11 @@ async function runMarketingSeeder() {
             status: status,
             priority: priority,
             nextFollowupDate: nextFollowup,
+            commissionPercent: leadComm,
           });
         }
 
-        createdLeads.push({ lead, customer, assignedEmp, prod, reqAmt, status, createdAtDate });
+        createdLeads.push({ lead, customer, assignedEmp, prod, reqAmt, status, createdAtDate, leadSrc, leadComm });
       }
 
       // 6. CALL LOGS
@@ -840,6 +870,383 @@ async function runMarketingSeeder() {
           isRead: false,
           createdAt: daysAgo(randInt(0, 2)),
         });
+      }
+
+      // 11. CASE PAYOUTS, DISBURSEMENTS, INVOICES & BANK RECEIPTS
+      console.log("11. Seeding Disbursed Case Payouts, Invoices, Bank Receipts & Payouts...");
+
+      // Clear existing records for clean idempotent seeding
+      await db.BankReceipt.destroy({ where: { companyId } });
+      await db.PartyPayment.destroy({ where: { companyId } });
+      await db.Expense.destroy({ where: { companyId } });
+
+      const payoutLeads = createdLeads.filter((item) =>
+        ["DISBURSED", "SANCTIONED"].includes(item.status)
+      );
+
+      const sourceConfigMap = new Map();
+      const currentSourceConfigs = await db.MasterConfig.findAll({
+        where: { companyId, configType: "LEAD_SOURCE" },
+      });
+      currentSourceConfigs.forEach((sc) => {
+        sourceConfigMap.set((sc.label || "").toLowerCase(), sc);
+        sourceConfigMap.set((sc.value || "").toLowerCase(), sc);
+      });
+
+      for (let pIdx = 0; pIdx < payoutLeads.length; pIdx++) {
+        const item = payoutLeads[pIdx];
+        const lender = lenders[pIdx % lenders.length];
+        const sourceConfig = sourceConfigMap.get((item.lead.leadSource || "").toLowerCase());
+
+        const loanAmount = parseFloat(item.reqAmt);
+        const bankCommPct = parseFloat(lender.payoutCommissionPercent) || 1.50;
+        // Base Amount = Incoming / Credit Amount from Bank = (Loan Amount * Bank Comm %) / 100
+        const baseAmount = Math.round((loanAmount * bankCommPct) / 100);
+        const bankCommDue = baseAmount;
+
+        const partyName = item.lead.leadSource || "DSA Partner";
+        const partyCode = sourceConfig?.code || `PTY-${String((pIdx % 6) + 1).padStart(3, "0")}`;
+        // Party commission % (applied on base value / credit amount)
+        const partyCommPct = 50.0;
+        const partyCommDue = Math.round((baseAmount * partyCommPct) / 100);
+
+        const partyTdsPercent = 5.0;
+        const partyTdsAmount = Math.round((partyCommDue * partyTdsPercent) / 100);
+        const partyGstPercent = 0.0;
+        const partyGstAmount = 0.0;
+        const extraCharges = pIdx % 3 === 0 ? 500 : 0; // staff incentive / operational deduction
+
+        const partyNetPayable = Math.max(0, partyCommDue - partyTdsAmount - partyGstAmount - extraCharges);
+
+        // Status distribution:
+        // pIdx % 3 === 0: SETTLED (full bank received & full party paid)
+        // pIdx % 3 === 1: PARTIALLY_SETTLED (bank received, partial party paid)
+        // pIdx % 3 === 2: PENDING (bank due, party due)
+        let caseStatus = "SETTLED";
+        let bankReceived = bankCommDue;
+        let partyPaid = partyNetPayable;
+
+        if (pIdx % 3 === 1) {
+          caseStatus = "PARTIALLY_SETTLED";
+          bankReceived = bankCommDue;
+          partyPaid = Math.round(partyNetPayable * 0.5);
+        } else if (pIdx % 3 === 2) {
+          caseStatus = "PENDING";
+          bankReceived = 0;
+          partyPaid = 0;
+        }
+
+        const bankRemaining = Math.max(0, bankCommDue - bankReceived);
+        const partyRemaining = Math.max(0, partyNetPayable - partyPaid);
+        const netMargin = Math.round(baseAmount - partyNetPayable);
+
+        const disbursalDaysAgo = Math.min(32, (pIdx * 2) + 2);
+        const disbursalDate = dateStr(daysAgo(disbursalDaysAgo));
+        const invoiceNumber = `INV-2026-${companyId}${String(pIdx + 101).padStart(3, "0")}`;
+        const invoiceDate = disbursalDate;
+        const invoiceStatus = caseStatus === "SETTLED" ? "PAID" : caseStatus === "PARTIALLY_SETTLED" ? "ISSUED" : "DRAFT";
+
+        const primaryApp = await db.Application.findOne({
+          where: { companyId, leadId: item.lead.id },
+        });
+
+        let [casePayout] = await db.CasePayout.findOrCreate({
+          where: { companyId, leadId: item.lead.id },
+          defaults: {
+            companyId,
+            leadId: item.lead.id,
+            applicationId: primaryApp ? primaryApp.id : null,
+            customerName: item.customer.name,
+            customerMobile: item.customer.mobile,
+            loanProduct: item.prod.type,
+            bankName: lender.name,
+            lenderId: lender.id,
+            disbursalDate,
+            loanAmount,
+            baseAmount,
+            bankCommissionPercent: bankCommPct,
+            bankCommissionDue: bankCommDue,
+            bankGstPercent: 18.0,
+            bankTdsPercent: 5.0,
+            bankReceivedAmount: bankReceived,
+            bankRemainingDue: bankRemaining,
+            partyName,
+            partyCode,
+            partyCommissionPercent: partyCommPct,
+            partyCommissionDue: partyCommDue,
+            partyTdsPercent,
+            partyTdsAmount,
+            partyGstPercent,
+            partyGstAmount,
+            extraCharges,
+            partyNetPayable,
+            partyPaidAmount: partyPaid,
+            partyRemainingDue: partyRemaining,
+            netMargin,
+            invoiceNumber,
+            invoiceDate,
+            invoiceStatus,
+            status: caseStatus,
+            notes: `Disbursed under ${lender.name} partner program. Case managed by ${item.assignedEmp.name}.`,
+          },
+        });
+
+        await casePayout.update({
+          customerName: item.customer.name,
+          customerMobile: item.customer.mobile,
+          loanProduct: item.prod.type,
+          bankName: lender.name,
+          lenderId: lender.id,
+          disbursalDate,
+          loanAmount,
+          baseAmount,
+          bankCommissionPercent: bankCommPct,
+          bankCommissionDue: bankCommDue,
+          bankReceivedAmount: bankReceived,
+          bankRemainingDue: bankRemaining,
+          partyName,
+          partyCode,
+          partyCommissionPercent: partyCommPct,
+          partyCommissionDue: partyCommDue,
+          partyTdsPercent,
+          partyTdsAmount,
+          partyGstPercent,
+          partyGstAmount,
+          extraCharges,
+          partyNetPayable,
+          partyPaidAmount: partyPaid,
+          partyRemainingDue: partyRemaining,
+          netMargin,
+          invoiceNumber,
+          invoiceDate,
+          invoiceStatus,
+          status: caseStatus,
+        });
+
+        // Seed BankReceipt if bankReceived > 0
+        if (bankReceived > 0) {
+          const receiptDate = dateStr(daysAgo(Math.max(1, disbursalDaysAgo - 2)));
+          await db.BankReceipt.create({
+            companyId,
+            casePayoutId: casePayout.id,
+            leadId: item.lead.id,
+            bankName: lender.name,
+            grossAmount: bankReceived,
+            gstAmount: Math.round(bankReceived * 0.18),
+            tdsAmount: Math.round(bankReceived * 0.05),
+            netAmount: Math.round(bankReceived * (1 + 0.18 - 0.05)),
+            receiptDate,
+            paymentMode: "NEFT",
+            referenceNumber: `UTR${randInt(100000000000, 999999999999)}`,
+            notes: `Commission payment received from ${lender.name} for Application #${item.lead.id}`,
+            recordedById: opsUsers[0]?.id || activeUsers[0].id,
+          });
+        }
+
+        // Seed PartyPayment (LINKED_PAYMENT) if partyPaid > 0
+        if (partyPaid > 0) {
+          const payDate = dateStr(daysAgo(Math.max(1, disbursalDaysAgo - 3)));
+          await db.PartyPayment.create({
+            companyId,
+            partyName,
+            partyCode,
+            leadId: item.lead.id,
+            paymentType: "LINKED_PAYMENT",
+            amount: partyPaid,
+            paymentDate: payDate,
+            paymentMode: "BANK_TRANSFER",
+            referenceNumber: `UTR${randInt(100000000000, 999999999999)}`,
+            notes: `Disbursement commission payout for Lead #${item.lead.id} (${item.customer.name})`,
+            recordedById: opsUsers[0]?.id || activeUsers[0].id,
+          });
+        }
+      }
+
+      // 12. PARTY / CONNECTOR ADVANCES & REFUND CREDITS
+      console.log("12. Seeding Party / Connector Unallocated Advances & Refund Credits...");
+
+      const connectorAdvanceList = [
+        { partyName: "DSA Partner", partyCode: "PTY-001", paymentType: "ADVANCE", amount: 45000, days: 12, notes: "Advance commission transfer against upcoming home loan file pipeline" },
+        { partyName: "Sharma DSA", partyCode: "PTY-002", paymentType: "ADVANCE", amount: 30000, days: 8, notes: "Advance payout credited for priority file processing" },
+        { partyName: "Pooja Finance", partyCode: "PTY-003", paymentType: "ADVANCE", amount: 25000, days: 15, notes: "Quarterly retainer advance payment" },
+        { partyName: "FinTech Connect", partyCode: "PTY-004", paymentType: "ADVANCE", amount: 50000, days: 5, notes: "Advance deposit for digital lead intake" },
+        { partyName: "DSA Partner", partyCode: "PTY-001", paymentType: "REFUND_CREDIT", amount: 5000, days: 3, notes: "Client processing fee reversal adjustment / refund credit" },
+      ];
+
+      for (const adv of connectorAdvanceList) {
+        await db.PartyPayment.create({
+          companyId,
+          partyName: adv.partyName,
+          partyCode: adv.partyCode,
+          leadId: null,
+          paymentType: adv.paymentType,
+          amount: adv.amount,
+          paymentDate: dateStr(daysAgo(adv.days)),
+          paymentMode: "BANK_TRANSFER",
+          referenceNumber: `UTR${randInt(100000000000, 999999999999)}`,
+          notes: adv.notes,
+          recordedById: opsUsers[0]?.id || activeUsers[0].id,
+        });
+      }
+
+      // 13. COMPREHENSIVE OFFICE RUNNING EXPENSES (EXPENSE TRACKER)
+      console.log("13. Seeding Comprehensive Office Running Expenses (Expense Tracker)...");
+
+      const currentYear = new Date().getFullYear();
+      const currentMonthNum = new Date().getMonth() + 1; // 1-12
+      const currentMonthStr = `${currentYear}-${String(currentMonthNum).padStart(2, "0")}`;
+      
+      const prev1MonthNum = currentMonthNum === 1 ? 12 : currentMonthNum - 1;
+      const prev1Year = currentMonthNum === 1 ? currentYear - 1 : currentYear;
+      const prevMonthStr = `${prev1Year}-${String(prev1MonthNum).padStart(2, "0")}`;
+
+      const prev2MonthNum = prev1MonthNum === 1 ? 12 : prev1MonthNum - 1;
+      const prev2Year = prev1MonthNum === 1 ? prev1Year - 1 : prev1Year;
+      const prev2MonthStr = `${prev2Year}-${String(prev2MonthNum).padStart(2, "0")}`;
+
+      const expenseTemplates = [
+        {
+          category: "Office Rent",
+          vendorName: "Apex Commercial Towers Realty Ltd.",
+          description: "Monthly lease rent for 4th Floor Corporate Headquarters & Operations Hub",
+          baseAmount: 85000.0,
+          gstPercent: 18.0,
+          paymentMode: "BANK_TRANSFER",
+          dayOfMonth: 5,
+        },
+        {
+          category: "Electricity & Utility",
+          vendorName: "Jaipur Vidyut Vitran Nigam Ltd. (JVVNL)",
+          description: "Commercial power & electricity consumption utility bill",
+          baseAmount: 14850.0,
+          gstPercent: 0.0,
+          paymentMode: "UPI",
+          dayOfMonth: 10,
+        },
+        {
+          category: "Tea, Coffee & Pantry",
+          vendorName: "Chai Point & Daily Pantry Supplies",
+          description: "Monthly staff pantry refreshment, tea, coffee beans & mineral water cans",
+          baseAmount: 8400.0,
+          gstPercent: 5.0,
+          paymentMode: "UPI",
+          dayOfMonth: 12,
+        },
+        {
+          category: "Internet & Phone",
+          vendorName: "Airtel Enterprise Telecommunications",
+          description: "Dedicated leased line 300 Mbps fiber & corporate CUG mobile connections",
+          baseAmount: 6800.0,
+          gstPercent: 18.0,
+          paymentMode: "CREDIT_CARD",
+          dayOfMonth: 8,
+        },
+        {
+          category: "Software & Subscriptions",
+          vendorName: "Google Workspace, AWS Cloud & Exotel Dialler",
+          description: "Cloud server infrastructure, CRM business emails and telephony dialler credits",
+          baseAmount: 13500.0,
+          gstPercent: 18.0,
+          paymentMode: "CREDIT_CARD",
+          dayOfMonth: 2,
+        },
+        {
+          category: "Stationery & Printing",
+          vendorName: "Reliable Printers & Office Supplies",
+          description: "Loan agreement legal dossier files, KYC verification forms & stamp papers",
+          baseAmount: 5600.0,
+          gstPercent: 12.0,
+          paymentMode: "UPI",
+          dayOfMonth: 16,
+        },
+        {
+          category: "Travel & Fuel",
+          vendorName: "Indian Oil Corporation / Conveyance Reimbursements",
+          description: "Field credit verification officers travel allowance & local client visits fuel",
+          baseAmount: 9200.0,
+          gstPercent: 0.0,
+          paymentMode: "UPI",
+          dayOfMonth: 22,
+        },
+        {
+          category: "Office Maintenance",
+          vendorName: "CleanPro Integrated Facility Services",
+          description: "Bi-weekly deep cleaning, HVAC / AC unit servicing and pest management",
+          baseAmount: 7200.0,
+          gstPercent: 18.0,
+          paymentMode: "BANK_TRANSFER",
+          dayOfMonth: 18,
+        },
+        {
+          category: "Marketing & Advertising",
+          vendorName: "Meta Ads & Google Performance Ads",
+          description: "Digital customer acquisition, Google search campaign & Facebook lead generation",
+          baseAmount: 48000.0,
+          gstPercent: 18.0,
+          paymentMode: "BANK_TRANSFER",
+          dayOfMonth: 15,
+        },
+        {
+          category: "Legal & Accounting",
+          vendorName: "Singhal & Associates Chartered Accountants",
+          description: "Monthly GST return filings, TDS compliance and statutory audit fee",
+          baseAmount: 15000.0,
+          gstPercent: 18.0,
+          paymentMode: "CHEQUE",
+          dayOfMonth: 25,
+        },
+        {
+          category: "Miscellaneous",
+          vendorName: "Local Market Stores & Hardware Supplies",
+          description: "Emergency electrical fittings, sanitization dispensers and pantry utensils",
+          baseAmount: 3200.0,
+          gstPercent: 0.0,
+          paymentMode: "CASH",
+          dayOfMonth: 28,
+        },
+      ];
+
+      const monthsToSeed = [
+        { monthStr: prev2MonthStr, year: prev2Year, month: prev2MonthNum },
+        { monthStr: prevMonthStr, year: prev1Year, month: prev1MonthNum },
+        { monthStr: currentMonthStr, year: currentYear, month: currentMonthNum },
+      ];
+
+      let expGlobalCount = 1;
+
+      for (const mObj of monthsToSeed) {
+        for (let eIdx = 0; eIdx < expenseTemplates.length; eIdx++) {
+          const tmpl = expenseTemplates[eIdx];
+          const expDate = `${mObj.year}-${String(mObj.month).padStart(2, "0")}-${String(Math.min(28, tmpl.dayOfMonth)).padStart(2, "0")}`;
+          const gstAmt = Math.round((tmpl.baseAmount * tmpl.gstPercent) / 100);
+          const totalAmt = Math.round(tmpl.baseAmount + gstAmt);
+          const expCode = `EXP-${mObj.year}-${String(expGlobalCount).padStart(4, "0")}`;
+          expGlobalCount++;
+
+          // In the current month, mark 2 expenses as PENDING to show status badge filter in UI
+          const isCurrentMonth = mObj.monthStr === currentMonthStr;
+          const status = isCurrentMonth && (eIdx === 1 || eIdx === 7) ? "PENDING" : "PAID";
+
+          await db.Expense.create({
+            companyId,
+            expenseCode: expCode,
+            expenseDate: expDate,
+            expenseMonth: mObj.monthStr,
+            title: tmpl.description,
+            category: tmpl.category,
+            amount: totalAmt,
+            vendorName: tmpl.vendorName,
+            description: tmpl.description,
+            baseAmount: tmpl.baseAmount,
+            gstPercent: tmpl.gstPercent,
+            gstAmount: gstAmt,
+            totalAmount: totalAmt,
+            paymentMode: tmpl.paymentMode,
+            status,
+            remarks: status === "PAID" ? `Cleared via ${tmpl.paymentMode}. Invoice verified.` : "Approval pending with Branch Manager.",
+            createdById: activeUsers[0].id,
+          });
+        }
       }
 
       console.log(`✓ Finished seeding Company [ID: ${companyId}].`);

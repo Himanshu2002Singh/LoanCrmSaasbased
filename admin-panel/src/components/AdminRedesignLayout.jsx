@@ -23,6 +23,7 @@ import {
   Receipt,
   Settings,
   Share2,
+  ShieldCheck,
   Tags,
   UserPlus,
   Users,
@@ -39,7 +40,7 @@ import SubscriptionExpiredModal from "./SubscriptionExpiredModal";
 const managerNavItems = [
   { path: "/", label: "Dashboard", icon: LayoutDashboard },
   { path: "/leads", label: "Leads", icon: FileText },
-  { path: "/add-users", label: "Add Employees", icon: UserPlus },
+  { path: "/add-users", label: "Add Employees", icon: UserPlus, permission: "manageUsers" },
   { path: "/branches", label: "Branches", icon: MapPin },
   { path: "/attendance", label: "Attendance", icon: CalendarDays },
   { path: "/tasks", label: "Tasks", icon: ClipboardList },
@@ -50,21 +51,22 @@ const managerNavItems = [
   { path: "/document-types", label: "Document Types", icon: Files },
   { path: "/lenders", label: "Lenders & NBFC", icon: Building2 },
   { path: "/operations", label: "Operations", icon: BriefcaseBusiness },
-  { path: "/party-payouts", label: "Party / Connector Details", icon: Receipt },
-  { path: "/case-payouts", label: "Disbursement & Payouts", icon: IndianRupee },
-  { path: "/expenses", label: "Expense Tracker", icon: Wallet },
+  { path: "/party-payouts", label: "Party / Connector Details", icon: Receipt, permission: "viewConnectors" },
+  { path: "/case-payouts", label: "Disbursement & Payouts", icon: IndianRupee, permission: "viewPayouts" },
+  { path: "/expenses", label: "Expense Tracker", icon: Wallet, permission: "viewExpenses" },
   { path: "/banker/queries", label: "Banker Queries", icon: ClipboardList },
-  { path: "/performance", label: "Performance Report", icon: BarChart3 },
-  { path: "/lead_report", label: "Lead Report", icon: FileBarChart },
+  { path: "/performance", label: "Performance Report", icon: BarChart3, permission: "viewReports" },
+  { path: "/lead_report", label: "Lead Report", icon: FileBarChart, permission: "viewReports" },
+  { path: "/role-permissions", label: "Role Permissions", icon: ShieldCheck, permission: "manageSettings" },
   { path: "/company", label: "Company & Plan", icon: Building2 },
-  { path: "/settings", label: "Settings", icon: Settings },
+  { path: "/settings", label: "Settings", icon: Settings, permission: "manageSettings" },
 ];
 
 const operationsNavItems = [
   { path: "/operations", label: "Operations", icon: BriefcaseBusiness },
-  { path: "/party-payouts", label: "Party / Connector Details", icon: Receipt },
-  { path: "/case-payouts", label: "Disbursement & Payouts", icon: IndianRupee },
-  { path: "/expenses", label: "Expense Tracker", icon: Wallet },
+  { path: "/party-payouts", label: "Party / Connector Details", icon: Receipt, permission: "viewConnectors" },
+  { path: "/case-payouts", label: "Disbursement & Payouts", icon: IndianRupee, permission: "viewPayouts" },
+  { path: "/expenses", label: "Expense Tracker", icon: Wallet, permission: "viewExpenses" },
   { path: "/banker/queries", label: "Banker Queries", icon: ClipboardList },
 ];
 
@@ -125,14 +127,37 @@ function AdminRedesignLayout({ children }) {
   const [employees, setEmployees] = useState([]);
   const [statuses, setStatuses] = useState(defaultStatusLabels);
   const employeeRole = localStorage.getItem("employeeRole");
+  const userRole = localStorage.getItem("userRole") || "";
   const name = localStorage.getItem("name") || "Guest";
   const email = localStorage.getItem("email") || "";
-  const navItems =
+
+  const isCompanyAdmin =
+    ["COMPANY_ADMIN", "SUPERADMIN"].includes(userRole.toUpperCase()) ||
+    ["admin", "superadmin"].includes(employeeRole?.toLowerCase());
+
+  const userPermissions = useMemo(() => {
+    try {
+      return JSON.parse(localStorage.getItem("userPermissions") || "{}");
+    } catch {
+      return {};
+    }
+  }, []);
+
+  const rawNavItems =
     employeeRole === "banker"
       ? bankerNavItems
       : employeeRole === "operations"
       ? operationsNavItems
       : managerNavItems;
+
+  const navItems = useMemo(() => {
+    if (isCompanyAdmin) return rawNavItems;
+    return rawNavItems.filter((item) => {
+      if (!item.permission) return true;
+      return Boolean(userPermissions[item.permission]);
+    });
+  }, [rawNavItems, isCompanyAdmin, userPermissions]);
+
   const homePath =
     employeeRole === "banker"
       ? "/banker"

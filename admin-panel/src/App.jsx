@@ -38,9 +38,10 @@ import PlansScreen from "./screens/platform/PlansScreen";
 import PartyPayoutsScreen from "./screens/partyPayouts/PartyPayoutsScreen";
 import CasePayoutsScreen from "./screens/payouts/CasePayoutsScreen";
 import ExpenseTrackerScreen from "./screens/expenses/ExpenseTrackerScreen";
+import RolePermissionsRedesign from "./screens/permissions/RolePermissionsRedesign";
 
-const PageShell = ({ children, allowedRoles = ["manager"] }) => (
-  <ProtectedRoute allowedRoles={allowedRoles}>
+const PageShell = ({ children, allowedRoles = ["manager"], requiredPermission = null }) => (
+  <ProtectedRoute allowedRoles={allowedRoles} requiredPermission={requiredPermission}>
     <AdminRedesignLayout>{children}</AdminRedesignLayout>
   </ProtectedRoute>
 );
@@ -107,7 +108,7 @@ function App() {
         <Route
           path="/add-users"
           element={
-            <PageShell>
+            <PageShell requiredPermission="manageUsers">
               <UserList />
             </PageShell>
           }
@@ -115,7 +116,7 @@ function App() {
         <Route
           path="/branches"
           element={
-            <PageShell>
+            <PageShell requiredPermission="manageSettings">
               <BranchesScreen />
             </PageShell>
           }
@@ -151,7 +152,7 @@ function App() {
         <Route
           path="/userdetail/:emp_id"
           element={
-            <PageShell>
+            <PageShell requiredPermission="manageUsers">
               <UserDetailScreen />
             </PageShell>
           }
@@ -175,7 +176,7 @@ function App() {
         <Route
           path="/lenders"
           element={
-            <PageShell>
+            <PageShell requiredPermission="manageSettings">
               <LendersScreen />
             </PageShell>
           }
@@ -183,7 +184,7 @@ function App() {
         <Route
           path="/lead-statuses"
           element={
-            <PageShell>
+            <PageShell requiredPermission="manageSettings">
               <LeadStatusesScreen />
             </PageShell>
           }
@@ -191,7 +192,7 @@ function App() {
         <Route
           path="/loan-products"
           element={
-            <PageShell>
+            <PageShell requiredPermission="manageSettings">
               <LoanProductsScreen />
             </PageShell>
           }
@@ -199,7 +200,7 @@ function App() {
         <Route
           path="/lead-sources"
           element={
-            <PageShell>
+            <PageShell requiredPermission="manageSettings">
               <LeadSourcesScreen />
             </PageShell>
           }
@@ -207,7 +208,7 @@ function App() {
         <Route
           path="/party-payouts"
           element={
-            <PageShell allowedRoles={["manager", "operations"]}>
+            <PageShell allowedRoles={["manager", "operations"]} requiredPermission="viewConnectors">
               <PartyPayoutsScreen />
             </PageShell>
           }
@@ -215,7 +216,7 @@ function App() {
         <Route
           path="/case-payouts"
           element={
-            <PageShell allowedRoles={["manager", "operations"]}>
+            <PageShell allowedRoles={["manager", "operations"]} requiredPermission="viewPayouts">
               <CasePayoutsScreen />
             </PageShell>
           }
@@ -223,7 +224,7 @@ function App() {
         <Route
           path="/payouts"
           element={
-            <PageShell allowedRoles={["manager", "operations"]}>
+            <PageShell allowedRoles={["manager", "operations"]} requiredPermission="viewPayouts">
               <CasePayoutsScreen />
             </PageShell>
           }
@@ -231,7 +232,7 @@ function App() {
         <Route
           path="/expenses"
           element={
-            <PageShell allowedRoles={["manager", "operations"]}>
+            <PageShell allowedRoles={["manager", "operations"]} requiredPermission="viewExpenses">
               <ExpenseTrackerScreen />
             </PageShell>
           }
@@ -239,7 +240,7 @@ function App() {
         <Route
           path="/expense-tracker"
           element={
-            <PageShell allowedRoles={["manager", "operations"]}>
+            <PageShell allowedRoles={["manager", "operations"]} requiredPermission="viewExpenses">
               <ExpenseTrackerScreen />
             </PageShell>
           }
@@ -247,7 +248,7 @@ function App() {
         <Route
           path="/document-types"
           element={
-            <PageShell>
+            <PageShell requiredPermission="manageSettings">
               <DocumentTypesScreen />
             </PageShell>
           }
@@ -263,7 +264,7 @@ function App() {
         <Route
           path="/performance"
           element={
-            <PageShell>
+            <PageShell requiredPermission="viewReports">
               <PerformanceScreen />
             </PageShell>
           }
@@ -271,7 +272,7 @@ function App() {
         <Route
           path="/lead_report"
           element={
-            <PageShell>
+            <PageShell requiredPermission="viewReports">
               <LeadsReport />
             </PageShell>
           }
@@ -279,7 +280,7 @@ function App() {
         <Route
           path="/settings"
           element={
-            <PageShell>
+            <PageShell requiredPermission="manageSettings">
               <RedesignPageFrame pageKey="settings">
                 <SettingsScreen />
               </RedesignPageFrame>
@@ -287,9 +288,25 @@ function App() {
           }
         />
         <Route
+          path="/role-permissions"
+          element={
+            <PageShell requiredPermission="manageSettings">
+              <RolePermissionsRedesign />
+            </PageShell>
+          }
+        />
+        <Route
+          path="/permissions"
+          element={
+            <PageShell requiredPermission="manageSettings">
+              <RolePermissionsRedesign />
+            </PageShell>
+          }
+        />
+        <Route
           path="/company"
           element={
-            <PageShell allowedRoles={["manager", "operations", "banker"]}>
+            <PageShell allowedRoles={["manager", "operations", "banker"]} requiredPermission="manageSettings">
               <CompanyProfileScreen />
             </PageShell>
           }

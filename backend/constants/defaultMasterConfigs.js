@@ -27,11 +27,14 @@ const DEFAULT_MASTER_CONFIGS = [
   { configType: "DOC_TYPE", label: "Bank Statement (Last 6 Months)", value: "BANK_STATEMENT", orderIndex: 40 },
   { configType: "DOC_TYPE", label: "ITR / Form 16", value: "ITR", orderIndex: 50 },
 
-  { configType: "LEAD_SOURCE", label: "Self", value: "Self", colorCode: "#10b981", orderIndex: 10 },
-  { configType: "LEAD_SOURCE", label: "Referral / Party", value: "Referral", colorCode: "#8b5cf6", orderIndex: 20 },
-  { configType: "LEAD_SOURCE", label: "Direct Inward Call", value: "Direct Call", colorCode: "#3b82f6", orderIndex: 30 },
-  { configType: "LEAD_SOURCE", label: "DSA / Channel Partner", value: "DSA Partner", colorCode: "#f59e0b", orderIndex: 40 },
-  { configType: "LEAD_SOURCE", label: "Website / Online Ads", value: "Online", colorCode: "#06b6d4", orderIndex: 50 },
+  { configType: "LEAD_SOURCE", label: "Self / Direct Walkin", value: "Self", colorCode: "#10b981", code: "DIR-001", commissionPercent: 0.0, orderIndex: 10 },
+  { configType: "LEAD_SOURCE", label: "DSA Direct Partner", value: "DSA Partner", colorCode: "#f59e0b", code: "PTY-001", commissionPercent: 1.50, orderIndex: 20 },
+  { configType: "LEAD_SOURCE", label: "Sharma & Associates (DSA)", value: "Sharma DSA", colorCode: "#3b82f6", code: "PTY-002", commissionPercent: 1.25, orderIndex: 30 },
+  { configType: "LEAD_SOURCE", label: "Pooja Financial Consultancy", value: "Pooja Finance", colorCode: "#8b5cf6", code: "PTY-003", commissionPercent: 1.20, orderIndex: 40 },
+  { configType: "LEAD_SOURCE", label: "FinTech Connectors Network", value: "FinTech Connect", colorCode: "#ec4899", code: "PTY-004", commissionPercent: 1.40, orderIndex: 50 },
+  { configType: "LEAD_SOURCE", label: "Bank Referral Channel", value: "Bank Referral", colorCode: "#06b6d4", code: "PTY-005", commissionPercent: 1.00, orderIndex: 60 },
+  { configType: "LEAD_SOURCE", label: "Direct Inward Call", value: "Direct Call", colorCode: "#14b8a6", code: "PTY-006", commissionPercent: 0.0, orderIndex: 70 },
+  { configType: "LEAD_SOURCE", label: "Website / Online Ads", value: "Online", colorCode: "#6366f1", code: "PTY-007", commissionPercent: 0.50, orderIndex: 80 },
 ];
 
 module.exports = { DEFAULT_MASTER_CONFIGS };

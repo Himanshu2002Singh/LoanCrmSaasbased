@@ -201,6 +201,9 @@ const visibilityScope = async (req) => {
     };
   }
   if (req.user.role === ROLES.MANAGER) {
+    if (req.permissions?.viewAllLeads) {
+      return {};
+    }
     const subordinates = await User.findAll({
       where: { companyId: req.user.companyId, managerId: req.user.id },
       attributes: ["id"],

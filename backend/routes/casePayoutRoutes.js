@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { isAuthenticated } = require("../middlewares/auth");
+const { isAuthenticated, requirePermission } = require("../middlewares/auth");
 const {
   getDisbursedPayouts,
   updateCasePayoutRates,
@@ -10,11 +10,11 @@ const {
   getInvoiceData,
 } = require("../controllers/casePayoutController");
 
-router.get("/cases", isAuthenticated, getDisbursedPayouts);
-router.put("/cases/:id", isAuthenticated, updateCasePayoutRates);
-router.post("/cases/:id/bank-receipt", isAuthenticated, recordBankReceipt);
-router.post("/cases/:id/party-payment", isAuthenticated, recordPartyPayoutForCase);
-router.get("/cases/:id/invoice", isAuthenticated, getInvoiceData);
-router.get("/journal", isAuthenticated, getPaymentJournal);
+router.get("/cases", isAuthenticated, requirePermission("viewPayouts"), getDisbursedPayouts);
+router.put("/cases/:id", isAuthenticated, requirePermission("managePayouts"), updateCasePayoutRates);
+router.post("/cases/:id/bank-receipt", isAuthenticated, requirePermission("managePayouts"), recordBankReceipt);
+router.post("/cases/:id/party-payment", isAuthenticated, requirePermission("managePayouts"), recordPartyPayoutForCase);
+router.get("/cases/:id/invoice", isAuthenticated, requirePermission("viewPayouts"), getInvoiceData);
+router.get("/journal", isAuthenticated, requirePermission("viewPayouts"), getPaymentJournal);
 
 module.exports = router;

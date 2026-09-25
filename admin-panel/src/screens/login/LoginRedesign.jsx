@@ -66,6 +66,10 @@ function LoginRedesign() {
       localStorage.setItem("employeeRole", panelRole);
       localStorage.setItem("userRole", role);
       localStorage.setItem("token", response.data.token);
+      localStorage.setItem(
+        "userPermissions",
+        JSON.stringify(response.data.user?.resolvedPermissions || response.data.user?.permissions || response.data.data?.resolvedPermissions || {})
+      );
 
       // A super admin operates the platform, not a company, so they land on
       // their own console. Bankers land on the banker underwriting portal.

@@ -6,10 +6,11 @@ const { logActivity, diffFields } = require("../utils/activity");
 const { companyScope, belongsToScope } = require("../middlewares/auth");
 const { seatLimitFor } = require("../services/provisioning");
 const { ROLES, ROLE_VALUES, USER_STATUSES, USER_STATUS_VALUES } = require("../constants/roles");
+const { PERMISSION_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, resolveUserPermissions } = require("../constants/permissions");
 
 const SEARCHABLE = ["name", "email", "phone"];
 const SORTABLE = ["name", "email", "role", "status", "salary", "createdAt"];
-const EDITABLE = ["name", "email", "phone", "role", "managerId", "branchId", "status", "salary"];
+const EDITABLE = ["name", "email", "phone", "role", "managerId", "branchId", "status", "salary", "permissions"];
 
 const WITH_RELATIONS = [
   { model: Branch, as: "branch", attributes: ["id", "name", "city"], required: false },
@@ -140,10 +141,78 @@ exports.getUsers = async (req, res) => {
       distinct: true,
     });
 
-    return res.status(200).json(paginated({ count, rows, page, limit }));
+    const formattedRows = rows.map((u) => {
+      const json = u.toJSON ? u.toJSON() : { ...u };
+      json.resolvedPermissions = resolveUserPermissions(u);
+      return json;
+    });
+
+    return res.status(200).json(paginated({ count, rows: formattedRows, page, limit }));
   } catch (error) {
     console.error("[users] getUsers error:", error);
     return res.status(500).json({ message: "Internal Server Error", error: error.message });
+  }
+};
+
+/**
+ * GET /api/users/permissions/metadata
+ */
+exports.getPermissionMetadata = async (req, res) => {
+  try {
+    return res.status(200).json({
+      success: true,
+      definitions: PERMISSION_DEFINITIONS,
+      roleDefaults: DEFAULT_ROLE_PERMISSIONS,
+      defaultRolePermissions: DEFAULT_ROLE_PERMISSIONS,
+    });
+  } catch (err) {
+    console.error("[users] getPermissionMetadata error:", err);
+    return res.status(500).json({ message: "Internal server error", error: err.message });
+  }
+};
+
+/**
+ * PUT /api/users/:id/permissions
+ */
+exports.updateUserPermissions = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { permissions } = req.body;
+
+    const user = await User.findByPk(id);
+    if (!user || !belongsToScope(req, user)) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (user.role === ROLES.SUPERADMIN || user.role === ROLES.COMPANY_ADMIN) {
+      return res.status(400).json({ message: "Cannot override permissions for administrator accounts" });
+    }
+
+    // Update user permissions JSON
+    await user.update({ permissions: permissions || {} });
+
+    const resolved = resolveUserPermissions(user);
+
+    await logActivity(req, {
+      recordType: "User",
+      recordId: user.id,
+      action: "UPDATED",
+      remarks: `Updated role permissions for ${user.name} (${user.role})`,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `Permissions updated successfully for ${user.name}`,
+      data: {
+        userId: user.id,
+        role: user.role,
+        permissions: user.permissions,
+        resolvedPermissions: resolved,
+      },
+    });
+  } catch (error) {
+    console.error("[users] updateUserPermissions error:", error);
+    return res.status(500).json({ message: "Internal server error", error: error.message });
   }
 };
 
@@ -163,7 +232,10 @@ exports.getUserById = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    return res.status(200).json({ message: "success", data: user });
+    const json = user.toJSON ? user.toJSON() : { ...user };
+    json.resolvedPermissions = resolveUserPermissions(user);
+
+    return res.status(200).json({ message: "success", data: json });
   } catch (error) {
     console.error("[users] getUserById error:", error);
     return res.status(500).json({ message: "Internal Server Error", error: error.message });

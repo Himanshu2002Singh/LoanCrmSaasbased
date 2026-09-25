@@ -52,6 +52,16 @@ const Expense = sequelize.define(
       field: "vendor_name",
       comment: "Vendor / Payee name",
     },
+    title: {
+      type: DataTypes.STRING(150),
+      allowNull: true,
+      defaultValue: "",
+    },
+    amount: {
+      type: DataTypes.DECIMAL(12, 2),
+      allowNull: true,
+      defaultValue: 0.0,
+    },
     description: {
       type: DataTypes.TEXT,
       allowNull: true,

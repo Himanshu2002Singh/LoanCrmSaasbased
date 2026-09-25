@@ -13,13 +13,15 @@ router.use(isAuthenticated);
 
 // Fixed segments first, so they are not swallowed by /:id.
 router.get("/seats", requireRole(ROLES.COMPANY_ADMIN, ROLES.MANAGER), userController.getSeatUsage);
+router.get("/permissions/metadata", userController.getPermissionMetadata);
 router.post("/import", canManageUsers, upload.single("file"), userController.importUsersFromExcel);
 router.get("/", requireRole(ROLES.COMPANY_ADMIN, ROLES.MANAGER, ROLES.OPS), userController.getUsers);
 router.get("/:id", requireRole(ROLES.COMPANY_ADMIN, ROLES.MANAGER, ROLES.OPS), userController.getUserById);
 
 router.post("/", canManageUsers, userController.createUser);
-router.put("/:id", canManageUsers, userController.updateUser);
+router.put("/:id/permissions", adminOnly, userController.updateUserPermissions);
 router.put("/:id/password", canManageUsers, userController.resetPassword);
+router.put("/:id", canManageUsers, userController.updateUser);
 router.delete("/:id", adminOnly, userController.deactivateUser);
 
 module.exports = router;

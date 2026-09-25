@@ -10,6 +10,7 @@ import {
   Pencil,
   Plus,
   Search,
+  Shield,
   Shuffle,
   Trash2,
   Upload,
@@ -18,6 +19,7 @@ import API_URL from "../../../config";
 import AddEmployeeModal from "../AddEmployeeModal";
 import EmployeeImportModal from "../EmployeeImportModal";
 import ResetPasswordModal from "../ResetPasswordModal";
+import ManagePermissionsModal from "../ManagePermissionsModal";
 import CcPagination from "../../../components/CcPagination";
 
 const PAGE_SIZE = 50;
@@ -64,6 +66,7 @@ export default function UserListRedesign() {
   const [transferUser, setTransferUser] = useState(null);
   const [transferTarget, setTransferTarget] = useState("");
   const [resetPasswordUser, setResetPasswordUser] = useState(null);
+  const [permissionUser, setPermissionUser] = useState(null);
   const [seatInfo, setSeatInfo] = useState(null);
 
   const fetchSeats = async () => {

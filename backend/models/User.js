@@ -86,6 +86,13 @@ const User = sequelize.define(
       allowNull: false,
       defaultValue: "active",
     },
+    permissions: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      defaultValue: null,
+      field: "permissions",
+      comment: "JSON dictionary of custom boolean permission overrides for this user",
+    },
   },
   {
     tableName: "users",

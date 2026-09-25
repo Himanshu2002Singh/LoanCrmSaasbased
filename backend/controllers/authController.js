@@ -15,43 +15,50 @@ const issueToken = (user) =>
     { expiresIn: TOKEN_TTL }
   );
 
-const publicUser = (user) => ({
-  id: user.id,
-  name: user.name,
-  email: user.email,
-  phone: user.phone,
-  role: user.role,
-  status: user.status,
-  companyId: user.companyId,
-  managerId: user.managerId,
-  company: user.company
-    ? {
-        id: user.company.id,
-        name: user.company.name,
-        slug: user.company.slug,
-        status: user.company.status,
-        subscriptionExpiresAt: user.company.subscriptionExpiresAt,
-        isExpired: user.company.subscriptionExpiresAt ? new Date(user.company.subscriptionExpiresAt) < new Date() : false,
-      }
-    : null,
-  branch: user.branch
-    ? {
-        id: user.branch.id,
-        name: user.branch.name,
-        city: user.branch.city,
-        state: user.branch.state,
-        address: user.branch.address,
-        office_lat: user.branch.officeLat != null ? Number(user.branch.officeLat) : null,
-        office_lng: user.branch.officeLng != null ? Number(user.branch.officeLng) : null,
-        geo_radius_meters: user.branch.geoRadiusMeters || 200,
-        officeLat: user.branch.officeLat != null ? Number(user.branch.officeLat) : null,
-        officeLng: user.branch.officeLng != null ? Number(user.branch.officeLng) : null,
-        geoRadiusMeters: user.branch.geoRadiusMeters || 200,
-      }
-    : null,
-  isSuperAdmin: user.role === ROLES.SUPERADMIN,
-  canAccessAdminPanel: ADMIN_PANEL_ROLES.includes(user.role),
-});
+const { resolveUserPermissions } = require("../constants/permissions");
+
+const publicUser = (user) => {
+  const resolvedPermissions = resolveUserPermissions(user);
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    phone: user.phone,
+    role: user.role,
+    status: user.status,
+    companyId: user.companyId,
+    managerId: user.managerId,
+    permissions: user.permissions || null,
+    resolvedPermissions: resolvedPermissions,
+    company: user.company
+      ? {
+          id: user.company.id,
+          name: user.company.name,
+          slug: user.company.slug,
+          status: user.company.status,
+          subscriptionExpiresAt: user.company.subscriptionExpiresAt,
+          isExpired: user.company.subscriptionExpiresAt ? new Date(user.company.subscriptionExpiresAt) < new Date() : false,
+        }
+      : null,
+    branch: user.branch
+      ? {
+          id: user.branch.id,
+          name: user.branch.name,
+          city: user.branch.city,
+          state: user.branch.state,
+          address: user.branch.address,
+          office_lat: user.branch.officeLat != null ? Number(user.branch.officeLat) : null,
+          office_lng: user.branch.officeLng != null ? Number(user.branch.officeLng) : null,
+          geo_radius_meters: user.branch.geoRadiusMeters || 200,
+          officeLat: user.branch.officeLat != null ? Number(user.branch.officeLat) : null,
+          officeLng: user.branch.officeLng != null ? Number(user.branch.officeLng) : null,
+          geoRadiusMeters: user.branch.geoRadiusMeters || 200,
+        }
+      : null,
+    isSuperAdmin: user.role === ROLES.SUPERADMIN,
+    canAccessAdminPanel: ADMIN_PANEL_ROLES.includes(user.role),
+  };
+};
 
 /**
  * POST /api/auth/login

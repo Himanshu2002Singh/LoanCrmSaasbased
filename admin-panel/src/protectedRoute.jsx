@@ -1,7 +1,7 @@
 import React from 'react';
 import { Navigate } from 'react-router-dom';
 
-function ProtectedRoute({ children, allowedRoles = ["manager", "operations"] }) {
+function ProtectedRoute({ children, allowedRoles = ["manager", "operations"], requiredPermission = null }) {
   const isLogin = localStorage.getItem("isLogin");
   const employeeRole = localStorage.getItem("employeeRole");
   // The platform console is keyed on the real API role, not the translated
@@ -31,6 +31,21 @@ function ProtectedRoute({ children, allowedRoles = ["manager", "operations"] }) 
     }
     localStorage.clear();
     return <Navigate to="/login" replace />;
+  }
+
+  // Permission Check for Company users (Company Admin has all permissions)
+  if (requiredPermission && userRole !== "COMPANY_ADMIN" && userRole !== "SUPERADMIN") {
+    let permissions = {};
+    try {
+      permissions = JSON.parse(localStorage.getItem("userPermissions") || "{}");
+    } catch (e) {
+      permissions = {};
+    }
+
+    if (permissions[requiredPermission] === false) {
+      const fallbackHome = employeeRole === "operations" ? "/operations" : employeeRole === "banker" ? "/banker" : "/";
+      return <Navigate to={fallbackHome} replace />;
+    }
   }
 
   return children;
