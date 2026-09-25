@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Capital Care</string>
+	<string>Loan CRM</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -15,7 +15,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>capital_care</string>
+	<string>loan_crm</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -67,8 +67,8 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Capital Care requires GPS access to verify your punch-in location within the branch geofence premises.</string>
+	<string>Loan CRM requires GPS access to verify your punch-in location within the branch geofence premises.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Capital Care requires GPS access to verify your punch-in location within the branch geofence premises.</string>
+	<string>Loan CRM requires GPS access to verify your punch-in location within the branch geofence premises.</string>
 </dict>
 </plist>

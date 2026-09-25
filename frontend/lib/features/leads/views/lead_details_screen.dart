@@ -13,6 +13,7 @@ import 'package:capital_care/features/leads/models/lead_status_model.dart';
 import 'package:capital_care/features/leads/providers/leads_provider.dart';
 import 'package:capital_care/features/telecalling/views/log_call_dialog.dart';
 import 'package:capital_care/features/dashboard/providers/dashboard_provider.dart';
+import 'package:capital_care/features/auth/providers/auth_provider.dart';
 
 class LeadDetailsScreen extends ConsumerStatefulWidget {
   final int leadId;
@@ -58,7 +59,10 @@ class _LeadDetailsScreenState extends ConsumerState<LeadDetailsScreen> with Sing
     if (lead.number.isEmpty) return;
     final clean = lead.number.replaceAll(RegExp(r'\D'), '');
     final fullNumber = clean.length == 10 ? '91$clean' : clean;
-    final uri = Uri.parse('https://wa.me/$fullNumber?text=Hello%20${Uri.encodeComponent(lead.name)},%20from%20Capital%20Care.');
+    final user = ref.read(currentUserProvider).value;
+    final companyName = user?.company?.name ?? 'our lending team';
+    final message = 'Hello ${lead.name}, from $companyName.';
+    final uri = Uri.parse('https://wa.me/$fullNumber?text=${Uri.encodeComponent(message)}');
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }

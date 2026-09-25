@@ -82,22 +82,25 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 // Header Logo & Title
                 Center(
                   child: Container(
-                    padding: const EdgeInsets.all(16),
+                    width: 80,
+                    height: 80,
                     decoration: BoxDecoration(
-                      color: AppColors.primary,
-                      shape: BoxShape.circle,
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
                       boxShadow: [
                         BoxShadow(
-                          color: AppColors.primary.withValues(alpha: 0.25),
-                          blurRadius: 20,
-                          offset: const Offset(0, 8),
+                          color: AppColors.primary.withValues(alpha: 0.2),
+                          blurRadius: 18,
+                          offset: const Offset(0, 6),
                         ),
                       ],
                     ),
-                    child: const Icon(
-                      Icons.account_balance_wallet_rounded,
-                      size: 40,
-                      color: Colors.white,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(20),
+                      child: Image.asset(
+                        'assets/images/playstore-icon.png',
+                        fit: BoxFit.cover,
+                      ),
                     ),
                   ),
                 ),

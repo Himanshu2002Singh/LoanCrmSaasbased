@@ -158,6 +158,32 @@ class AppDrawer extends ConsumerWidget {
                   path: '/profile',
                   isSelected: currentRoute == '/profile',
                 ),
+                const SizedBox(height: 4),
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: AppColors.error.withValues(alpha: 0.06),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: ListTile(
+                    leading: const Icon(
+                      Icons.logout_rounded,
+                      size: 20,
+                      color: AppColors.error,
+                    ),
+                    title: const Text(
+                      'Logout',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.error,
+                      ),
+                    ),
+                    dense: true,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    onTap: () => _handleLogout(context, ref, user?.company?.name ?? 'CRM'),
+                  ),
+                ),
               ],
             ),
           ),
@@ -166,7 +192,7 @@ class AppDrawer extends ConsumerWidget {
           Padding(
             padding: const EdgeInsets.all(16),
             child: Text(
-              'Capital Care CRM v2.0',
+              user?.company?.name ?? 'SaaS Loan CRM v2.0',
               style: TextStyle(
                 fontSize: 11,
                 color: AppColors.textMuted.withValues(alpha: 0.8),
@@ -176,6 +202,41 @@ class AppDrawer extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  Future<void> _handleLogout(BuildContext context, WidgetRef ref, String companyName) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Confirm Logout', style: TextStyle(fontWeight: FontWeight.w700)),
+        content: Text('Are you sure you want to log out of $companyName?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.error,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Logout', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      if (context.mounted) {
+        Navigator.pop(context); // close drawer
+      }
+      await ref.read(currentUserProvider.notifier).logout();
+      if (context.mounted) {
+        context.go('/login');
+      }
+    }
   }
 
   Widget _buildMenuItem(

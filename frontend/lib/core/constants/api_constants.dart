@@ -4,9 +4,9 @@ import 'package:flutter/foundation.dart';
 class ApiConstants {
   // Base URL with Android Emulator / iOS Simulator / Web fallback
   static String get baseUrl {
-    if (kIsWeb) return 'http://localhost:5002/api';
-    if (Platform.isAndroid) return 'http://192.168.1.2:5002/api';
-    return 'http://localhost:5002/api';
+    if (kIsWeb) return 'https://loancrm.trustingbrains.com/api';
+    if (Platform.isAndroid) return 'https://loancrm.trustingbrains.com/api';
+    return 'https://loancrm.trustingbrains.com/api';
   }
 
   // Auth Endpoints
