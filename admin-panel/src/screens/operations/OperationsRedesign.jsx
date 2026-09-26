@@ -9,10 +9,12 @@ import {
   ArrowRight,
   Building2,
   CalendarDays,
+  Check,
   CheckCircle2,
   ChevronRight,
   Clock,
   Coins,
+  Copy,
   ExternalLink,
   Eye,
   FileCheck,
@@ -24,8 +26,10 @@ import {
   Kanban,
   Layers,
   List,
+  Mail,
   MessageSquare,
   Paperclip,
+  Pencil,
   Plus,
   RefreshCw,
   Search,
@@ -160,6 +164,25 @@ export default function OperationsRedesign() {
     assignedBankerId: "",
   });
   const [convertSubmitting, setConvertSubmitting] = useState(false);
+
+  // Bank Email Dispatch Modal State
+  const [bankMailModalApp, setBankMailModalApp] = useState(null);
+  const [emailTemplates, setEmailTemplates] = useState([]);
+  const [bankMailLoading, setBankMailLoading] = useState(false);
+  const [bankMailSubmitting, setBankMailSubmitting] = useState(false);
+  const [mailActiveTab, setMailActiveTab] = useState("compose"); // "compose" | "preview"
+  const [mailForm, setMailForm] = useState({
+    lenderId: "",
+    toEmail: "",
+    ccEmails: "",
+    templateId: "",
+    subject: "",
+    content: "",
+    selectedDocIds: [],
+    updateStatus: "FILE_LOGIN",
+  });
+  const mailSubjectRef = useRef(null);
+  const mailContentRef = useRef(null);
 
   // Financial Years list (Indian FY starting April 1)
   const financialYears = useMemo(() => {
@@ -739,6 +762,249 @@ export default function OperationsRedesign() {
     }
   };
 
+  // Helper to replace {{placeholder}} tags
+  const renderTemplateVariables = (tplString = "", varMap = {}) => {
+    if (!tplString) return "";
+    let out = tplString;
+    for (const [k, v] of Object.entries(varMap)) {
+      out = out.replace(new RegExp(`\\{\\{\\s*${k}\\s*\\}\\}`, "g"), v ?? "");
+    }
+    return out;
+  };
+
+  const getApplicationVarMap = (app, currentLender) => {
+    const docs = app.documents || [];
+    const docBullets =
+      docs.length > 0
+        ? docs.map((d) => `• ${d.docType}: ${d.fileName}`).join("\n")
+        : "• No documents attached";
+
+    return {
+      customer_name: app.customer?.name || "Customer",
+      application_number: app.applicationNumber || "",
+      loan_product: app.loanProduct || "",
+      loan_amount: app.appliedAmount ? Number(app.appliedAmount).toLocaleString("en-IN") : "0",
+      bank_name: currentLender?.name || app.lender?.name || "Bank",
+      bank_rm_name: currentLender?.contact_person || currentLender?.contactPerson || "Relationship Manager",
+      mobile: app.customer?.mobile || "",
+      email: app.customer?.email || "",
+      pan: app.customer?.panNumber || app.customer?.pan || "—",
+      documents_list: docBullets,
+      company_name: localStorage.getItem("companyName") || "CapitalCare Financial",
+      sender_name: localStorage.getItem("name") || "Operations Team",
+    };
+  };
+
+  // Open Bank Email Dispatch Modal
+  const openBankMailModal = async (app) => {
+    setBankMailLoading(true);
+    setBankMailModalApp(app);
+    setMailActiveTab("compose");
+
+    try {
+      const [appRes, tplRes] = await Promise.all([
+        axios.get(`${API_URL}/applications/${app.id}`),
+        axios.get(`${API_URL}/email-templates`),
+      ]);
+
+      const fullApp = appRes.data?.application || app;
+      setBankMailModalApp(fullApp);
+
+      const tpls = tplRes.data?.templates || tplRes.data?.data || [];
+      setEmailTemplates(tpls);
+
+      const currentLenderId = fullApp.lenderId || (lenders[0]?.lender_id || lenders[0]?.id || "");
+      const currentLender = lenders.find(
+        (l) => String(l.lender_id || l.id) === String(currentLenderId)
+      );
+
+      const defaultToEmail =
+        currentLender?.rm_email ||
+        currentLender?.rmEmail ||
+        currentLender?.bank_email ||
+        currentLender?.bankEmail ||
+        "";
+
+      const defaultTpl =
+        tpls.find((t) => t.isDefault) ||
+        tpls[0] || {
+          subject: "[Loan Docket] Application Submission - {{customer_name}} | {{loan_product}} (Ref: {{application_number}})",
+          content:
+            "Dear {{bank_rm_name}},\n\nPlease find attached the verified loan docket and customer KYC documents for processing:\n\nApplicant Details:\n• Customer Name: {{customer_name}}\n• Mobile: {{mobile}}\n• PAN: {{pan}}\n• Loan Product: {{loan_product}}\n• Loan Amount: ₹{{loan_amount}}\n• Application Ref: {{application_number}}\n\nAttached Documents:\n{{documents_list}}\n\nKindly initiate file login at the earliest.\n\nBest regards,\n{{sender_name}}\n{{company_name}}",
+        };
+
+      const varMap = getApplicationVarMap(fullApp, currentLender);
+      const evalSubject = renderTemplateVariables(defaultTpl.subject, varMap);
+      const evalContent = renderTemplateVariables(defaultTpl.content, varMap);
+
+      // Select ALL customer documents by default!
+      const allDocIds = (fullApp.documents || []).map((d) => d.id);
+
+      setMailForm({
+        lenderId: currentLenderId,
+        toEmail: defaultToEmail,
+        ccEmails: "",
+        templateId: defaultTpl.id || "",
+        subject: evalSubject,
+        content: evalContent,
+        selectedDocIds: allDocIds,
+        updateStatus: "FILE_LOGIN",
+      });
+    } catch (err) {
+      console.error("Error opening bank email modal:", err);
+      toast.error("Could not prepare email dispatch");
+    } finally {
+      setBankMailLoading(false);
+    }
+  };
+
+  const handleBankChange = (newLenderId) => {
+    const currentLender = lenders.find((l) => String(l.lender_id || l.id) === String(newLenderId));
+    const toEmail =
+      currentLender?.rm_email ||
+      currentLender?.rmEmail ||
+      currentLender?.bank_email ||
+      currentLender?.bankEmail ||
+      "";
+
+    setMailForm((prev) => {
+      let nextSubject = prev.subject;
+      let nextContent = prev.content;
+      if (bankMailModalApp && currentLender) {
+        const varMap = getApplicationVarMap(bankMailModalApp, currentLender);
+        // If a template was selected, re-evaluate with new bank name and RM
+        const activeTpl = emailTemplates.find((t) => String(t.id) === String(prev.templateId));
+        if (activeTpl) {
+          nextSubject = renderTemplateVariables(activeTpl.subject, varMap);
+          nextContent = renderTemplateVariables(activeTpl.content, varMap);
+        }
+      }
+      return {
+        ...prev,
+        lenderId: newLenderId,
+        toEmail: toEmail || prev.toEmail,
+        subject: nextSubject,
+        content: nextContent,
+      };
+    });
+  };
+
+  const handleTemplateChange = (tplId) => {
+    const chosenTpl = emailTemplates.find((t) => String(t.id) === String(tplId));
+    if (!chosenTpl || !bankMailModalApp) return;
+
+    const currentLender = lenders.find(
+      (l) => String(l.lender_id || l.id) === String(mailForm.lenderId)
+    );
+    const varMap = getApplicationVarMap(bankMailModalApp, currentLender);
+
+    setMailForm((prev) => ({
+      ...prev,
+      templateId: tplId,
+      subject: renderTemplateVariables(chosenTpl.subject, varMap),
+      content: renderTemplateVariables(chosenTpl.content, varMap),
+    }));
+  };
+
+  const toggleDocumentAttachment = (docId) => {
+    setMailForm((prev) => {
+      const exists = prev.selectedDocIds.includes(docId);
+      return {
+        ...prev,
+        selectedDocIds: exists
+          ? prev.selectedDocIds.filter((id) => id !== docId)
+          : [...prev.selectedDocIds, docId],
+      };
+    });
+  };
+
+  const selectAllDocs = () => {
+    const all = (bankMailModalApp?.documents || []).map((d) => d.id);
+    setMailForm((prev) => ({ ...prev, selectedDocIds: all }));
+  };
+
+  const deselectAllDocs = () => {
+    setMailForm((prev) => ({ ...prev, selectedDocIds: [] }));
+  };
+
+  const insertMailVariable = (tag, field = "content") => {
+    if (field === "subject") {
+      const input = mailSubjectRef.current;
+      if (input) {
+        const start = input.selectionStart || 0;
+        const end = input.selectionEnd || 0;
+        const oldVal = mailForm.subject || "";
+        const newVal = oldVal.substring(0, start) + tag + oldVal.substring(end);
+        setMailForm((prev) => ({ ...prev, subject: newVal }));
+        setTimeout(() => {
+          input.focus();
+          input.setSelectionRange(start + tag.length, start + tag.length);
+        }, 50);
+      } else {
+        setMailForm((prev) => ({ ...prev, subject: (prev.subject || "") + " " + tag }));
+      }
+    } else {
+      const textarea = mailContentRef.current;
+      if (textarea) {
+        const start = textarea.selectionStart || 0;
+        const end = textarea.selectionEnd || 0;
+        const oldVal = mailForm.content || "";
+        const newVal = oldVal.substring(0, start) + tag + oldVal.substring(end);
+        setMailForm((prev) => ({ ...prev, content: newVal }));
+        setTimeout(() => {
+          textarea.focus();
+          textarea.setSelectionRange(start + tag.length, start + tag.length);
+        }, 50);
+      } else {
+        setMailForm((prev) => ({ ...prev, content: (prev.content || "") + "\n" + tag }));
+      }
+    }
+  };
+
+  const handleSendBankEmail = async (e) => {
+    e?.preventDefault();
+    if (!mailForm.toEmail.trim()) {
+      toast.warning("Please provide a recipient Bank / RM email address");
+      return;
+    }
+    if (!mailForm.subject.trim()) {
+      toast.warning("Email subject cannot be empty");
+      return;
+    }
+    if (!mailForm.content.trim()) {
+      toast.warning("Email content cannot be empty");
+      return;
+    }
+
+    setBankMailSubmitting(true);
+    try {
+      const res = await axios.post(`${API_URL}/applications/${bankMailModalApp.id}/send-to-bank`, {
+        toEmail: mailForm.toEmail.trim(),
+        ccEmails: mailForm.ccEmails.trim() || undefined,
+        subject: mailForm.subject.trim(),
+        content: mailForm.content.trim(),
+        documentIds: mailForm.selectedDocIds,
+        lenderId: mailForm.lenderId ? parseInt(mailForm.lenderId, 10) : undefined,
+        newStatus: mailForm.updateStatus || undefined,
+      });
+
+      toast.success(res.data?.message || "Loan application successfully emailed to Bank RM!");
+      setBankMailModalApp(null);
+      fetchApplications(appCurrentPage);
+      if (verificationApp && verificationApp.id === bankMailModalApp.id) {
+        setVerificationApp((prev) => ({
+          ...prev,
+          status: mailForm.updateStatus || prev.status,
+        }));
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error(err.response?.data?.message || "Failed to send email to bank");
+    } finally {
+      setBankMailSubmitting(false);
+    }
+  };
+
   // 1-Click Convert Lead to Application
   const openConvertModal = (lead) => {
     setConvertLead(lead);
@@ -975,6 +1241,17 @@ export default function OperationsRedesign() {
                                   </span>
                                 ) : null}
                               </div>
+
+                              <div className="cc-kcard-dispatch-row" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  type="button"
+                                  className="cc-kcard-mail-btn"
+                                  title="Send Loan Docket & KYC to Bank via Email"
+                                  onClick={() => openBankMailModal(app)}
+                                >
+                                  <Mail size={12} /> Send Email to Bank
+                                </button>
+                              </div>
                             </div>
                           );
                         })
@@ -1087,13 +1364,23 @@ export default function OperationsRedesign() {
                             )}
                           </td>
                           <td onClick={(e) => e.stopPropagation()}>
-                            <button
-                              type="button"
-                              className="cc-ops-action-btn"
-                              onClick={() => openVerificationDrawer(app)}
-                            >
-                              Verify KYC <ChevronRight size={13} />
-                            </button>
+                            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                              <button
+                                type="button"
+                                className="cc-ops-action-btn mail-dispatch"
+                                title="Send Loan Application & KYC to Bank via Email"
+                                onClick={() => openBankMailModal(app)}
+                              >
+                                <Mail size={12} /> Email Bank
+                              </button>
+                              <button
+                                type="button"
+                                className="cc-ops-action-btn"
+                                onClick={() => openVerificationDrawer(app)}
+                              >
+                                Verify KYC <ChevronRight size={13} />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))
@@ -1251,13 +1538,23 @@ export default function OperationsRedesign() {
                   <strong>{verificationApp.customer?.name}</strong> ({verificationApp.customer?.mobile})
                 </p>
               </div>
-              <button
-                type="button"
-                className="cc-drawer-close-btn"
-                onClick={() => setVerificationApp(null)}
-              >
-                <X size={20} />
-              </button>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginLeft: "auto" }}>
+                <button
+                  type="button"
+                  className="cc-drawer-mail-btn"
+                  onClick={() => openBankMailModal(verificationApp)}
+                  title="Send Loan Application Docket to Bank RM via Email"
+                >
+                  <Mail size={14} /> Send to Bank (Email)
+                </button>
+                <button
+                  type="button"
+                  className="cc-drawer-close-btn"
+                  onClick={() => setVerificationApp(null)}
+                >
+                  <X size={20} />
+                </button>
+              </div>
             </div>
 
             <div className="cc-ops-drawer-body">
@@ -1649,6 +1946,431 @@ export default function OperationsRedesign() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Send Loan Application Docket to Bank RM via Email Modal */}
+      {bankMailModalApp && (
+        <div className="cc-modal-overlay" onClick={() => setBankMailModalApp(null)}>
+          <div className="cc-modal-card cc-mail-modal-large" onClick={(e) => e.stopPropagation()}>
+            <div className="cc-modal-head">
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
+                  <span className="cc-mail-modal-badge">
+                    <Mail size={12} /> Direct Bank Email Dispatch
+                  </span>
+                  <span className="cc-mail-app-no">{bankMailModalApp.applicationNumber}</span>
+                </div>
+                <h3 style={{ margin: "2px 0 0", fontSize: 18, color: "#0f172a", fontWeight: 700 }}>
+                  Send Loan Docket to Bank RM
+                </h3>
+                <p style={{ margin: "3px 0 0", fontSize: 12.5, color: "#64748b" }}>
+                  Applicant: <strong>{bankMailModalApp.customer?.name}</strong> • Product:{" "}
+                  <strong>{bankMailModalApp.loanProduct}</strong> • Applied:{" "}
+                  <strong>₹{Number(bankMailModalApp.appliedAmount || 0).toLocaleString("en-IN")}</strong>
+                </p>
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div className="cc-mail-tabs">
+                  <button
+                    type="button"
+                    className={`cc-mail-tab ${mailActiveTab === "compose" ? "active" : ""}`}
+                    onClick={() => setMailActiveTab("compose")}
+                  >
+                    <Pencil size={13} /> Compose &amp; Edit
+                  </button>
+                  <button
+                    type="button"
+                    className={`cc-mail-tab ${mailActiveTab === "preview" ? "active" : ""}`}
+                    onClick={() => setMailActiveTab("preview")}
+                  >
+                    <Eye size={13} /> Email Preview
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  className="cc-mail-close-btn"
+                  onClick={() => setBankMailModalApp(null)}
+                >
+                  <X size={17} />
+                </button>
+              </div>
+            </div>
+
+            {bankMailLoading ? (
+              <div style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
+                <RefreshCw className="cc-spin" size={24} style={{ marginBottom: 10, color: "#047857" }} />
+                <p>Loading application documents and bank templates...</p>
+              </div>
+            ) : mailActiveTab === "compose" ? (
+              <form className="cc-modal-form" onSubmit={handleSendBankEmail}>
+                {/* Bank / RM Recipient Section */}
+                <div className="cc-mail-section-card">
+                  <div className="cc-mail-section-title">
+                    <Building2 size={15} style={{ color: "#4338ca" }} /> 1. Institution &amp; Recipient Bank RM Email
+                  </div>
+
+                  <div className="cc-modal-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                    <label className="cc-modal-field">
+                      <span>Target Bank / NBFC Institution *</span>
+                      <select
+                        value={mailForm.lenderId}
+                        onChange={(e) => handleBankChange(e.target.value)}
+                        required
+                      >
+                        <option value="">Select Bank / Lender</option>
+                        {lenders.map((l) => (
+                          <option key={l.lender_id || l.id} value={l.lender_id || l.id}>
+                            {l.name} ({l.short_code || l.shortCode})
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="cc-modal-field">
+                      <span style={{ color: "#047857", fontWeight: 700 }}>
+                        Send Directly To (Bank RM Email) *
+                      </span>
+                      <input
+                        type="email"
+                        value={mailForm.toEmail}
+                        onChange={(e) => setMailForm({ ...mailForm, toEmail: e.target.value })}
+                        placeholder="e.g. rajesh.rm@hdfcbank.com"
+                        required
+                      />
+                    </label>
+                  </div>
+
+                  <div className="cc-modal-row" style={{ marginTop: 8 }}>
+                    <label className="cc-modal-field" style={{ width: "100%" }}>
+                      <span>CC Email Address(es) (Optional)</span>
+                      <input
+                        type="text"
+                        value={mailForm.ccEmails}
+                        onChange={(e) => setMailForm({ ...mailForm, ccEmails: e.target.value })}
+                        placeholder="e.g. ops.desk@capitalcare.in, credit.officer@bank.com (comma separated)"
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                {/* Email Subject & Content Section */}
+                <div className="cc-mail-section-card">
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
+                    <div className="cc-mail-section-title" style={{ margin: 0 }}>
+                      <Mail size={15} style={{ color: "#047857" }} /> 2. Subject &amp; Mail Content (Editable)
+                    </div>
+
+                    <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "#475569" }}>
+                      <span>Preset Template:</span>
+                      <select
+                        style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #cbd5e1", fontSize: 12 }}
+                        value={mailForm.templateId}
+                        onChange={(e) => handleTemplateChange(e.target.value)}
+                      >
+                        <option value="">-- Choose Template --</option>
+                        {emailTemplates.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.name} {t.isDefault ? "(Default)" : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+
+                  {/* Subject Input */}
+                  <div className="cc-mail-field-shell">
+                    <div className="cc-mail-field-header">
+                      <label className="cc-modal-field" style={{ margin: 0 }}>
+                        <span style={{ fontWeight: 700 }}>Email Subject *</span>
+                      </label>
+                      <div className="cc-mail-var-pills">
+                        <span style={{ fontSize: 10.5, color: "#64748b" }}>Insert:</span>
+                        {["{{customer_name}}", "{{loan_product}}", "{{application_number}}", "{{loan_amount}}"].map((tag) => (
+                          <button
+                            key={tag}
+                            type="button"
+                            className="cc-mail-var-btn"
+                            onClick={() => insertMailVariable(tag, "subject")}
+                          >
+                            + {tag}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <input
+                      ref={mailSubjectRef}
+                      type="text"
+                      className="cc-mail-subject-input"
+                      value={mailForm.subject}
+                      onChange={(e) => setMailForm({ ...mailForm, subject: e.target.value })}
+                      placeholder="e.g. Loan Application Docket: Rahul Verma - Personal Loan (Ref: APP-2026-0042)"
+                      required
+                    />
+                  </div>
+
+                  {/* Multiline Body Textarea */}
+                  <div className="cc-mail-field-shell" style={{ marginTop: 10 }}>
+                    <div className="cc-mail-field-header">
+                      <label className="cc-modal-field" style={{ margin: 0 }}>
+                        <span style={{ fontWeight: 700 }}>Multiline Mail Body / Content *</span>
+                      </label>
+                      <div className="cc-mail-var-pills">
+                        <span style={{ fontSize: 10.5, color: "#64748b" }}>Insert:</span>
+                        {["{{bank_rm_name}}", "{{customer_name}}", "{{documents_list}}", "{{company_name}}", "{{sender_name}}"].map((tag) => (
+                          <button
+                            key={tag}
+                            type="button"
+                            className="cc-mail-var-btn"
+                            onClick={() => insertMailVariable(tag, "content")}
+                          >
+                            + {tag}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <textarea
+                      ref={mailContentRef}
+                      rows={8}
+                      className="cc-mail-textarea"
+                      value={mailForm.content}
+                      onChange={(e) => setMailForm({ ...mailForm, content: e.target.value })}
+                      placeholder="Write your email body..."
+                      required
+                    />
+                  </div>
+                </div>
+
+                {/* Document Attachments Selection */}
+                <div className="cc-mail-section-card">
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
+                    <div className="cc-mail-section-title" style={{ margin: 0 }}>
+                      <Paperclip size={15} style={{ color: "#d97706" }} /> 3. Applicant KYC &amp; Loan Documents Attached
+                      <span className="cc-mail-count-pill">
+                        {mailForm.selectedDocIds.length} of {(bankMailModalApp.documents || []).length} Attached
+                      </span>
+                    </div>
+
+                    <div style={{ display: "flex", gap: 6, fontSize: 11.5 }}>
+                      <button
+                        type="button"
+                        className="cc-mail-link-btn"
+                        onClick={selectAllDocs}
+                      >
+                        Select All
+                      </button>
+                      <span style={{ color: "#cbd5e1" }}>|</span>
+                      <button
+                        type="button"
+                        className="cc-mail-link-btn"
+                        onClick={deselectAllDocs}
+                      >
+                        Remove All
+                      </button>
+                    </div>
+                  </div>
+
+                  {(bankMailModalApp.documents || []).length === 0 ? (
+                    <div className="cc-mail-no-docs">
+                      <AlertCircle size={18} style={{ color: "#d97706" }} />
+                      <span>
+                        No customer documents are currently uploaded for this applicant. You can still email the docket text, or upload documents in the KYC Verification Center.
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="cc-mail-docs-grid">
+                      {bankMailModalApp.documents.map((doc) => {
+                        const isSelected = mailForm.selectedDocIds.includes(doc.id);
+                        return (
+                          <div
+                            key={doc.id}
+                            className={`cc-mail-doc-card ${isSelected ? "selected" : "deselected"}`}
+                            onClick={() => toggleDocumentAttachment(doc.id)}
+                          >
+                            <label
+                              className="cc-mail-doc-check"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => toggleDocumentAttachment(doc.id)}
+                              />
+                            </label>
+
+                            <div className="cc-mail-doc-info">
+                              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                <strong className="cc-mail-doc-type">{doc.docType}</strong>
+                                <span className={`cc-mail-doc-status ${doc.verificationStatus?.toLowerCase()}`}>
+                                  {doc.verificationStatus}
+                                </span>
+                              </div>
+                              <span className="cc-mail-doc-name" title={doc.fileName}>
+                                {doc.fileName}
+                              </span>
+                            </div>
+
+                            <div className="cc-mail-doc-actions" onClick={(e) => e.stopPropagation()}>
+                              {doc.fileUrl && (
+                                <a
+                                  href={
+                                    doc.fileUrl.startsWith("http")
+                                      ? doc.fileUrl
+                                      : `${API_URL.replace("/api", "")}/${doc.fileUrl.replace(/^\//, "")}`
+                                  }
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="cc-mail-doc-view-btn"
+                                  title="Inspect Document"
+                                >
+                                  <ExternalLink size={12} />
+                                </a>
+                              )}
+                              <button
+                                type="button"
+                                className={`cc-mail-remove-btn ${isSelected ? "" : "add"}`}
+                                title={isSelected ? "Remove attachment from this email" : "Attach this document"}
+                                onClick={() => toggleDocumentAttachment(doc.id)}
+                              >
+                                {isSelected ? <X size={13} /> : <Plus size={13} />}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Pipeline Stage Transition Option */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#f8fafc", padding: "10px 14px", borderRadius: 10, border: "1px solid #e2e8f0" }}>
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, color: "#334155", cursor: "pointer", fontWeight: 500 }}>
+                    <input
+                      type="checkbox"
+                      checked={mailForm.updateStatus === "FILE_LOGIN"}
+                      onChange={(e) =>
+                        setMailForm({ ...mailForm, updateStatus: e.target.checked ? "FILE_LOGIN" : "" })
+                      }
+                      style={{ accentColor: "#047857" }}
+                    />
+                    <span>Automatically move application pipeline status to <strong>FILE_LOGIN</strong></span>
+                  </label>
+                  <span style={{ fontSize: 11.5, color: "#64748b" }}>Recommended for banker dispatch</span>
+                </div>
+
+                {/* Modal Action Buttons */}
+                <div className="cc-modal-actions">
+                  <button
+                    type="button"
+                    className="cc-modal-btn ghost"
+                    onClick={() => setBankMailModalApp(null)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="cc-modal-btn ghost"
+                    style={{ borderColor: "#4338ca", color: "#4338ca" }}
+                    onClick={() => setMailActiveTab("preview")}
+                  >
+                    <Eye size={14} /> Preview Email
+                  </button>
+                  <button
+                    type="submit"
+                    className="cc-modal-btn primary"
+                    disabled={bankMailSubmitting}
+                  >
+                    {bankMailSubmitting ? (
+                      <>
+                        <RefreshCw className="cc-spin" size={14} /> Sending Email &amp; Documents...
+                      </>
+                    ) : (
+                      <>
+                        <Send size={15} /> Send Email to Bank
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              /* TAB 2: LIVE EMAIL PREVIEW */
+              <div className="cc-mail-preview-wrapper">
+                <div className="cc-email-preview-envelope">
+                  <div className="cc-email-preview-headers">
+                    <div className="cc-email-hdr-row">
+                      <strong>From:</strong> <span>Operations Desk &lt;operations@capitalcare.com&gt;</span>
+                    </div>
+                    <div className="cc-email-hdr-row">
+                      <strong>To:</strong>{" "}
+                      <span style={{ color: "#047857", fontWeight: 700 }}>
+                        {mailForm.toEmail || "(No RM email specified)"}
+                      </span>
+                    </div>
+                    {mailForm.ccEmails && (
+                      <div className="cc-email-hdr-row">
+                        <strong>CC:</strong> <span>{mailForm.ccEmails}</span>
+                      </div>
+                    )}
+                    <div className="cc-email-hdr-row">
+                      <strong>Subject:</strong>{" "}
+                      <span style={{ fontWeight: 700, color: "#0f172a" }}>
+                        {mailForm.subject || "(Empty Subject)"}
+                      </span>
+                    </div>
+                    <div className="cc-email-hdr-row">
+                      <strong>Attachments:</strong>{" "}
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {mailForm.selectedDocIds.length === 0 ? (
+                          <span style={{ color: "#94a3b8", fontStyle: "italic" }}>No attachments selected</span>
+                        ) : (
+                          (bankMailModalApp.documents || [])
+                            .filter((d) => mailForm.selectedDocIds.includes(d.id))
+                            .map((doc) => (
+                              <span key={doc.id} className="cc-etpl-sample-att-badge">
+                                📎 {doc.docType} ({doc.fileName})
+                              </span>
+                            ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="cc-email-preview-body">
+                    <div style={{ whiteSpace: "pre-wrap", fontSize: 13.5, lineHeight: 1.65, color: "#334155" }}>
+                      {mailForm.content || "(Empty message content)"}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="cc-modal-actions" style={{ marginTop: 16 }}>
+                  <button
+                    type="button"
+                    className="cc-modal-btn ghost"
+                    onClick={() => setMailActiveTab("compose")}
+                  >
+                    <Pencil size={14} /> Back to Edit
+                  </button>
+                  <button
+                    type="button"
+                    className="cc-modal-btn primary"
+                    onClick={handleSendBankEmail}
+                    disabled={bankMailSubmitting}
+                  >
+                    {bankMailSubmitting ? (
+                      <>
+                        <RefreshCw className="cc-spin" size={14} /> Sending Email...
+                      </>
+                    ) : (
+                      <>
+                        <Send size={15} /> Confirm &amp; Send Email to Bank
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -2460,5 +3182,348 @@ const opsStyles = `
   .cc-modal-btn:disabled {
     opacity: 0.6;
     cursor: not-allowed;
+  }
+
+  /* Bank Email Dispatch Modal & Buttons */
+  .cc-kcard-dispatch-row {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed #e2e8f0;
+  }
+  .cc-kcard-mail-btn {
+    width: 100%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    background: #ecfdf5;
+    color: #047857;
+    border: 1px solid #bbf7d0;
+    font-size: 11.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all .15s ease;
+  }
+  .cc-kcard-mail-btn:hover {
+    background: #047857;
+    color: #fff;
+    border-color: #047857;
+  }
+
+  .cc-ops-action-btn.mail-dispatch {
+    background: #ecfdf5;
+    color: #047857;
+    border-color: #a7f3d0;
+  }
+  .cc-ops-action-btn.mail-dispatch:hover {
+    background: #047857;
+    color: #fff;
+  }
+
+  .cc-drawer-mail-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    border-radius: 8px;
+    background: #047857;
+    color: #fff;
+    border: 0;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all .15s ease;
+    box-shadow: 0 2px 6px rgba(4,120,87,0.25);
+  }
+  .cc-drawer-mail-btn:hover {
+    background: #065f46;
+    transform: translateY(-1px);
+  }
+
+  .cc-modal-card.cc-mail-modal-large {
+    max-width: 820px;
+    width: 100%;
+    max-height: 94vh;
+    padding: 22px 26px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    overflow-y: auto;
+  }
+  .cc-mail-modal-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: #ecfdf5;
+    color: #047857;
+    font-size: 11px;
+    font-weight: 700;
+    border: 1px solid #bbf7d0;
+  }
+  .cc-mail-app-no {
+    font-size: 11.5px;
+    color: #64748b;
+    font-weight: 700;
+  }
+  .cc-mail-tabs {
+    display: inline-flex;
+    background: #f1f5f9;
+    padding: 3px;
+    border-radius: 8px;
+    gap: 3px;
+  }
+  .cc-mail-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 12px;
+    border-radius: 6px;
+    border: 0;
+    background: transparent;
+    color: #475569;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all .12s;
+  }
+  .cc-mail-tab.active {
+    background: #fff;
+    color: #0f172a;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  }
+  .cc-mail-close-btn {
+    border: 0;
+    background: #f1f5f9;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    color: #475569;
+  }
+
+  .cc-mail-section-card {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .cc-mail-section-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12.5px;
+    font-weight: 700;
+    color: #1e293b;
+  }
+  .cc-mail-field-shell {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .cc-mail-field-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .cc-mail-var-pills {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+  .cc-mail-var-btn {
+    border: 1px dashed #cbd5e1;
+    background: #fff;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 10.5px;
+    color: #047857;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all .12s;
+  }
+  .cc-mail-var-btn:hover {
+    background: #ecfdf5;
+    border-color: #047857;
+  }
+  .cc-mail-subject-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 9px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    font-size: 13px;
+    color: #0f172a;
+    background: #fff;
+    outline: none;
+  }
+  .cc-mail-subject-input:focus {
+    border-color: #047857;
+    box-shadow: 0 0 0 3px rgba(4,120,87,0.12);
+  }
+  .cc-mail-textarea {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    font-size: 13px;
+    font-family: inherit;
+    line-height: 1.55;
+    color: #0f172a;
+    background: #fff;
+    resize: vertical;
+    outline: none;
+  }
+  .cc-mail-textarea:focus {
+    border-color: #047857;
+    box-shadow: 0 0 0 3px rgba(4,120,87,0.12);
+  }
+
+  .cc-mail-count-pill {
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: #fef3c7;
+    color: #b45309;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .cc-mail-link-btn {
+    border: 0;
+    background: none;
+    padding: 0;
+    color: #047857;
+    font-size: 11.5px;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+  .cc-mail-no-docs {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 14px;
+    background: #fffbeb;
+    border: 1px solid #fef3c7;
+    border-radius: 8px;
+    font-size: 12.5px;
+    color: #92400e;
+  }
+
+  .cc-mail-docs-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 8px;
+    max-height: 200px;
+    overflow-y: auto;
+    padding: 2px;
+  }
+  .cc-mail-doc-card {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    border-radius: 8px;
+    border: 1px solid #cbd5e1;
+    background: #fff;
+    cursor: pointer;
+    transition: all .12s ease;
+    user-select: none;
+  }
+  .cc-mail-doc-card:hover {
+    border-color: #047857;
+  }
+  .cc-mail-doc-card.selected {
+    background: #f0fdf4;
+    border-color: #86efac;
+  }
+  .cc-mail-doc-card.deselected {
+    background: #f8fafc;
+    opacity: 0.65;
+  }
+  .cc-mail-doc-check input {
+    cursor: pointer;
+    accent-color: #047857;
+  }
+  .cc-mail-doc-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .cc-mail-doc-type {
+    font-size: 12px;
+    color: #0f172a;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .cc-mail-doc-status {
+    font-size: 9.5px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 4px;
+    text-transform: uppercase;
+  }
+  .cc-mail-doc-status.verified { background: #dcfce7; color: #15803d; }
+  .cc-mail-doc-status.pending { background: #fef3c7; color: #b45309; }
+  .cc-mail-doc-name {
+    font-size: 11px;
+    color: #64748b;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .cc-mail-doc-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .cc-mail-doc-view-btn {
+    width: 22px;
+    height: 22px;
+    border-radius: 4px;
+    display: grid;
+    place-items: center;
+    background: #f1f5f9;
+    color: #475569;
+    text-decoration: none;
+  }
+  .cc-mail-doc-view-btn:hover {
+    background: #e2e8f0;
+    color: #0f172a;
+  }
+  .cc-mail-remove-btn {
+    width: 22px;
+    height: 22px;
+    border-radius: 4px;
+    border: 0;
+    display: grid;
+    place-items: center;
+    background: #fee2e2;
+    color: #dc2626;
+    cursor: pointer;
+  }
+  .cc-mail-remove-btn.add {
+    background: #ecfdf5;
+    color: #047857;
+  }
+
+  .cc-mail-preview-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
   }
 `;

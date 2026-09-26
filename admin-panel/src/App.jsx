@@ -17,6 +17,7 @@ import AttendanceScreen from "./screens/attendance/AttendanceRedesign";
 import UserDetailScreen from "./screens/users/Screens/UserDetailRedesign";
 import TaskScreen from "./screens/tasks/Screens/TaskScreenRedesign";
 import TemplateScreen from "./screens/template/TemplateScreenRedesign";
+import EmailTemplatesScreen from "./screens/template/EmailTemplatesRedesign";
 import Login from "./screens/login/LoginRedesign";
 import ProtectedRoute from "./protectedRoute";
 import PerformanceScreen from "./screens/performance/PerformanceRedesign";
@@ -170,6 +171,14 @@ function App() {
           element={
             <PageShell>
               <TemplateScreen />
+            </PageShell>
+          }
+        />
+        <Route
+          path="/email-templates"
+          element={
+            <PageShell allowedRoles={["manager", "operations"]}>
+              <EmailTemplatesScreen />
             </PageShell>
           }
         />

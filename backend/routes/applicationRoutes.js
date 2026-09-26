@@ -24,6 +24,12 @@ router.patch(
   controller.updateApplication
 );
 
+router.post(
+  "/:id/send-to-bank",
+  requireRole(ROLES.COMPANY_ADMIN, ROLES.MANAGER, ROLES.OPS),
+  controller.sendApplicationToBank
+);
+
 router.patch(
   "/:id/status",
   requireRole(ROLES.COMPANY_ADMIN, ROLES.MANAGER, ROLES.OPS, ROLES.BANKER),

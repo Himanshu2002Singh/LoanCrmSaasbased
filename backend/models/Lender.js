@@ -43,6 +43,21 @@ const Lender = sequelize.define(
       allowNull: true,
       field: "contact_person",
     },
+    bankEmail: {
+      type: DataTypes.STRING(150),
+      allowNull: true,
+      field: "bank_email",
+    },
+    rmEmail: {
+      type: DataTypes.STRING(150),
+      allowNull: true,
+      field: "rm_email",
+    },
+    rmPhone: {
+      type: DataTypes.STRING(50),
+      allowNull: true,
+      field: "rm_phone",
+    },
     supportedLoanProducts: {
       type: DataTypes.JSON,
       allowNull: true,

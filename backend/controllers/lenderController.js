@@ -4,7 +4,7 @@ const { buildQuery, paginated } = require("../utils/query");
 const { logActivity, diffFields } = require("../utils/activity");
 const { companyScope, belongsToScope } = require("../middlewares/auth");
 
-const SEARCHABLE = ["name", "shortCode", "contactPerson"];
+const SEARCHABLE = ["name", "shortCode", "contactPerson", "bankEmail", "rmEmail"];
 const SORTABLE = ["name", "lenderType", "createdAt"];
 
 /**
@@ -18,6 +18,9 @@ const LENDER_FIELDS = [
   "shortCode",
   "lenderType",
   "contactPerson",
+  "bankEmail",
+  "rmEmail",
+  "rmPhone",
   "supportedLoanProducts",
   "payoutCommissionPercent",
   "isActive",
@@ -31,6 +34,12 @@ const LENDER_ALIASES = {
   short_code: "shortCode",
   lender_type: "lenderType",
   contact_person: "contactPerson",
+  bank_email: "bankEmail",
+  email: "bankEmail",
+  rm_email: "rmEmail",
+  rmEmail: "rmEmail",
+  rm_phone: "rmPhone",
+  rmPhone: "rmPhone",
   supported_loan_products: "supportedLoanProducts",
   supportedLoanProducts: "supportedLoanProducts",
   commission_percent: "payoutCommissionPercent",
@@ -85,6 +94,12 @@ const serializeLender = (lender) => {
     short_code: lender.shortCode,
     lender_type: lender.lenderType,
     contact_person: lender.contactPerson,
+    bank_email: lender.bankEmail || null,
+    bankEmail: lender.bankEmail || null,
+    rm_email: lender.rmEmail || null,
+    rmEmail: lender.rmEmail || null,
+    rm_phone: lender.rmPhone || null,
+    rmPhone: lender.rmPhone || null,
     supported_loan_products: products,
     commission_percent: lender.payoutCommissionPercent,
     is_active: lender.isActive,

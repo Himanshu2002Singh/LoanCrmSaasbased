@@ -16,6 +16,7 @@ import {
   IndianRupee,
   LayoutDashboard,
   LogOut,
+  Mail,
   MapPin,
   Menu,
   PanelLeftClose,
@@ -45,6 +46,7 @@ const managerNavItems = [
   { path: "/attendance", label: "Attendance", icon: CalendarDays },
   { path: "/tasks", label: "Tasks", icon: ClipboardList },
   { path: "/template", label: "Template", icon: FileText },
+  { path: "/email-templates", label: "Email Templates", icon: Mail },
   { path: "/lead-statuses", label: "Lead Statuses", icon: Tags },
   { path: "/loan-products", label: "Loan Types", icon: Coins },
   { path: "/lead-sources", label: "Lead Sources", icon: Share2 },
@@ -64,6 +66,7 @@ const managerNavItems = [
 
 const operationsNavItems = [
   { path: "/operations", label: "Operations", icon: BriefcaseBusiness },
+  { path: "/email-templates", label: "Email Templates", icon: Mail },
   { path: "/party-payouts", label: "Party / Connector Details", icon: Receipt, permission: "viewConnectors" },
   { path: "/case-payouts", label: "Disbursement & Payouts", icon: IndianRupee, permission: "viewPayouts" },
   { path: "/expenses", label: "Expense Tracker", icon: Wallet, permission: "viewExpenses" },

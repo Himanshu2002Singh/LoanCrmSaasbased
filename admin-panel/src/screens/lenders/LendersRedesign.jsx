@@ -6,7 +6,9 @@ import {
   Building2,
   Check,
   CheckCircle2,
+  Mail,
   Pencil,
+  Phone,
   Plus,
   RefreshCw,
   Search,
@@ -36,6 +38,9 @@ const emptyLender = () => ({
   short_code: "",
   lender_type: "Bank",
   contact_person: "",
+  bank_email: "",
+  rm_email: "",
+  rm_phone: "",
   supported_loan_products: [],
   is_active: true,
 });
@@ -126,6 +131,9 @@ export default function LendersRedesign() {
       short_code: lender.short_code || lender.shortCode || "",
       lender_type: lender.lender_type || lender.lenderType || "Bank",
       contact_person: lender.contact_person || lender.contactPerson || "",
+      bank_email: lender.bank_email || lender.bankEmail || "",
+      rm_email: lender.rm_email || lender.rmEmail || "",
+      rm_phone: lender.rm_phone || lender.rmPhone || "",
       supported_loan_products: prods,
       is_active: lender.is_active !== undefined ? lender.is_active : lender.isActive ?? true,
     });
@@ -184,6 +192,9 @@ export default function LendersRedesign() {
         short_code: lenderForm.short_code.trim(),
         lender_type: lenderForm.lender_type,
         contact_person: lenderForm.contact_person.trim() || null,
+        bank_email: lenderForm.bank_email?.trim() || null,
+        rm_email: lenderForm.rm_email?.trim() || null,
+        rm_phone: lenderForm.rm_phone?.trim() || null,
         supported_loan_products: lenderForm.supported_loan_products || [],
       };
 
@@ -366,13 +377,42 @@ export default function LendersRedesign() {
                         </span>
                       </td>
                       <td>
-                        {contact ? (
-                          <span className="cc-lender-contact-cell">
-                            <UserCheck size={14} /> {contact}
-                          </span>
-                        ) : (
-                          <span className="cc-lender-muted">—</span>
-                        )}
+                        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                          {contact ? (
+                            <span className="cc-lender-contact-cell">
+                              <UserCheck size={14} /> <strong>{contact}</strong>
+                            </span>
+                          ) : (
+                            <span className="cc-lender-muted">—</span>
+                          )}
+                          {lender.rm_email || lender.rmEmail ? (
+                            <a
+                              href={`mailto:${lender.rm_email || lender.rmEmail}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="cc-lender-mail-tag rm"
+                              title="Bank RM Email (Receives dispatched applications)"
+                            >
+                              <Mail size={12} />
+                              <span>{lender.rm_email || lender.rmEmail}</span>
+                            </a>
+                          ) : null}
+                          {lender.bank_email || lender.bankEmail ? (
+                            <a
+                              href={`mailto:${lender.bank_email || lender.bankEmail}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="cc-lender-mail-tag bank"
+                              title="Bank Branch / Official Email"
+                            >
+                              <Building2 size={12} />
+                              <span>{lender.bank_email || lender.bankEmail}</span>
+                            </a>
+                          ) : null}
+                          {lender.rm_phone || lender.rmPhone ? (
+                            <span style={{ fontSize: 11, color: "#64748b", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                              <Phone size={11} /> {lender.rm_phone || lender.rmPhone}
+                            </span>
+                          ) : null}
+                        </div>
                       </td>
                       <td>
                         {prods.length > 0 ? (
@@ -504,7 +544,48 @@ export default function LendersRedesign() {
                     onChange={(event) =>
                       setLenderForm({ ...lenderForm, contact_person: event.target.value })
                     }
-                    placeholder="e.g. Rajesh Kumar - Chief RM (9876543210)"
+                    placeholder="e.g. Rajesh Kumar - Chief RM"
+                  />
+                </label>
+              </div>
+
+              <div className="cc-lender-form-row">
+                <label className="cc-form-field grow">
+                  <span style={{ color: "#047857", fontWeight: 700 }}>Bank RM Email (Direct Dispatch)</span>
+                  <input
+                    type="email"
+                    value={lenderForm.rm_email}
+                    onChange={(event) =>
+                      setLenderForm({ ...lenderForm, rm_email: event.target.value })
+                    }
+                    placeholder="e.g. rajesh.rm@hdfcbank.com"
+                  />
+                  <small style={{ fontSize: 10.5, color: "#64748b", fontWeight: 400 }}>
+                    Applications sent from Operations will be emailed to this RM directly
+                  </small>
+                </label>
+
+                <label className="cc-form-field grow">
+                  <span>Bank Official / Branch Email</span>
+                  <input
+                    type="email"
+                    value={lenderForm.bank_email}
+                    onChange={(event) =>
+                      setLenderForm({ ...lenderForm, bank_email: event.target.value })
+                    }
+                    placeholder="e.g. loans@hdfcbank.com"
+                  />
+                </label>
+
+                <label className="cc-form-field" style={{ minWidth: 150 }}>
+                  <span>RM Phone / Mobile</span>
+                  <input
+                    type="tel"
+                    value={lenderForm.rm_phone}
+                    onChange={(event) =>
+                      setLenderForm({ ...lenderForm, rm_phone: event.target.value })
+                    }
+                    placeholder="e.g. 9876543210"
                   />
                 </label>
               </div>
@@ -696,6 +777,12 @@ const styles = `
   .cc-lender-product-item.selected .cc-lender-product-check { border-color:#047857; background:#047857; }
   .cc-lender-product-label { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .cc-lender-products-empty { font-size:12px; color:#94a3b8; font-style:italic; padding:6px 0; }
+
+  .cc-lender-mail-tag { display:inline-flex; align-items:center; gap:5px; font-size:11.5px; padding:2px 7px; border-radius:6px; text-decoration:none; max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; transition:all .15s; }
+  .cc-lender-mail-tag.rm { background:#ecfdf5; color:#047857; border:1px solid #bbf7d0; font-weight:600; }
+  .cc-lender-mail-tag.rm:hover { background:#d1fae5; }
+  .cc-lender-mail-tag.bank { background:#f8fafc; color:#475569; border:1px solid #e2e8f0; }
+  .cc-lender-mail-tag.bank:hover { background:#f1f5f9; color:#0f172a; }
 
   .cc-lender-modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:8px; }
   .cc-lender-btn { display:inline-flex; align-items:center; gap:6px; padding:8px 16px; border-radius:10px; font-size:13px; font-weight:600; border:1px solid transparent; cursor:pointer; }

@@ -23,6 +23,7 @@ const Document = require("./Document");
 const Lender = require("./Lender");
 const Application = require("./Application");
 const BankerQuery = require("./BankerQuery");
+const EmailTemplate = require("./EmailTemplate");
 
 // Module 6: Master Configs, Attendance & Audit Engine
 const MasterConfig = require("./MasterConfig");
@@ -122,6 +123,9 @@ BankerQuery.belongsTo(Application, { foreignKey: "application_id", as: "applicat
 BankerQuery.belongsTo(User, { foreignKey: "banker_id", as: "banker" });
 BankerQuery.belongsTo(User, { foreignKey: "resolved_by_ops_id", as: "resolvedByOps" });
 
+Company.hasMany(EmailTemplate, { foreignKey: "company_id", as: "emailTemplates", onDelete: "CASCADE" });
+EmailTemplate.belongsTo(Company, { foreignKey: "company_id", as: "company" });
+
 // Module 6: Master Configs, Attendance, Audit Logs, Notifications
 Company.hasMany(MasterConfig, { foreignKey: "company_id", as: "masterConfigs", onDelete: "CASCADE" });
 MasterConfig.belongsTo(Company, { foreignKey: "company_id", as: "company" });
@@ -191,6 +195,7 @@ const db = {
   CasePayout,
   BankReceipt,
   Expense,
+  EmailTemplate,
 };
 
 module.exports = db;

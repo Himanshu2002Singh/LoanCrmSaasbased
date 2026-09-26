@@ -16,6 +16,7 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
     { path: "/attendance", label: "Attendance", icon: "calendar" },
     { path: "/tasks", label: "Tasks", icon: "task" },
     { path: "/template", label: "Template", icon: "template" },
+    { path: "/email-templates", label: "Email Templates", icon: "document" },
     { path: "/lead-statuses", label: "Lead Statuses", icon: "lead_report" },
     { path: "/loan-products", label: "Loan Types", icon: "template" },
     { path: "/lead-sources", label: "Lead Sources", icon: "template" },
@@ -31,6 +32,7 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
   ];
   const operationsNavItems = [
     { path: "/operations", label: "Operations", icon: "operations" },
+    { path: "/email-templates", label: "Email Templates", icon: "document" },
     { path: "/party-payouts", label: "Party / Connector Details", icon: "template" },
     { path: "/case-payouts", label: "Disbursement & Payouts", icon: "performance" },
     { path: "/expenses", label: "Expense Tracker", icon: "expense" },

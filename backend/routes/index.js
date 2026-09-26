@@ -25,6 +25,7 @@ router.use("/attendance", require("./attendanceRoutes"));
 router.use("/activity", require("./activityRoutes"));
 router.use("/lenders", require("./lenderRoutes"));
 router.use("/templates", require("./templateRoutes"));
+router.use("/email-templates", require("./emailTemplateRoutes"));
 router.use("/reports", require("./reportRoutes"));
 router.use("/settings", require("./settingRoutes"));
 router.use("/company", require("./companyRoutes"));

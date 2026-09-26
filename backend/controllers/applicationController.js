@@ -4,6 +4,7 @@ const { buildQuery, paginated } = require("../utils/query");
 const { logActivity, diffFields } = require("../utils/activity");
 const { companyScope, belongsToScope } = require("../middlewares/auth");
 const { ROLES } = require("../constants/roles");
+const { sendMail } = require("../utils/emailService");
 
 const APP_FIELDS = [
   "loanProduct",
@@ -586,6 +587,133 @@ const resolveBankerQuery = async (req, res, next) => {
   }
 };
 
+/**
+ * @desc    Send Loan Application Docket to Bank RM via Email with Customer Documents
+ * @route   POST /api/applications/:id/send-to-bank
+ */
+const sendApplicationToBank = async (req, res, next) => {
+  try {
+    const applicationId = req.params.id;
+    const {
+      toEmail,
+      ccEmails,
+      subject,
+      content,
+      documentIds = [],
+      lenderId,
+      newStatus,
+    } = req.body;
+
+    if (!toEmail || !String(toEmail).trim()) {
+      return res.status(400).json({ message: "Recipient Bank / RM Email (toEmail) is required" });
+    }
+    if (!subject || !String(subject).trim()) {
+      return res.status(400).json({ message: "Email subject is required" });
+    }
+    if (!content || !String(content).trim()) {
+      return res.status(400).json({ message: "Email content / body is required" });
+    }
+
+    const application = await Application.findByPk(applicationId, {
+      include: [
+        { model: Customer, as: "customer" },
+        { model: Lead, as: "lead" },
+        { model: Lender, as: "lender" },
+      ],
+    });
+
+    if (!application || !belongsToScope(req, application)) {
+      return res.status(404).json({ message: "Application not found" });
+    }
+
+    // Update lender if a different one was selected
+    if (lenderId && parseInt(lenderId, 10) !== application.lenderId) {
+      await application.update({ lenderId: parseInt(lenderId, 10) });
+    }
+
+    // Retrieve documents to attach
+    let attachedDocs = [];
+    if (Array.isArray(documentIds) && documentIds.length > 0) {
+      attachedDocs = await Document.findAll({
+        where: {
+          id: { [Op.in]: documentIds },
+          companyId: req.companyId,
+        },
+      });
+    }
+
+    const attachments = attachedDocs.map((doc) => ({
+      filename: `${doc.docType.replace(/\s+/g, "_")}_${doc.fileName}`,
+      fileUrl: doc.fileUrl,
+    }));
+
+    // Send email via emailService
+    const mailResult = await sendMail({
+      to: toEmail,
+      cc: ccEmails || undefined,
+      subject: subject.trim(),
+      text: content.trim(),
+      html: `
+        <div style="font-family: Arial, -apple-system, sans-serif; line-height: 1.6; color: #1e293b; max-width: 650px; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; background: #ffffff;">
+          <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: #ffffff; padding: 22px 28px;">
+            <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #94a3b8; font-weight: 700; margin-bottom: 4px;">Loan Docket Submission</div>
+            <h2 style="margin: 0; font-size: 20px; font-weight: 700; color: #ffffff;">${application.loanProduct || "Loan Application"}</h2>
+            <p style="margin: 6px 0 0; font-size: 13px; color: #cbd5e1;">Application Ref: <strong>${application.applicationNumber}</strong> • Applied: <strong>₹${Number(application.appliedAmount || 0).toLocaleString("en-IN")}</strong></p>
+          </div>
+          <div style="padding: 26px 28px;">
+            <div style="white-space: pre-wrap; font-size: 14px; color: #334155; line-height: 1.65; margin-bottom: 24px;">${content.trim()}</div>
+            ${
+              attachedDocs.length > 0
+                ? `<div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px 20px; margin-top: 24px;">
+                    <div style="font-size: 13px; font-weight: 700; color: #0f172a; margin-bottom: 10px;">📎 Attached Applicant Documents (${attachedDocs.length})</div>
+                    <ul style="margin: 0; padding-left: 20px; font-size: 12.5px; color: #475569;">
+                      ${attachedDocs.map((d) => `<li style="margin-bottom: 4px;"><strong>${d.docType}:</strong> ${d.fileName}</li>`).join("")}
+                    </ul>
+                  </div>`
+                : ""
+            }
+            <div style="margin-top: 28px; padding-top: 18px; border-top: 1px solid #f1f5f9; font-size: 11.5px; color: #94a3b8; display: flex; justify-content: space-between;">
+              <span>Verified Loan Dispatch from CapitalCare CRM</span>
+              <span>Dispatched by ${req.user.name || "Operations Desk"}</span>
+            </div>
+          </div>
+        </div>
+      `,
+      attachments,
+    });
+
+    // Optionally update pipeline status (e.g. to FILE_LOGIN)
+    if (newStatus && newStatus !== application.status) {
+      await application.update({ status: newStatus });
+    }
+
+    await logActivity(req, {
+      recordType: "Application",
+      recordId: application.id,
+      action: "UPDATED",
+      newValue: {
+        dispatchedToEmail: toEmail,
+        subject,
+        documentsAttached: attachedDocs.map((d) => d.fileName),
+        status: application.status,
+      },
+      remarks: `Loan application docket dispatched to Bank RM (${toEmail}) with ${attachedDocs.length} documents.`,
+    });
+
+    return res.json({
+      success: true,
+      message: `Loan application docket successfully emailed to ${toEmail}`,
+      mailResult,
+      documentsCount: attachedDocs.length,
+      applicationNumber: application.applicationNumber,
+      updatedStatus: application.status,
+    });
+  } catch (error) {
+    console.error("[applicationController] sendApplicationToBank error:", error);
+    next(error);
+  }
+};
+
 module.exports = {
   createApplication,
   listApplications,
@@ -596,4 +724,5 @@ module.exports = {
   updateStatus,
   createBankerQuery,
   resolveBankerQuery,
+  sendApplicationToBank,
 };
