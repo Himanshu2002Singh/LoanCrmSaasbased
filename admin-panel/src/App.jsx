@@ -185,7 +185,7 @@ function App() {
         <Route
           path="/lenders"
           element={
-            <PageShell requiredPermission="manageSettings">
+            <PageShell allowedRoles={["manager", "operations"]}>
               <LendersScreen />
             </PageShell>
           }
@@ -225,7 +225,7 @@ function App() {
         <Route
           path="/case-payouts"
           element={
-            <PageShell allowedRoles={["manager", "operations"]} requiredPermission="viewPayouts">
+            <PageShell allowedRoles={["manager", "operations"]}>
               <CasePayoutsScreen />
             </PageShell>
           }
@@ -233,7 +233,7 @@ function App() {
         <Route
           path="/payouts"
           element={
-            <PageShell allowedRoles={["manager", "operations"]} requiredPermission="viewPayouts">
+            <PageShell allowedRoles={["manager", "operations"]}>
               <CasePayoutsScreen />
             </PageShell>
           }

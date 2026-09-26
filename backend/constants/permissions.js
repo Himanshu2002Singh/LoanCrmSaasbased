@@ -155,8 +155,8 @@ const DEFAULT_ROLE_PERMISSIONS = {
     manageLeads: true,
     viewConnectors: false, // confidential - disabled by default
     manageConnectors: false,
-    viewPayouts: false, // confidential - disabled by default
-    managePayouts: false,
+    viewPayouts: true, // enabled for disbursement and payouts
+    managePayouts: true,
     viewExpenses: false, // confidential - disabled by default
     manageExpenses: false,
     viewReports: false,

@@ -65,11 +65,14 @@ const managerNavItems = [
 ];
 
 const operationsNavItems = [
-  { path: "/operations", label: "Operations", icon: BriefcaseBusiness },
+  { path: "/leads", label: "Leads", icon: FileText },
   { path: "/email-templates", label: "Email Templates", icon: Mail },
-  { path: "/party-payouts", label: "Party / Connector Details", icon: Receipt, permission: "viewConnectors" },
-  { path: "/case-payouts", label: "Disbursement & Payouts", icon: IndianRupee, permission: "viewPayouts" },
-  { path: "/expenses", label: "Expense Tracker", icon: Wallet, permission: "viewExpenses" },
+  { path: "/lead-statuses", label: "Lead Statuses", icon: Tags },
+  { path: "/loan-products", label: "Loan Types", icon: Coins },
+  { path: "/lead-sources", label: "Lead Sources", icon: Share2 },
+  { path: "/lenders", label: "Lenders & NBFC", icon: Building2 },
+  { path: "/operations", label: "Operations", icon: BriefcaseBusiness },
+  { path: "/case-payouts", label: "Disbursement & Payouts", icon: IndianRupee },
   { path: "/banker/queries", label: "Banker Queries", icon: ClipboardList },
 ];
 
@@ -146,6 +149,16 @@ function AdminRedesignLayout({ children }) {
     ["COMPANY_ADMIN", "SUPERADMIN"].includes(userRole.toUpperCase()) ||
     ["admin", "superadmin"].includes(employeeRole?.toLowerCase());
 
+  const isOperations =
+    userRole.toUpperCase() === "OPERATIONS" ||
+    userRole.toUpperCase() === "OPS" ||
+    employeeRole?.toLowerCase() === "operations" ||
+    employeeRole?.toLowerCase() === "ops";
+
+  const isBanker =
+    userRole.toUpperCase() === "BANKER" ||
+    employeeRole?.toLowerCase() === "banker";
+
   const isEmployee =
     userRole.toUpperCase() === "EMPLOYEE" ||
     ["calling", "employee"].includes(employeeRole?.toLowerCase());
@@ -159,9 +172,9 @@ function AdminRedesignLayout({ children }) {
   }, []);
 
   const rawNavItems =
-    employeeRole === "banker"
+    isBanker
       ? bankerNavItems
-      : employeeRole === "operations"
+      : isOperations
       ? operationsNavItems
       : isEmployee
       ? employeeNavItems
@@ -170,11 +183,13 @@ function AdminRedesignLayout({ children }) {
   const navItems = useMemo(() => {
     if (isCompanyAdmin) return rawNavItems;
     if (isEmployee) return employeeNavItems;
+    if (isOperations) return operationsNavItems;
+    if (isBanker) return bankerNavItems;
     return rawNavItems.filter((item) => {
       if (!item.permission) return true;
       return Boolean(userPermissions[item.permission]);
     });
-  }, [rawNavItems, isCompanyAdmin, isEmployee, userPermissions]);
+  }, [rawNavItems, isCompanyAdmin, isEmployee, isOperations, isBanker, userPermissions]);
 
   const homePath =
     employeeRole === "banker"

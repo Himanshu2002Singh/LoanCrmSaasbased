@@ -152,9 +152,8 @@ const resolveStatus = (statuses, input) => {
  * Company admins and superadmins are not restricted.
  */
 const canSetStatus = (role, status) => {
-  if ([ROLES.SUPERADMIN, ROLES.COMPANY_ADMIN].includes(role)) return true;
+  if ([ROLES.SUPERADMIN, ROLES.COMPANY_ADMIN, ROLES.OPS].includes(role)) return true;
   const team = status?.team || teamForStatus(status?.value, status?.team);
-  if (role === ROLES.OPS) return team === "operations" || team === "both";
   if (role === ROLES.EMPLOYEE || role === ROLES.MANAGER) return team === "calling" || team === "both";
   return false;
 };
@@ -181,26 +180,7 @@ const visibilityScope = async (req) => {
         ],
       };
     }
-    return {
-      [Op.or]: [
-        { assignedEmployeeId: req.user.id },
-        { assignedManagerId: req.user.id },
-        {
-          status: {
-            [Op.in]: [
-              "PASSED_TO_OPS",
-              "DOCS_PENDING",
-              "DOCS_RECEIVED",
-              "VERIFICATION_PENDING",
-              "APPLICATION_CREATED",
-              "FILE_LOGIN",
-              "SANCTIONED",
-              "DISBURSED",
-            ],
-          },
-        },
-      ],
-    };
+    return {};
   }
   if (req.user.role === ROLES.MANAGER) {
     if (req.permissions?.viewAllLeads) {
@@ -399,8 +379,12 @@ exports.getLeadById = async (req, res) => {
       return res.status(404).json({ message: "Lead not found" });
     }
 
-    if (req.user.role === ROLES.EMPLOYEE || req.user.role === ROLES.OPS) {
-      if (lead.assignedEmployeeId !== req.user.id && lead.assignedManagerId !== req.user.id) {
+    if (req.user.role === ROLES.EMPLOYEE) {
+      if (
+        !req.permissions?.viewAllLeads &&
+        lead.assignedEmployeeId !== req.user.id &&
+        lead.assignedManagerId !== req.user.id
+      ) {
         return res.status(403).json({ message: "You do not have access to this lead" });
       }
     }
@@ -552,8 +536,13 @@ exports.updateLead = async (req, res) => {
       return res.status(404).json({ message: "Lead not found" });
     }
 
-    if (req.user.role === ROLES.EMPLOYEE || req.user.role === ROLES.OPS) {
-      if (lead.assignedEmployeeId !== req.user.id && lead.assignedManagerId !== req.user.id) {
+    if (req.user.role === ROLES.EMPLOYEE) {
+      if (
+        !req.permissions?.editAllLeads &&
+        !req.permissions?.editLeads &&
+        lead.assignedEmployeeId !== req.user.id &&
+        lead.assignedManagerId !== req.user.id
+      ) {
         return res.status(403).json({ message: "You do not have permission to edit this lead" });
       }
     }
