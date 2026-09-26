@@ -69,6 +69,12 @@ const Company = sequelize.define(
       field: "role_permissions",
       comment: "Company customized role permissions overrides for MANAGER, OPS, BANKER, EMPLOYEE",
     },
+    smtpConfig: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      field: "smtp_config",
+      comment: "Company outgoing mail configuration { host, port, secure, user, pass, senderName, isConfigured }",
+    },
   },
   {
     tableName: "companies",

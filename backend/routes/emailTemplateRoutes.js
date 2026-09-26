@@ -7,6 +7,20 @@ const { ROLES } = require("../constants/roles");
 router.use(isAuthenticated);
 
 router.get("/", controller.getEmailTemplates);
+
+// SMTP / Gmail configuration routes
+router.get("/smtp/config", controller.getSmtpConfig);
+router.put(
+  "/smtp/config",
+  requireRole(ROLES.COMPANY_ADMIN, ROLES.MANAGER, ROLES.OPS),
+  controller.updateSmtpConfig
+);
+router.post(
+  "/smtp/test",
+  requireRole(ROLES.COMPANY_ADMIN, ROLES.MANAGER, ROLES.OPS),
+  controller.testSmtpConfig
+);
+
 router.get("/:id", controller.getEmailTemplateById);
 
 router.post(

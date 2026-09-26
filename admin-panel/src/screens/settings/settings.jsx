@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Building2, ChevronRight, Clock, ShieldCheck } from 'lucide-react';
+import { Building2, ChevronRight, Clock, Mail, ShieldCheck } from 'lucide-react';
 import axios from 'axios';
 import API_URL from '../../config';
 
@@ -120,6 +120,32 @@ const SettingsScreen = () => {
           </div>
           <div className="flex items-center text-blue-700 font-semibold text-xs gap-1">
             <span>Manage Roles</span>
+            <ChevronRight size={16} />
+          </div>
+        </div>
+      </Link>
+
+      {/* Outgoing Email & Gmail (SMTP) Configuration Link Card */}
+      <Link
+        to="/email-templates"
+        className="block mb-6 p-5 rounded-xl border border-emerald-200 bg-gradient-to-r from-emerald-50 to-teal-50 shadow-sm hover:shadow-md transition-all text-decoration-none group"
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-emerald-600 text-white flex items-center justify-center shadow">
+              <Mail size={24} />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-gray-900 group-hover:text-emerald-800 flex items-center gap-2">
+                Outgoing Email & Gmail (SMTP) Credentials
+              </h3>
+              <p className="text-xs text-gray-600 mt-0.5">
+                Set company sender email and Google 16-digit App Password so bankers, lenders, and partners receive all loan files from your address.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center text-emerald-700 font-semibold text-xs gap-1">
+            <span>Configure Email</span>
             <ChevronRight size={16} />
           </div>
         </div>

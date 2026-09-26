@@ -649,6 +649,7 @@ const sendApplicationToBank = async (req, res, next) => {
 
     // Send email via emailService
     const mailResult = await sendMail({
+      companyId: req.companyId || req.user?.companyId,
       to: toEmail,
       cc: ccEmails || undefined,
       subject: subject.trim(),

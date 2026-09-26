@@ -24,19 +24,29 @@ const pick = (body, fields) => {
   return data;
 };
 
-const serialize = (company, extra = {}) => ({
-  ...company.get({ plain: true }),
-  plan: company.plan
-    ? {
-        id: company.plan.id,
-        name: company.plan.name,
-        priceMonthly: company.plan.priceMonthly,
-        maxEmployees: company.plan.maxEmployees,
-        featuresJson: company.plan.featuresJson,
-      }
-    : null,
-  ...extra,
-});
+const serialize = (company, extra = {}) => {
+  const plain = company.get ? company.get({ plain: true }) : { ...company };
+  if (plain.smtpConfig && plain.smtpConfig.pass) {
+    plain.smtpConfig = {
+      ...plain.smtpConfig,
+      pass: undefined,
+      hasPassword: true,
+    };
+  }
+  return {
+    ...plain,
+    plan: company.plan
+      ? {
+          id: company.plan.id,
+          name: company.plan.name,
+          priceMonthly: company.plan.priceMonthly,
+          maxEmployees: company.plan.maxEmployees,
+          featuresJson: company.plan.featuresJson,
+        }
+      : null,
+    ...extra,
+  };
+};
 
 /**
  * GET /api/platform/companies

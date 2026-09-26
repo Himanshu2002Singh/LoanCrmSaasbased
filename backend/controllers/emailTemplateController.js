@@ -1,5 +1,6 @@
 const { EmailTemplate, Company } = require("../models");
 const { companyScope, belongsToScope } = require("../middlewares/auth");
+const { testSmtpConnection } = require("../utils/emailService");
 
 const DEFAULT_TEMPLATES = [
   {
@@ -240,3 +241,183 @@ exports.deleteEmailTemplate = async (req, res, next) => {
     next(error);
   }
 };
+
+/**
+ * GET /api/email-templates/smtp/config
+ * Retrieve company's saved SMTP/Gmail configuration (password masked)
+ */
+exports.getSmtpConfig = async (req, res, next) => {
+  try {
+    const companyId = req.user.companyId;
+    if (!companyId) {
+      return res.status(400).json({ message: "No company associated with user" });
+    }
+
+    const company = await Company.findByPk(companyId, {
+      attributes: ["id", "name", "email", "smtpConfig"],
+    });
+
+    if (!company) {
+      return res.status(404).json({ message: "Company not found" });
+    }
+
+    const cfg = company.smtpConfig || {};
+    return res.json({
+      success: true,
+      data: {
+        service: cfg.service || "gmail",
+        user: cfg.user || "",
+        senderName: cfg.senderName || company.name || "Operations Desk",
+        host: cfg.host || "smtp.gmail.com",
+        port: cfg.port || 465,
+        secure: cfg.secure !== undefined ? Boolean(cfg.secure) : true,
+        isConfigured: Boolean(cfg.isConfigured),
+        hasPassword: Boolean(cfg.pass),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * PUT /api/email-templates/smtp/config
+ * Save or update company's outgoing SMTP/Gmail credentials
+ */
+exports.updateSmtpConfig = async (req, res, next) => {
+  try {
+    const companyId = req.user.companyId;
+    if (!companyId) {
+      return res.status(400).json({ message: "No company associated with user" });
+    }
+
+    const company = await Company.findByPk(companyId);
+    if (!company) {
+      return res.status(404).json({ message: "Company not found" });
+    }
+
+    const {
+      service = "gmail",
+      user,
+      pass,
+      senderName,
+      host,
+      port,
+      secure,
+      isConfigured = true,
+    } = req.body;
+
+    if (isConfigured && (!user || !user.trim())) {
+      return res.status(400).json({ message: "Sender email address is required" });
+    }
+
+    const existingConfig = company.smtpConfig || {};
+    const finalPassword = pass && pass.trim() ? pass.trim() : existingConfig.pass;
+
+    if (isConfigured && !finalPassword) {
+      return res.status(400).json({
+        message: "Email password or Gmail App Password is required",
+      });
+    }
+
+    const isGmail = service === "gmail" || (user && user.toLowerCase().endsWith("@gmail.com"));
+    const finalHost = host ? host.trim() : isGmail ? "smtp.gmail.com" : "smtp.gmail.com";
+    const finalPort = port ? parseInt(port, 10) : isGmail ? 465 : 587;
+    const finalSecure = secure !== undefined ? Boolean(secure) : finalPort === 465;
+
+    const updatedConfig = {
+      service: isGmail ? "gmail" : service || "custom",
+      user: user ? user.trim() : "",
+      pass: finalPassword || "",
+      senderName: senderName ? senderName.trim() : company.name || "Operations Desk",
+      host: finalHost,
+      port: finalPort,
+      secure: finalSecure,
+      isConfigured: Boolean(isConfigured),
+      updatedAt: new Date().toISOString(),
+    };
+
+    await company.update({ smtpConfig: updatedConfig });
+
+    return res.json({
+      success: true,
+      message: "Outgoing email configuration saved successfully",
+      data: {
+        service: updatedConfig.service,
+        user: updatedConfig.user,
+        senderName: updatedConfig.senderName,
+        host: updatedConfig.host,
+        port: updatedConfig.port,
+        secure: updatedConfig.secure,
+        isConfigured: updatedConfig.isConfigured,
+        hasPassword: Boolean(updatedConfig.pass),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/email-templates/smtp/test
+ * Test the SMTP / Gmail credentials and optionally send a test email
+ */
+exports.testSmtpConfig = async (req, res, next) => {
+  try {
+    const companyId = req.user.companyId;
+    const company = companyId ? await Company.findByPk(companyId) : null;
+    const existingConfig = company?.smtpConfig || {};
+
+    const {
+      service = "gmail",
+      user,
+      pass,
+      senderName,
+      host,
+      port,
+      secure,
+      testToEmail,
+    } = req.body;
+
+    const finalUser = user && user.trim() ? user.trim() : existingConfig.user;
+    const finalPass = pass && pass.trim() ? pass.trim() : existingConfig.pass;
+
+    if (!finalUser) {
+      return res.status(400).json({ message: "Sender email is required to test connection" });
+    }
+    if (!finalPass) {
+      return res.status(400).json({ message: "Password / App Password is required to test connection" });
+    }
+
+    const isGmail = service === "gmail" || (finalUser && finalUser.toLowerCase().endsWith("@gmail.com"));
+    const finalHost = host ? host.trim() : isGmail ? "smtp.gmail.com" : "smtp.gmail.com";
+    const finalPort = port ? parseInt(port, 10) : isGmail ? 465 : 587;
+    const finalSecure = secure !== undefined ? Boolean(secure) : finalPort === 465;
+
+    const testConfig = {
+      service: isGmail ? "gmail" : service,
+      user: finalUser,
+      pass: finalPass,
+      senderName: senderName || company?.name || "Operations Desk",
+      host: finalHost,
+      port: finalPort,
+      secure: finalSecure,
+    };
+
+    const targetRecipient = testToEmail && testToEmail.trim() ? testToEmail.trim() : finalUser;
+    const result = await testSmtpConnection(testConfig, targetRecipient);
+
+    return res.json({
+      success: true,
+      message: `Authentication verified successfully! A test email was sent to ${targetRecipient}`,
+      result,
+    });
+  } catch (error) {
+    console.error("[emailTemplateController] testSmtpConfig error:", error);
+    return res.status(400).json({
+      success: false,
+      message: error.message || "Failed to connect to SMTP server with the provided credentials.",
+    });
+  }
+};
+

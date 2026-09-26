@@ -6,13 +6,23 @@ import {
   Check,
   CheckCircle2,
   Copy,
+  ExternalLink,
   Eye,
+  EyeOff,
   FileText,
+  HelpCircle,
+  Info,
+  KeyRound,
+  Lock,
   Mail,
   Pencil,
   Plus,
   RefreshCw,
   Search,
+  Send,
+  Server,
+  Settings,
+  ShieldCheck,
   Sparkles,
   Star,
   Trash2,
@@ -66,6 +76,17 @@ const emptyForm = () => ({
   isDefault: false,
 });
 
+const emptySmtpForm = () => ({
+  service: "gmail",
+  user: "",
+  pass: "",
+  senderName: "",
+  host: "smtp.gmail.com",
+  port: 465,
+  secure: true,
+  isConfigured: true,
+});
+
 export default function EmailTemplatesRedesign() {
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -79,6 +100,18 @@ export default function EmailTemplatesRedesign() {
 
   const [previewTemplate, setPreviewTemplate] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+
+  // Outgoing Email & Gmail SMTP Configuration State
+  const [smtpConfig, setSmtpConfig] = useState(null);
+  const [smtpLoading, setSmtpLoading] = useState(false);
+  const [smtpModalOpen, setSmtpModalOpen] = useState(false);
+  const [smtpForm, setSmtpForm] = useState(emptySmtpForm);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [smtpSaving, setSmtpSaving] = useState(false);
+  const [smtpTesting, setSmtpTesting] = useState(false);
+  const [testEmail, setTestEmail] = useState("");
+  const [testFeedback, setTestFeedback] = useState(null);
 
   const subjectInputRef = useRef(null);
   const contentInputRef = useRef(null);
@@ -99,9 +132,24 @@ export default function EmailTemplatesRedesign() {
     }
   }, []);
 
+  const fetchSmtpConfig = useCallback(async () => {
+    setSmtpLoading(true);
+    try {
+      const res = await axios.get(`${API_URL}/email-templates/smtp/config`);
+      if (res.data?.success && res.data?.data) {
+        setSmtpConfig(res.data.data);
+      }
+    } catch (error) {
+      console.warn("Could not fetch SMTP config:", error.message);
+    } finally {
+      setSmtpLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchTemplates();
-  }, [fetchTemplates]);
+    fetchSmtpConfig();
+  }, [fetchTemplates, fetchSmtpConfig]);
 
   const openCreateModal = () => {
     setEditingTemplate(null);
@@ -119,6 +167,122 @@ export default function EmailTemplatesRedesign() {
       isDefault: Boolean(tpl.isDefault),
     });
     setModalOpen(true);
+  };
+
+  const openSmtpModal = () => {
+    const isCustom =
+      smtpConfig?.service !== "gmail" &&
+      smtpConfig?.host &&
+      smtpConfig?.host !== "smtp.gmail.com";
+
+    setSmtpForm({
+      service: smtpConfig?.service || "gmail",
+      user: smtpConfig?.user || "",
+      pass: "", // Keep empty so existing saved password is unchanged unless user types a new one
+      senderName:
+        smtpConfig?.senderName ||
+        localStorage.getItem("name") ||
+        "CapitalCare Operations",
+      host: smtpConfig?.host || "smtp.gmail.com",
+      port: smtpConfig?.port || 465,
+      secure: smtpConfig?.secure !== undefined ? smtpConfig.secure : true,
+      isConfigured:
+        smtpConfig?.isConfigured !== undefined ? smtpConfig.isConfigured : true,
+    });
+    setTestEmail(smtpConfig?.user || localStorage.getItem("email") || "");
+    setTestFeedback(null);
+    setShowPassword(false);
+    setShowAdvanced(Boolean(isCustom));
+    setSmtpModalOpen(true);
+  };
+
+  const handleServicePresetChange = (serviceType) => {
+    if (serviceType === "gmail") {
+      setSmtpForm((prev) => ({
+        ...prev,
+        service: "gmail",
+        host: "smtp.gmail.com",
+        port: 465,
+        secure: true,
+      }));
+      setShowAdvanced(false);
+    } else {
+      setSmtpForm((prev) => ({
+        ...prev,
+        service: "custom",
+        host: prev.host === "smtp.gmail.com" ? "" : prev.host,
+        port: prev.port || 587,
+        secure: prev.secure !== undefined ? prev.secure : false,
+      }));
+      setShowAdvanced(true);
+    }
+  };
+
+  const handleSaveSmtp = async (e) => {
+    e.preventDefault();
+    if (!smtpForm.user || !smtpForm.user.trim()) {
+      toast.error("Please enter a valid sender email address");
+      return;
+    }
+    if (!smtpConfig?.hasPassword && (!smtpForm.pass || !smtpForm.pass.trim())) {
+      toast.error("Please enter your Gmail App Password / Email Password");
+      return;
+    }
+
+    setSmtpSaving(true);
+    try {
+      const res = await axios.put(`${API_URL}/email-templates/smtp/config`, smtpForm);
+      if (res.data?.success) {
+        setSmtpConfig(res.data.data);
+        toast.success("Outgoing email & password saved successfully!");
+        setSmtpModalOpen(false);
+      }
+    } catch (err) {
+      console.error("Save SMTP error:", err);
+      toast.error(err.response?.data?.message || "Failed to save SMTP configuration");
+    } finally {
+      setSmtpSaving(false);
+    }
+  };
+
+  const handleTestSmtp = async () => {
+    if (!smtpForm.user || !smtpForm.user.trim()) {
+      toast.warning("Please enter a sender email address first");
+      return;
+    }
+    if (!smtpConfig?.hasPassword && (!smtpForm.pass || !smtpForm.pass.trim())) {
+      toast.warning("Please enter your Gmail App Password to test connection");
+      return;
+    }
+
+    setSmtpTesting(true);
+    setTestFeedback(null);
+    try {
+      const res = await axios.post(`${API_URL}/email-templates/smtp/test`, {
+        ...smtpForm,
+        testToEmail: testEmail.trim() || smtpForm.user.trim(),
+      });
+      if (res.data?.success) {
+        setTestFeedback({
+          type: "success",
+          message:
+            res.data.message ||
+            `Authentication successful! A test email was delivered to ${testEmail || smtpForm.user}`,
+        });
+        toast.success("SMTP connection verified!");
+      }
+    } catch (err) {
+      console.error("Test SMTP error:", err);
+      setTestFeedback({
+        type: "error",
+        message:
+          err.response?.data?.message ||
+          err.message ||
+          "Failed to authenticate with SMTP server. Please verify your App Password and try again.",
+      });
+    } finally {
+      setSmtpTesting(false);
+    }
   };
 
   const insertVariable = (tag, target = "content") => {
@@ -153,56 +317,47 @@ export default function EmailTemplatesRedesign() {
         setForm((prev) => ({ ...prev, content: (prev.content || "") + "\n" + tag }));
       }
     }
-    toast.info(`Inserted ${tag}`, { autoClose: 1200 });
   };
 
   const handleCopyTag = (tag) => {
-    navigator.clipboard?.writeText(tag);
-    toast.success(`Copied ${tag} to clipboard!`, { autoClose: 1400 });
+    navigator.clipboard.writeText(tag);
+    toast.info(`Copied ${tag} to clipboard`);
   };
 
   const handleSubmit = async (e) => {
-    e?.preventDefault();
-    if (!form.name.trim()) {
-      toast.warning("Template name is required");
-      return;
-    }
-    if (!form.subject.trim()) {
-      toast.warning("Email subject is required");
-      return;
-    }
-    if (!form.content.trim()) {
-      toast.warning("Email content / body is required");
+    e.preventDefault();
+    if (!form.name.trim() || !form.subject.trim() || !form.content.trim()) {
+      toast.error("Template Name, Subject, and Body Content are required");
       return;
     }
 
     setSubmitting(true);
     try {
-      const payload = {
-        name: form.name.trim(),
-        subject: form.subject.trim(),
-        content: form.content.trim(),
-        category: form.category,
-        isDefault: form.isDefault,
-      };
-
       if (editingTemplate) {
-        await axios.put(`${API_URL}/email-templates/${editingTemplate.id}`, payload);
-        toast.success("Email template updated successfully");
+        await axios.put(`${API_URL}/email-templates/${editingTemplate.id}`, form);
+        toast.success("Template updated successfully");
       } else {
-        await axios.post(`${API_URL}/email-templates`, payload);
-        toast.success("New email template created successfully");
+        await axios.post(`${API_URL}/email-templates`, form);
+        toast.success("New template created successfully");
       }
-
       setModalOpen(false);
-      setEditingTemplate(null);
-      setForm(emptyForm());
       fetchTemplates();
     } catch (error) {
-      console.error(error);
-      toast.error(error.response?.data?.message || "Could not save template");
+      console.error("Save template error:", error);
+      toast.error(error.response?.data?.message || "Failed to save template");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleSetDefault = async (tpl) => {
+    try {
+      await axios.put(`${API_URL}/email-templates/${tpl.id}`, { isDefault: true });
+      toast.success(`"${tpl.name}" is now the default dispatch template`);
+      fetchTemplates();
+    } catch (error) {
+      console.error("Set default error:", error);
+      toast.error("Failed to set default template");
     }
   };
 
@@ -211,29 +366,18 @@ export default function EmailTemplatesRedesign() {
     try {
       await axios.delete(`${API_URL}/email-templates/${deleteTarget.id}`);
       toast.success("Template deleted successfully");
-      fetchTemplates();
       setDeleteTarget(null);
-    } catch (error) {
-      console.error(error);
-      toast.error(error.response?.data?.message || "Could not delete template");
-    }
-  };
-
-  const handleSetDefault = async (tpl) => {
-    try {
-      await axios.put(`${API_URL}/email-templates/${tpl.id}`, { isDefault: true });
-      toast.success(`"${tpl.name}" is now set as the default template`);
       fetchTemplates();
     } catch (error) {
-      console.error(error);
-      toast.error("Could not set template as default");
+      console.error("Delete template error:", error);
+      toast.error(error.response?.data?.message || "Failed to delete template");
     }
   };
 
   const filteredTemplates = useMemo(() => {
     return templates.filter((tpl) => {
       if (categoryFilter && tpl.category !== categoryFilter) return false;
-      if (!searchTerm.trim()) return true;
+      if (!searchTerm) return true;
       const q = searchTerm.toLowerCase();
       return (
         String(tpl.name || "").toLowerCase().includes(q) ||
@@ -256,13 +400,93 @@ export default function EmailTemplatesRedesign() {
           </div>
           <h1>Email &amp; Subject Templates</h1>
           <p>
-            Configure pre-approved email subjects and dynamic message templates used by the Operations Desk when emailing loan applications and KYC documents to Bank / NBFC Relationship Managers.
+            Configure pre-approved email subjects, dynamic message templates, and your outgoing Gmail / SMTP sender credentials used when emailing loan applications to Bank Relationship Managers.
           </p>
         </div>
 
-        <button type="button" className="cc-etpl-btn primary" onClick={openCreateModal}>
-          <Plus size={16} /> Create Email Template
-        </button>
+        <div className="cc-etpl-header-actions">
+          <button
+            type="button"
+            className="cc-etpl-btn secondary"
+            onClick={openSmtpModal}
+            title="Configure company Gmail ID and App Password"
+          >
+            <Settings size={15} />
+            <span>Sender Gmail / SMTP</span>
+            {smtpConfig?.isConfigured && smtpConfig?.user && (
+              <span className="cc-header-active-dot" title="Active & Connected" />
+            )}
+          </button>
+          <button type="button" className="cc-etpl-btn primary" onClick={openCreateModal}>
+            <Plus size={16} /> Create Template
+          </button>
+        </div>
+      </section>
+
+      {/* Outgoing Email & SMTP Sender Account Status Banner */}
+      <section className="cc-smtp-banner-wrapper">
+        {smtpLoading ? (
+          <div className="cc-smtp-banner loading">
+            <RefreshCw className="cc-spin" size={16} style={{ color: "#047857" }} />
+            <span>Checking outgoing email configuration...</span>
+          </div>
+        ) : smtpConfig?.isConfigured && smtpConfig?.user ? (
+          <div className="cc-smtp-banner configured">
+            <div className="cc-smtp-banner-left">
+              <div className="cc-smtp-status-dot active" />
+              <div>
+                <div className="cc-smtp-banner-title">
+                  <span>Outgoing Sender Email:</span>{" "}
+                  <strong>{smtpConfig.user}</strong>
+                  <span className="cc-smtp-badge-active">
+                    <CheckCircle2 size={12} /> Connected &amp; Authenticated
+                  </span>
+                </div>
+                <div className="cc-smtp-banner-sub">
+                  Sender Name: <strong>{smtpConfig.senderName}</strong> • Server:{" "}
+                  <code>{smtpConfig.host}:{smtpConfig.port}</code> • Bankers, lenders, and vendors receive emails directly from your email address.
+                </div>
+              </div>
+            </div>
+            <div className="cc-smtp-banner-actions">
+              <button
+                type="button"
+                className="cc-smtp-btn-sm ghost"
+                onClick={openSmtpModal}
+              >
+                <Send size={13} /> Test Email
+              </button>
+              <button
+                type="button"
+                className="cc-smtp-btn-sm primary"
+                onClick={openSmtpModal}
+              >
+                <Pencil size={13} /> Edit Gmail &amp; Password
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="cc-smtp-banner warning">
+            <div className="cc-smtp-banner-left">
+              <div className="cc-smtp-status-dot warning" />
+              <div>
+                <div className="cc-smtp-banner-title" style={{ color: "#9a3412" }}>
+                  ⚠️ Outgoing Sender Email &amp; Password Not Configured
+                </div>
+                <div className="cc-smtp-banner-sub" style={{ color: "#c2410c" }}>
+                  Bankers are currently receiving files via the system fallback mailer. Set your company Gmail ID and App Password so all emails are sent directly from your own domain or Gmail account.
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="cc-smtp-btn-action"
+              onClick={openSmtpModal}
+            >
+              <KeyRound size={14} /> Set Up Gmail &amp; Password
+            </button>
+          </div>
+        )}
       </section>
 
       {/* Dynamic Placeholder Variable Helper Bar */}
@@ -338,33 +562,31 @@ export default function EmailTemplatesRedesign() {
           </div>
         ) : filteredTemplates.length === 0 ? (
           <div className="cc-etpl-empty-card">
-            <Mail size={36} style={{ color: "#94a3b8", marginBottom: 10 }} />
-            <h3>No email templates found</h3>
+            <FileText size={32} style={{ color: "#94a3b8", marginBottom: 10 }} />
+            <h3>No Templates Found</h3>
             <p>
-              {templates.length === 0
-                ? "No templates created yet. Click Create Email Template to craft your first bank dispatch template."
-                : "No templates match your search filter."}
+              {searchTerm || categoryFilter
+                ? "No email templates match your search criteria. Try clearing the filter."
+                : "No email templates are configured yet. Click 'Create Email Template' to create your first standard dispatch template."}
             </p>
-            {templates.length === 0 && (
-              <button type="button" className="cc-etpl-btn primary" onClick={openCreateModal} style={{ marginTop: 12 }}>
-                <Plus size={15} /> Create First Template
-              </button>
-            )}
+            <button type="button" className="cc-etpl-btn primary" onClick={openCreateModal} style={{ marginTop: 14 }}>
+              <Plus size={15} /> Add Template
+            </button>
           </div>
         ) : (
           filteredTemplates.map((tpl) => (
             <div key={tpl.id} className={`cc-etpl-card ${tpl.isDefault ? "default" : ""}`}>
               <div className="cc-etpl-card-head">
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                    <h3 className="cc-etpl-card-title">{tpl.name}</h3>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    <span className="cc-etpl-cat-pill">{tpl.category || "LOAN_SUBMISSION"}</span>
                     {tpl.isDefault && (
                       <span className="cc-etpl-default-badge">
-                        <Star size={11} fill="#d97706" /> Default
+                        <Star size={11} fill="#d97706" color="#d97706" /> Default Dispatch
                       </span>
                     )}
                   </div>
-                  <span className="cc-etpl-cat-pill">{tpl.category || "LOAN_SUBMISSION"}</span>
+                  <h3 className="cc-etpl-card-title">{tpl.name}</h3>
                 </div>
 
                 <div className="cc-etpl-card-actions">
@@ -378,14 +600,6 @@ export default function EmailTemplatesRedesign() {
                       <Star size={14} />
                     </button>
                   )}
-                  <button
-                    type="button"
-                    className="cc-etpl-icon-btn"
-                    title="Live Preview"
-                    onClick={() => setPreviewTemplate(tpl)}
-                  >
-                    <Eye size={14} />
-                  </button>
                   <button
                     type="button"
                     className="cc-etpl-icon-btn"
@@ -405,46 +619,44 @@ export default function EmailTemplatesRedesign() {
                 </div>
               </div>
 
-              {/* Subject Line Box */}
               <div className="cc-etpl-subject-preview">
                 <span className="cc-etpl-subject-lbl">Subject Line:</span>
                 <p className="cc-etpl-subject-text">{tpl.subject}</p>
               </div>
 
-              {/* Body Content Preview */}
               <div className="cc-etpl-body-preview">
-                <span className="cc-etpl-subject-lbl">Message Body:</span>
-                <pre className="cc-etpl-body-text">{tpl.content}</pre>
+                <span className="cc-etpl-subject-lbl" style={{ marginBottom: 4 }}>Message Body:</span>
+                <p className="cc-etpl-body-text">{tpl.content}</p>
               </div>
 
               <div className="cc-etpl-card-footer">
-                <span style={{ fontSize: 11, color: "#94a3b8" }}>
-                  Updated {new Date(tpl.updatedAt || tpl.createdAt).toLocaleDateString("en-IN")}
-                </span>
                 <button
                   type="button"
                   className="cc-etpl-preview-link"
                   onClick={() => setPreviewTemplate(tpl)}
                 >
-                  <Eye size={12} /> Test Sample Preview
+                  <Eye size={13} /> Live Preview with Sample Data
                 </button>
+                <span style={{ fontSize: 11, color: "#94a3b8" }}>
+                  Updated {new Date(tpl.updatedAt || tpl.createdAt).toLocaleDateString()}
+                </span>
               </div>
             </div>
           ))
         )}
       </section>
 
-      {/* Add / Edit Template Modal */}
+      {/* CREATE / EDIT TEMPLATE MODAL */}
       {modalOpen && (
         <div className="cc-etpl-overlay" onClick={() => setModalOpen(false)}>
           <div className="cc-etpl-modal" onClick={(e) => e.stopPropagation()}>
             <div className="cc-etpl-modal-head">
               <div>
                 <span style={{ fontSize: 11, fontWeight: 700, color: "#047857", textTransform: "uppercase" }}>
-                  Operations Email Preset
+                  {editingTemplate ? "Update Existing Template" : "New Email Template"}
                 </span>
-                <h2 style={{ margin: "2px 0 0", fontSize: 18, color: "#0f172a", fontWeight: 700 }}>
-                  {editingTemplate ? "Edit Email Template" : "Create New Email Template"}
+                <h2 style={{ margin: "2px 0 0", fontSize: 18, color: "#0f172a" }}>
+                  {editingTemplate ? editingTemplate.name : "Create Loan Dispatch Email Template"}
                 </h2>
               </div>
               <button type="button" className="cc-etpl-modal-close" onClick={() => setModalOpen(false)}>
@@ -455,19 +667,18 @@ export default function EmailTemplatesRedesign() {
             <form onSubmit={handleSubmit} className="cc-etpl-form">
               <div className="cc-etpl-form-row">
                 <label className="cc-etpl-field grow">
-                  <span>Template Name *</span>
+                  Template Name *
                   <input
                     type="text"
                     value={form.name}
                     onChange={(e) => setForm({ ...form, name: e.target.value })}
                     placeholder="e.g. Standard Bank Loan Application Docket"
-                    autoFocus
                     required
                   />
                 </label>
 
                 <label className="cc-etpl-field" style={{ minWidth: 200 }}>
-                  <span>Category</span>
+                  Category
                   <select
                     value={form.category}
                     onChange={(e) => setForm({ ...form, category: e.target.value })}
@@ -479,15 +690,15 @@ export default function EmailTemplatesRedesign() {
                 </label>
               </div>
 
-              {/* Subject Field & Variable Inserters */}
+              {/* Subject Line Field */}
               <div className="cc-etpl-field-block">
                 <div className="cc-etpl-field-head">
-                  <label className="cc-etpl-field-title">
+                  <div className="cc-etpl-field-title">
                     <span>Email Subject Line *</span>
-                    <small>Include tags like <code>{"{{customer_name}}"}</code> to personalize dynamically.</small>
-                  </label>
+                    <small>Supports dynamic placeholders like <code>{`{{customer_name}}`}</code>, <code>{`{{loan_product}}`}</code></small>
+                  </div>
                   <div className="cc-etpl-quick-tags">
-                    <span style={{ fontSize: 11, color: "#64748b" }}>Quick Insert:</span>
+                    <span style={{ fontSize: 11, color: "#64748b" }}>Insert:</span>
                     {["{{customer_name}}", "{{loan_product}}", "{{application_number}}", "{{loan_amount}}"].map((t) => (
                       <button
                         key={t}
@@ -505,18 +716,18 @@ export default function EmailTemplatesRedesign() {
                   type="text"
                   value={form.subject}
                   onChange={(e) => setForm({ ...form, subject: e.target.value })}
-                  placeholder="e.g. [Loan Docket] Application Submission - {{customer_name}} | {{loan_product}} (Ref: {{application_number}})"
+                  placeholder="[Loan Docket] Application Submission - {{customer_name}} | {{loan_product}} (Ref: {{application_number}})"
                   required
                 />
               </div>
 
-              {/* Multiline Body Field & Variable Inserters */}
+              {/* Body Content Field */}
               <div className="cc-etpl-field-block">
                 <div className="cc-etpl-field-head">
-                  <label className="cc-etpl-field-title">
-                    <span>Multiline Email Content / Body *</span>
-                    <small>Write the email body text. Line breaks and spacing will be preserved.</small>
-                  </label>
+                  <div className="cc-etpl-field-title">
+                    <span>Email Message Body *</span>
+                    <small>Supports multiline text and dynamic customer/bank tags.</small>
+                  </div>
                   <div className="cc-etpl-quick-tags">
                     <span style={{ fontSize: 11, color: "#64748b" }}>Insert:</span>
                     {["{{bank_rm_name}}", "{{customer_name}}", "{{documents_list}}", "{{company_name}}", "{{sender_name}}"].map((t) => (
@@ -567,6 +778,307 @@ export default function EmailTemplatesRedesign() {
         </div>
       )}
 
+      {/* GMAIL & SMTP CONFIGURATION MODAL */}
+      {smtpModalOpen && (
+        <div className="cc-etpl-overlay" onClick={() => setSmtpModalOpen(false)}>
+          <div className="cc-etpl-modal smtp-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="cc-etpl-modal-head">
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div className="cc-smtp-icon-box">
+                  <Mail size={22} color="#047857" />
+                </div>
+                <div>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#047857", textTransform: "uppercase" }}>
+                    Outgoing Email Engine
+                  </span>
+                  <h2 style={{ margin: "2px 0 0", fontSize: 18, color: "#0f172a" }}>
+                    Set Sender Email &amp; Password (Gmail / SMTP)
+                  </h2>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="cc-etpl-modal-close"
+                onClick={() => setSmtpModalOpen(false)}
+              >
+                <X size={17} />
+              </button>
+            </div>
+
+            {/* Service Type Selector */}
+            <div className="cc-smtp-service-tabs">
+              <button
+                type="button"
+                className={`cc-smtp-tab ${smtpForm.service === "gmail" ? "active" : ""}`}
+                onClick={() => handleServicePresetChange("gmail")}
+              >
+                <img
+                  src="https://www.gstatic.com/images/branding/product/1x/gmail_2020q4_32dp.png"
+                  alt="Gmail"
+                  width="18"
+                  height="18"
+                  style={{ verticalAlign: "middle" }}
+                />
+                <span>Gmail / Google Workspace (Recommended)</span>
+              </button>
+              <button
+                type="button"
+                className={`cc-smtp-tab ${smtpForm.service === "custom" ? "active" : ""}`}
+                onClick={() => handleServicePresetChange("custom")}
+              >
+                <Server size={16} />
+                <span>Custom SMTP Server (Zoho, Outlook, Private)</span>
+              </button>
+            </div>
+
+            {/* How-to guide callout for Gmail App Password */}
+            {smtpForm.service === "gmail" && (
+              <div className="cc-smtp-guide-box">
+                <div className="cc-smtp-guide-head">
+                  <KeyRound size={15} color="#d97706" />
+                  <strong>How to set up Gmail App Password (1-minute guide):</strong>
+                </div>
+                <ol className="cc-smtp-guide-steps">
+                  <li>
+                    Log in to your Google Account at{" "}
+                    <a
+                      href="https://myaccount.google.com/security"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="cc-smtp-ext-link"
+                    >
+                      myaccount.google.com/security <ExternalLink size={11} />
+                    </a>
+                  </li>
+                  <li>
+                    Ensure <strong>2-Step Verification</strong> is turned <strong>ON</strong>.
+                  </li>
+                  <li>
+                    Open{" "}
+                    <a
+                      href="https://myaccount.google.com/apppasswords"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="cc-smtp-ext-link"
+                    >
+                      App Passwords <ExternalLink size={11} />
+                    </a>
+                    , enter app name as <code>Loan CRM Mailer</code>, and click <strong>Create</strong>.
+                  </li>
+                  <li>
+                    Copy the generated <strong>16-character code</strong> (e.g. <code>abcd efgh ijkl mnop</code>) and paste it into the password box below.
+                  </li>
+                </ol>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveSmtp} className="cc-etpl-form">
+              <div className="cc-etpl-form-row">
+                <label className="cc-etpl-field grow">
+                  Sender Email Address *
+                  <div className="cc-input-icon-shell">
+                    <Mail size={15} className="input-left-icon" />
+                    <input
+                      type="email"
+                      value={smtpForm.user}
+                      onChange={(e) => setSmtpForm({ ...smtpForm, user: e.target.value })}
+                      placeholder={
+                        smtpForm.service === "gmail"
+                          ? "e.g. operations@gmail.com"
+                          : "e.g. loan-desk@yourcompany.com"
+                      }
+                      required
+                    />
+                  </div>
+                  <span style={{ fontSize: 11, color: "#64748b" }}>
+                    Bankers and partners will see this address in the "From:" header.
+                  </span>
+                </label>
+
+                <label className="cc-etpl-field grow">
+                  Sender Display Name
+                  <input
+                    type="text"
+                    value={smtpForm.senderName}
+                    onChange={(e) => setSmtpForm({ ...smtpForm, senderName: e.target.value })}
+                    placeholder="e.g. CapitalCare Operations Desk"
+                  />
+                  <span style={{ fontSize: 11, color: "#64748b" }}>
+                    Name shown beside your email in inbox.
+                  </span>
+                </label>
+              </div>
+
+              {/* Password / App Password field with Eye Toggle */}
+              <div className="cc-etpl-field">
+                <label style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span>
+                    {smtpForm.service === "gmail"
+                      ? "Gmail 16-Digit App Password *"
+                      : "SMTP Password *"}
+                  </span>
+                  {smtpConfig?.hasPassword && (
+                    <span className="cc-saved-pwd-tag">
+                      <Lock size={11} /> Password is currently saved
+                    </span>
+                  )}
+                </label>
+                <div className="cc-input-icon-shell">
+                  <Lock size={15} className="input-left-icon" />
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={smtpForm.pass}
+                    onChange={(e) => setSmtpForm({ ...smtpForm, pass: e.target.value })}
+                    placeholder={
+                      smtpConfig?.hasPassword
+                        ? "•••••••••••••••• (Leave blank to keep existing password)"
+                        : "Enter 16-character Google App Password"
+                    }
+                    autoComplete="new-password"
+                  />
+                  <button
+                    type="button"
+                    className="input-eye-toggle"
+                    onClick={() => setShowPassword(!showPassword)}
+                    title={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                </div>
+                {smtpConfig?.hasPassword && (
+                  <span style={{ fontSize: 11, color: "#64748b" }}>
+                    A password is already saved securely. Only enter a value here if you want to update/change it.
+                  </span>
+                )}
+              </div>
+
+              {/* Advanced Server Details Accordion */}
+              {smtpForm.service === "custom" || showAdvanced ? (
+                <div className="cc-smtp-advanced-box">
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#1e293b", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                    <Server size={14} color="#4338ca" /> Advanced SMTP Server Parameters
+                  </div>
+                  <div className="cc-etpl-form-row">
+                    <label className="cc-etpl-field grow">
+                      SMTP Host
+                      <input
+                        type="text"
+                        value={smtpForm.host}
+                        onChange={(e) => setSmtpForm({ ...smtpForm, host: e.target.value })}
+                        placeholder="e.g. smtp.gmail.com or smtp.zoho.in"
+                      />
+                    </label>
+                    <label className="cc-etpl-field" style={{ width: 100 }}>
+                      Port
+                      <input
+                        type="number"
+                        value={smtpForm.port}
+                        onChange={(e) => setSmtpForm({ ...smtpForm, port: parseInt(e.target.value, 10) })}
+                        placeholder="465"
+                      />
+                    </label>
+                    <label className="cc-etpl-field" style={{ width: 140 }}>
+                      Encryption
+                      <select
+                        value={smtpForm.secure ? "ssl" : "tls"}
+                        onChange={(e) =>
+                          setSmtpForm({
+                            ...smtpForm,
+                            secure: e.target.value === "ssl",
+                            port: e.target.value === "ssl" ? 465 : 587,
+                          })
+                        }
+                      >
+                        <option value="ssl">SSL (Port 465)</option>
+                        <option value="tls">TLS / STARTTLS (Port 587)</option>
+                      </select>
+                    </label>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="cc-smtp-toggle-adv-btn"
+                  onClick={() => setShowAdvanced(true)}
+                >
+                  <Server size={12} /> Show Custom SMTP Server &amp; Port Settings
+                </button>
+              )}
+
+              {/* Real-time Test Email Section */}
+              <div className="cc-smtp-test-section">
+                <div className="cc-smtp-test-head">
+                  <Send size={14} color="#047857" />
+                  <strong>Test SMTP Connection &amp; Send Verification Email:</strong>
+                </div>
+                <div className="cc-smtp-test-input-row">
+                  <input
+                    type="email"
+                    value={testEmail}
+                    onChange={(e) => setTestEmail(e.target.value)}
+                    placeholder="Recipient email address for test message"
+                    className="cc-smtp-test-input"
+                  />
+                  <button
+                    type="button"
+                    className="cc-smtp-test-btn"
+                    onClick={handleTestSmtp}
+                    disabled={smtpTesting}
+                  >
+                    {smtpTesting ? (
+                      <>
+                        <RefreshCw className="cc-spin" size={13} /> Testing...
+                      </>
+                    ) : (
+                      <>
+                        <Send size={13} /> Test &amp; Send Sample
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {testFeedback && (
+                  <div className={`cc-smtp-feedback-card ${testFeedback.type}`}>
+                    {testFeedback.type === "success" ? (
+                      <CheckCircle2 size={16} />
+                    ) : (
+                      <Info size={16} />
+                    )}
+                    <span>{testFeedback.message}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="cc-etpl-modal-actions">
+                <button
+                  type="button"
+                  className="cc-etpl-btn ghost"
+                  onClick={() => setSmtpModalOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="cc-etpl-btn primary"
+                  disabled={smtpSaving}
+                >
+                  {smtpSaving ? (
+                    <>
+                      <RefreshCw className="cc-spin" size={14} /> Saving...
+                    </>
+                  ) : (
+                    <>
+                      <Check size={15} /> Save Email &amp; Password
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Live Sample Preview Modal */}
       {previewTemplate && (
         <div className="cc-etpl-overlay" onClick={() => setPreviewTemplate(null)}>
@@ -588,7 +1100,12 @@ export default function EmailTemplatesRedesign() {
             <div className="cc-email-preview-envelope">
               <div className="cc-email-preview-headers">
                 <div className="cc-email-hdr-row">
-                  <strong>From:</strong> <span>Operations Desk &lt;operations@capitalcare.com&gt;</span>
+                  <strong>From:</strong>{" "}
+                  <span>
+                    {smtpConfig?.user
+                      ? `"${smtpConfig.senderName || 'Operations Desk'}" <${smtpConfig.user}>`
+                      : "Operations Desk <operations@capitalcare.com>"}
+                  </span>
                 </div>
                 <div className="cc-email-hdr-row">
                   <strong>To:</strong> <span>rajesh.sharma@hdfcbank.com (Bank RM)</span>
@@ -601,16 +1118,18 @@ export default function EmailTemplatesRedesign() {
                 </div>
                 <div className="cc-email-hdr-row">
                   <strong>Attachments:</strong>{" "}
-                  <span className="cc-etpl-sample-att-badge">
-                    📎 4 Customer Documents Attached (Verified)
-                  </span>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    <span className="cc-etpl-sample-att-badge">📎 PAN Card (pan_card.pdf)</span>
+                    <span className="cc-etpl-sample-att-badge">📎 Aadhaar Card (aadhaar.pdf)</span>
+                    <span className="cc-etpl-sample-att-badge">📎 Salary Slips (salary_slips.pdf)</span>
+                  </div>
                 </div>
               </div>
 
               <div className="cc-email-preview-body">
-                <pre style={{ margin: 0, fontFamily: "inherit", whiteSpace: "pre-wrap", fontSize: 13.5, lineHeight: 1.65, color: "#334155" }}>
+                <div style={{ whiteSpace: "pre-wrap", fontSize: 13.5, lineHeight: 1.65, color: "#334155" }}>
                   {renderSampleText(previewTemplate.content)}
-                </pre>
+                </div>
               </div>
             </div>
 
@@ -638,33 +1157,26 @@ export default function EmailTemplatesRedesign() {
         </div>
       )}
 
-      {/* Delete Confirm Modal */}
+      {/* Delete Confirmation Modal */}
       {deleteTarget && (
         <div className="cc-etpl-overlay" onClick={() => setDeleteTarget(null)}>
           <div className="cc-etpl-modal danger-confirm" onClick={(e) => e.stopPropagation()}>
             <div className="cc-etpl-modal-head">
-              <h3>Delete Template?</h3>
+              <h2 style={{ margin: 0, fontSize: 17, color: "#dc2626" }}>Delete Email Template?</h2>
               <button type="button" className="cc-etpl-modal-close" onClick={() => setDeleteTarget(null)}>
-                <X size={16} />
+                <X size={17} />
               </button>
             </div>
-            <p style={{ margin: "4px 0 16px", color: "#475569", fontSize: 13.5, lineHeight: 1.5 }}>
-              Are you sure you want to delete <strong>{deleteTarget.name}</strong>? This action cannot be undone.
+            <p style={{ fontSize: 13.5, color: "#475569", lineHeight: 1.5, margin: "6px 0 0" }}>
+              Are you sure you want to permanently delete <strong>"{deleteTarget.name}"</strong>?
+              Operations agents will no longer be able to select this template.
             </p>
-            <div className="cc-etpl-modal-actions">
-              <button
-                type="button"
-                className="cc-etpl-btn ghost"
-                onClick={() => setDeleteTarget(null)}
-              >
+            <div className="cc-etpl-modal-actions" style={{ marginTop: 12 }}>
+              <button type="button" className="cc-etpl-btn ghost" onClick={() => setDeleteTarget(null)}>
                 Cancel
               </button>
-              <button
-                type="button"
-                className="cc-etpl-btn primary danger"
-                onClick={handleDelete}
-              >
-                Delete Template
+              <button type="button" className="cc-etpl-btn primary danger" onClick={handleDelete}>
+                <Trash2 size={14} /> Delete Template
               </button>
             </div>
           </div>
@@ -675,103 +1187,866 @@ export default function EmailTemplatesRedesign() {
 }
 
 const styles = `
-  .cc-etpl-container { display: flex; flex-direction: column; gap: 16px; padding: 20px 24px 48px; max-width: 1400px; margin: 0 auto; }
-  
-  .cc-etpl-header-panel { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px; background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%); border: 1px solid #e2e8f0; border-radius: 16px; padding: 22px 26px; box-shadow: 0 2px 10px rgba(15,23,42,0.03); }
+  .cc-etpl-container {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding: 22px 26px 60px;
+    background: #f8fafc;
+    min-height: 100vh;
+    box-sizing: border-box;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+
+  .cc-etpl-header-panel {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 16px;
+    background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    padding: 22px 26px;
+    box-shadow: 0 2px 10px rgba(15,23,42,0.03);
+  }
   .cc-etpl-header-text { max-width: 780px; }
-  .cc-etpl-badge-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: #ecfdf5; color: #047857; font-size: 11.5px; font-weight: 700; margin-bottom: 8px; border: 1px solid #bbf7d0; }
+  .cc-etpl-badge-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: #ecfdf5;
+    color: #047857;
+    font-size: 11.5px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    border: 1px solid #bbf7d0;
+  }
   .cc-etpl-header-text h1 { margin: 0; font-size: 22px; font-weight: 800; color: #0f172a; }
   .cc-etpl-header-text p { margin: 6px 0 0; font-size: 13px; color: #64748b; line-height: 1.55; }
+  .cc-etpl-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .cc-header-active-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #10b981;
+    display: inline-block;
+    box-shadow: 0 0 0 2px #ecfdf5;
+  }
 
-  .cc-etpl-tags-bar { background: #fffbeb; border: 1px solid #fde68a; border-radius: 14px; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; }
-  .cc-etpl-tags-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
-  .cc-etpl-tags-title { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; color: #92400e; }
-  .cc-etpl-tags-scroll { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-  .cc-etpl-tag-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 8px; background: #ffffff; border: 1px solid #fcd34d; font-size: 11.5px; color: #78350f; cursor: pointer; transition: all .15s ease; user-select: none; }
-  .cc-etpl-tag-chip:hover { background: #fef3c7; border-color: #f59e0b; transform: translateY(-1px); }
+  /* SMTP Status Banner */
+  .cc-smtp-banner-wrapper { width: 100%; }
+  .cc-smtp-banner {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 14px;
+    padding: 14px 20px;
+    border-radius: 14px;
+    box-shadow: 0 2px 8px rgba(15,23,42,0.02);
+  }
+  .cc-smtp-banner.configured {
+    background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
+    border: 1px solid #a7f3d0;
+  }
+  .cc-smtp-banner.warning {
+    background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+    border: 1px solid #fde68a;
+  }
+  .cc-smtp-banner.loading {
+    background: #f8fafc;
+    border: 1px dashed #cbd5e1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: #64748b;
+  }
+  .cc-smtp-banner-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .cc-smtp-status-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .cc-smtp-status-dot.active {
+    background: #10b981;
+    box-shadow: 0 0 0 4px #d1fae5;
+  }
+  .cc-smtp-status-dot.warning {
+    background: #f59e0b;
+    box-shadow: 0 0 0 4px #fef3c7;
+  }
+  .cc-smtp-banner-title {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: #0f172a;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .cc-smtp-badge-active {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: #dcfce7;
+    color: #15803d;
+    border: 1px solid #86efac;
+  }
+  .cc-smtp-banner-sub {
+    font-size: 12px;
+    color: #475569;
+    margin-top: 3px;
+  }
+  .cc-smtp-banner-sub code {
+    background: rgba(255,255,255,0.7);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 11px;
+  }
+  .cc-smtp-banner-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .cc-smtp-btn-sm {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all .12s;
+  }
+  .cc-smtp-btn-sm.primary {
+    background: #047857;
+    color: #fff;
+  }
+  .cc-smtp-btn-sm.primary:hover {
+    background: #065f46;
+  }
+  .cc-smtp-btn-sm.ghost {
+    background: #fff;
+    color: #047857;
+    border-color: #a7f3d0;
+  }
+  .cc-smtp-btn-sm.ghost:hover {
+    background: #f0fdf4;
+  }
+  .cc-smtp-btn-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border-radius: 9px;
+    background: #d97706;
+    color: #fff;
+    border: none;
+    font-size: 12.5px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all .12s;
+  }
+  .cc-smtp-btn-action:hover {
+    background: #b45309;
+    transform: translateY(-1px);
+  }
+
+  /* Tags helper bar */
+  .cc-etpl-tags-bar {
+    background: #fffbeb;
+    border: 1px solid #fde68a;
+    border-radius: 14px;
+    padding: 14px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .cc-etpl-tags-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .cc-etpl-tags-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12.5px;
+    font-weight: 700;
+    color: #92400e;
+  }
+  .cc-etpl-tags-scroll {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+  }
+  .cc-etpl-tag-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 9px;
+    border-radius: 8px;
+    background: #ffffff;
+    border: 1px solid #fcd34d;
+    font-size: 11.5px;
+    color: #78350f;
+    cursor: pointer;
+    transition: all .15s ease;
+    user-select: none;
+  }
+  .cc-etpl-tag-chip:hover {
+    background: #fef3c7;
+    border-color: #f59e0b;
+    transform: translateY(-1px);
+  }
   .cc-etpl-tag-chip code { font-weight: 700; font-size: 11px; color: #b45309; }
   .cc-etpl-tag-chip .copy-icon { color: #d97706; opacity: 0.7; }
 
-  .cc-etpl-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; background: #fff; padding: 12px 16px; border: 1px solid #e2e8f0; border-radius: 12px; }
-  .cc-etpl-search-shell { position: relative; flex: 1 1 260px; min-width: 220px; display: flex; align-items: center; height: 40px; padding: 0 12px 0 38px; border: 1px solid #cbd5e1; border-radius: 10px; background: #fff; }
-  .cc-etpl-search-shell:focus-within { border-color: #047857; box-shadow: 0 0 0 3px rgba(4,120,87,0.12); }
-  .cc-etpl-search-shell svg { position: absolute; left: 12px; color: #94a3b8; pointer-events: none; }
-  .cc-etpl-search-shell input { flex: 1; border: 0; outline: none; background: transparent; font-size: 13px; color: #0f172a; }
-  .cc-etpl-search-clear { border: 0; background: #f1f5f9; color: #475569; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; cursor: pointer; }
-  .cc-etpl-filter-select { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: #475569; text-transform: uppercase; }
-  .cc-etpl-filter-select select { padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 10px; font-size: 13px; color: #0f172a; background: #fff; height: 40px; }
-  .cc-etpl-count-tag { margin-left: auto; font-size: 12.5px; font-weight: 700; color: #64748b; padding: 4px 10px; background: #f1f5f9; border-radius: 999px; }
+  /* Toolbar */
+  .cc-etpl-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    background: #fff;
+    padding: 12px 16px;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+  }
+  .cc-etpl-search-shell {
+    position: relative;
+    flex: 1 1 260px;
+    min-width: 220px;
+    display: flex;
+    align-items: center;
+    height: 40px;
+    padding: 0 12px 0 38px;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    background: #fff;
+  }
+  .cc-etpl-search-shell:focus-within {
+    border-color: #047857;
+    box-shadow: 0 0 0 3px rgba(4,120,87,0.12);
+  }
+  .cc-etpl-search-shell svg {
+    position: absolute;
+    left: 12px;
+    color: #94a3b8;
+    pointer-events: none;
+  }
+  .cc-etpl-search-shell input {
+    flex: 1;
+    border: 0;
+    outline: none;
+    background: transparent;
+    font-size: 13px;
+    color: #0f172a;
+  }
+  .cc-etpl-search-clear {
+    border: 0;
+    background: #f1f5f9;
+    color: #475569;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+  }
+  .cc-etpl-filter-select {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #475569;
+    text-transform: uppercase;
+  }
+  .cc-etpl-filter-select select {
+    padding: 8px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    font-size: 13px;
+    color: #0f172a;
+    background: #fff;
+    height: 40px;
+  }
+  .cc-etpl-count-tag {
+    margin-left: auto;
+    font-size: 12.5px;
+    font-weight: 700;
+    color: #64748b;
+    padding: 4px 10px;
+    background: #f1f5f9;
+    border-radius: 999px;
+  }
 
-  .cc-etpl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 16px; }
-  .cc-etpl-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 2px 8px rgba(15,23,42,0.03); transition: all .15s ease; position: relative; }
-  .cc-etpl-card:hover { border-color: #cbd5e1; box-shadow: 0 6px 16px rgba(15,23,42,0.06); }
-  .cc-etpl-card.default { border-color: #fde68a; background: linear-gradient(180deg, #fffdfa 0%, #ffffff 100%); }
+  /* Grid & Cards */
+  .cc-etpl-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+    gap: 16px;
+  }
+  .cc-etpl-card {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    box-shadow: 0 2px 8px rgba(15,23,42,0.03);
+    transition: all .15s ease;
+    position: relative;
+  }
+  .cc-etpl-card:hover {
+    border-color: #cbd5e1;
+    box-shadow: 0 6px 16px rgba(15,23,42,0.06);
+  }
+  .cc-etpl-card.default {
+    border-color: #fde68a;
+    background: linear-gradient(180deg, #fffdfa 0%, #ffffff 100%);
+  }
   
-  .cc-etpl-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
-  .cc-etpl-card-title { margin: 0; font-size: 15px; font-weight: 700; color: #0f172a; line-height: 1.35; }
-  .cc-etpl-default-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 999px; background: #fef3c7; color: #b45309; font-size: 11px; font-weight: 700; border: 1px solid #fde68a; }
-  .cc-etpl-cat-pill { display: inline-block; padding: 2px 8px; border-radius: 6px; background: #f1f5f9; color: #475569; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+  .cc-etpl-card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .cc-etpl-card-title {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 700;
+    color: #0f172a;
+    line-height: 1.35;
+  }
+  .cc-etpl-default-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: #fef3c7;
+    color: #b45309;
+    font-size: 11px;
+    font-weight: 700;
+    border: 1px solid #fde68a;
+  }
+  .cc-etpl-cat-pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: #f1f5f9;
+    color: #475569;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
 
-  .cc-etpl-card-actions { display: inline-flex; align-items: center; gap: 5px; }
-  .cc-etpl-icon-btn { width: 30px; height: 30px; border-radius: 8px; border: 1px solid #e2e8f0; background: #fff; display: grid; place-items: center; color: #475569; cursor: pointer; transition: all .12s; }
-  .cc-etpl-icon-btn:hover { color: #047857; border-color: #047857; background: #f0fdf4; }
-  .cc-etpl-icon-btn.star:hover { color: #d97706; border-color: #fde68a; background: #fef3c7; }
-  .cc-etpl-icon-btn.danger:hover { color: #dc2626; border-color: #dc2626; background: #fef2f2; }
+  .cc-etpl-card-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .cc-etpl-icon-btn {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+    background: #fff;
+    display: grid;
+    place-items: center;
+    color: #475569;
+    cursor: pointer;
+    transition: all .12s;
+  }
+  .cc-etpl-icon-btn:hover {
+    color: #047857;
+    border-color: #047857;
+    background: #f0fdf4;
+  }
+  .cc-etpl-icon-btn.star:hover {
+    color: #d97706;
+    border-color: #fde68a;
+    background: #fef3c7;
+  }
+  .cc-etpl-icon-btn.danger:hover {
+    color: #dc2626;
+    border-color: #dc2626;
+    background: #fef2f2;
+  }
 
-  .cc-etpl-subject-preview { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px; }
-  .cc-etpl-subject-lbl { display: block; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 2px; }
-  .cc-etpl-subject-text { margin: 0; font-size: 13px; font-weight: 600; color: #0f172a; word-break: break-word; }
+  .cc-etpl-subject-preview {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 10px 12px;
+  }
+  .cc-etpl-subject-lbl {
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    color: #64748b;
+    text-transform: uppercase;
+    margin-bottom: 2px;
+  }
+  .cc-etpl-subject-text {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: #0f172a;
+    word-break: break-word;
+  }
 
-  .cc-etpl-body-preview { background: #fafafa; border: 1px dashed #cbd5e1; border-radius: 10px; padding: 10px 12px; max-height: 120px; overflow-y: auto; }
-  .cc-etpl-body-text { margin: 0; font-size: 12px; font-family: inherit; color: #475569; white-space: pre-wrap; line-height: 1.5; }
+  .cc-etpl-body-preview {
+    background: #fafafa;
+    border: 1px dashed #cbd5e1;
+    border-radius: 10px;
+    padding: 10px 12px;
+    max-height: 120px;
+    overflow-y: auto;
+  }
+  .cc-etpl-body-text {
+    margin: 0;
+    font-size: 12px;
+    font-family: inherit;
+    color: #475569;
+    white-space: pre-wrap;
+    line-height: 1.5;
+  }
 
-  .cc-etpl-card-footer { margin-top: auto; display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #f1f5f9; padding-top: 10px; }
-  .cc-etpl-preview-link { border: 0; background: none; padding: 0; color: #047857; font-size: 12px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
-  .cc-etpl-preview-link:hover { text-decoration: underline; color: #065f46; }
+  .cc-etpl-card-footer {
+    margin-top: auto;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-top: 1px solid #f1f5f9;
+    padding-top: 10px;
+  }
+  .cc-etpl-preview-link {
+    border: 0;
+    background: none;
+    padding: 0;
+    color: #047857;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .cc-etpl-preview-link:hover {
+    text-decoration: underline;
+    color: #065f46;
+  }
 
-  .cc-etpl-empty-card { grid-column: 1 / -1; background: #fff; border: 1px dashed #cbd5e1; border-radius: 16px; padding: 48px 24px; text-align: center; color: #64748b; }
+  .cc-etpl-empty-card {
+    grid-column: 1 / -1;
+    background: #fff;
+    border: 1px dashed #cbd5e1;
+    border-radius: 16px;
+    padding: 48px 24px;
+    text-align: center;
+    color: #64748b;
+  }
   .cc-etpl-empty-card h3 { margin: 0; font-size: 16px; color: #0f172a; font-weight: 700; }
   .cc-etpl-empty-card p { margin: 6px auto 0; max-width: 440px; font-size: 13px; line-height: 1.5; }
 
-  .cc-etpl-overlay { position: fixed; inset: 0; background: rgba(15,23,42,0.6); z-index: 1000; display: grid; place-items: center; padding: 16px; }
-  .cc-etpl-modal { width: 100%; max-width: 740px; background: #fff; border-radius: 18px; padding: 24px; display: flex; flex-direction: column; gap: 16px; box-shadow: 0 20px 60px rgba(15,23,42,0.25); max-height: 92vh; overflow-y: auto; }
+  /* Modals */
+  .cc-etpl-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15,23,42,0.6);
+    z-index: 1000;
+    display: grid;
+    place-items: center;
+    padding: 16px;
+  }
+  .cc-etpl-modal {
+    width: 100%;
+    max-width: 740px;
+    background: #fff;
+    border-radius: 18px;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    box-shadow: 0 20px 60px rgba(15,23,42,0.25);
+    max-height: 92vh;
+    overflow-y: auto;
+  }
   .cc-etpl-modal.preview { max-width: 680px; }
+  .cc-etpl-modal.smtp-modal { max-width: 680px; }
   .cc-etpl-modal.danger-confirm { max-width: 440px; }
-  .cc-etpl-modal-head { display: flex; justify-content: space-between; align-items: flex-start; }
-  .cc-etpl-modal-close { border: 0; background: #f1f5f9; width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; cursor: pointer; color: #475569; }
+  .cc-etpl-modal-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+  .cc-etpl-modal-close {
+    border: 0;
+    background: #f1f5f9;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    color: #475569;
+  }
 
   .cc-etpl-form { display: flex; flex-direction: column; gap: 14px; }
   .cc-etpl-form-row { display: flex; gap: 12px; flex-wrap: wrap; }
-  .cc-etpl-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #475569; font-weight: 600; }
+  .cc-etpl-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+    color: #475569;
+    font-weight: 600;
+  }
   .cc-etpl-field.grow { flex: 1; min-width: 220px; }
-  .cc-etpl-field input, .cc-etpl-field select { padding: 9px 12px; border: 1px solid #cbd5e1; border-radius: 10px; font-size: 13px; color: #0f172a; background: #fff; font-family: inherit; }
-  .cc-etpl-field input:focus, .cc-etpl-field select:focus { border-color: #047857; outline: none; box-shadow: 0 0 0 3px rgba(4,120,87,0.12); }
+  .cc-etpl-field input, .cc-etpl-field select {
+    padding: 9px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    font-size: 13px;
+    color: #0f172a;
+    background: #fff;
+    font-family: inherit;
+  }
+  .cc-etpl-field input:focus, .cc-etpl-field select:focus {
+    border-color: #047857;
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(4,120,87,0.12);
+  }
 
+  .cc-input-icon-shell {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+  .cc-input-icon-shell input {
+    width: 100%;
+    padding-left: 36px !important;
+    padding-right: 38px !important;
+  }
+  .input-left-icon {
+    position: absolute;
+    left: 12px;
+    color: #94a3b8;
+    pointer-events: none;
+  }
+  .input-eye-toggle {
+    position: absolute;
+    right: 10px;
+    background: none;
+    border: none;
+    color: #64748b;
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    padding: 4px;
+  }
+  .input-eye-toggle:hover { color: #0f172a; }
+
+  .cc-saved-pwd-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: #047857;
+    font-weight: 600;
+  }
+
+  /* SMTP Specific Styles */
+  .cc-smtp-icon-box {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    background: #ecfdf5;
+    border: 1px solid #a7f3d0;
+    display: grid;
+    place-items: center;
+  }
+  .cc-smtp-service-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    background: #f1f5f9;
+    padding: 4px;
+    border-radius: 12px;
+  }
+  .cc-smtp-tab {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border-radius: 9px;
+    border: 1px solid transparent;
+    background: transparent;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: #475569;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .cc-smtp-tab.active {
+    background: #ffffff;
+    color: #0f172a;
+    border-color: #cbd5e1;
+    box-shadow: 0 2px 6px rgba(15,23,42,0.06);
+  }
+
+  .cc-smtp-guide-box {
+    background: #fffdf5;
+    border: 1px solid #fde68a;
+    border-radius: 12px;
+    padding: 14px 18px;
+  }
+  .cc-smtp-guide-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12.5px;
+    color: #92400e;
+    margin-bottom: 6px;
+  }
+  .cc-smtp-guide-steps {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 12px;
+    color: #78350f;
+    line-height: 1.6;
+  }
+  .cc-smtp-guide-steps li { margin-bottom: 3px; }
+  .cc-smtp-guide-steps code {
+    background: #fef3c7;
+    padding: 1px 4px;
+    border-radius: 4px;
+    font-weight: 700;
+  }
+  .cc-smtp-ext-link {
+    color: #047857;
+    font-weight: 700;
+    text-decoration: underline;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+  }
+
+  .cc-smtp-advanced-box {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 14px;
+  }
+  .cc-smtp-toggle-adv-btn {
+    border: 0;
+    background: none;
+    color: #4338ca;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    align-self: flex-start;
+  }
+  .cc-smtp-toggle-adv-btn:hover { text-decoration: underline; }
+
+  .cc-smtp-test-section {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .cc-smtp-test-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12.5px;
+    color: #1e293b;
+  }
+  .cc-smtp-test-input-row {
+    display: flex;
+    gap: 8px;
+  }
+  .cc-smtp-test-input {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    font-size: 12.5px;
+  }
+  .cc-smtp-test-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border-radius: 8px;
+    background: #047857;
+    color: #fff;
+    border: none;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .cc-smtp-test-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+  .cc-smtp-feedback-card {
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    line-height: 1.45;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .cc-smtp-feedback-card.success {
+    background: #ecfdf5;
+    border: 1px solid #a7f3d0;
+    color: #065f46;
+  }
+  .cc-smtp-feedback-card.error {
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    color: #991b1b;
+  }
+
+  /* Field blocks */
   .cc-etpl-field-block { display: flex; flex-direction: column; gap: 6px; }
-  .cc-etpl-field-head { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 8px; }
+  .cc-etpl-field-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
   .cc-etpl-field-title span { display: block; font-size: 12px; font-weight: 700; color: #334155; }
   .cc-etpl-field-title small { display: block; font-size: 11px; color: #64748b; font-weight: 400; }
   .cc-etpl-quick-tags { display: inline-flex; align-items: center; gap: 5px; flex-wrap: wrap; }
-  .cc-etpl-insert-btn { border: 1px dashed #cbd5e1; background: #f8fafc; padding: 2px 7px; border-radius: 6px; font-size: 11px; color: #047857; font-weight: 600; cursor: pointer; transition: all .12s; }
+  .cc-etpl-insert-btn {
+    border: 1px dashed #cbd5e1;
+    background: #f8fafc;
+    padding: 2px 7px;
+    border-radius: 6px;
+    font-size: 11px;
+    color: #047857;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all .12s;
+  }
   .cc-etpl-insert-btn:hover { background: #ecfdf5; border-color: #047857; }
 
-  .cc-etpl-field-block input, .cc-etpl-field-block textarea { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 10px; font-size: 13px; color: #0f172a; font-family: inherit; line-height: 1.5; resize: vertical; }
-  .cc-etpl-field-block input:focus, .cc-etpl-field-block textarea:focus { border-color: #047857; outline: none; box-shadow: 0 0 0 3px rgba(4,120,87,0.12); }
+  .cc-etpl-field-block input, .cc-etpl-field-block textarea {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    font-size: 13px;
+    color: #0f172a;
+    font-family: inherit;
+    line-height: 1.5;
+    resize: vertical;
+  }
+  .cc-etpl-field-block input:focus, .cc-etpl-field-block textarea:focus {
+    border-color: #047857;
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(4,120,87,0.12);
+  }
 
-  .cc-etpl-checkbox-label { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: #334155; font-weight: 500; cursor: pointer; }
+  .cc-etpl-checkbox-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: #334155;
+    font-weight: 500;
+    cursor: pointer;
+  }
   .cc-etpl-checkbox-label input { width: 16px; height: 16px; cursor: pointer; accent-color: #047857; }
 
-  .cc-email-preview-envelope { border: 1px solid #cbd5e1; border-radius: 12px; overflow: hidden; background: #fff; box-shadow: 0 4px 12px rgba(15,23,42,0.06); }
-  .cc-email-preview-headers { background: #f8fafc; border-bottom: 1px solid #e2e8f0; padding: 14px 18px; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; }
+  .cc-email-preview-envelope {
+    border: 1px solid #cbd5e1;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #fff;
+    box-shadow: 0 4px 12px rgba(15,23,42,0.06);
+  }
+  .cc-email-preview-headers {
+    background: #f8fafc;
+    border-bottom: 1px solid #e2e8f0;
+    padding: 14px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 12.5px;
+  }
   .cc-email-hdr-row { display: flex; gap: 8px; }
   .cc-email-hdr-row strong { color: #64748b; min-width: 80px; }
-  .cc-etpl-sample-att-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 6px; background: #ecfdf5; color: #047857; font-weight: 600; font-size: 11.5px; border: 1px solid #bbf7d0; }
+  .cc-etpl-sample-att-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: #ecfdf5;
+    color: #047857;
+    font-weight: 600;
+    font-size: 11.5px;
+    border: 1px solid #bbf7d0;
+  }
   .cc-email-preview-body { padding: 20px; background: #fff; max-height: 340px; overflow-y: auto; }
 
   .cc-etpl-modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px; }
-  .cc-etpl-btn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 18px; border-radius: 10px; font-size: 13px; font-weight: 600; border: 1px solid transparent; cursor: pointer; transition: all .12s; }
+  .cc-etpl-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 9px 18px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all .12s;
+  }
   .cc-etpl-btn.primary { background: #047857; color: #fff; }
   .cc-etpl-btn.primary:hover { background: #065f46; }
+  .cc-etpl-btn.secondary { background: #ffffff; color: #047857; border-color: #a7f3d0; }
+  .cc-etpl-btn.secondary:hover { background: #ecfdf5; border-color: #047857; }
   .cc-etpl-btn.primary.danger { background: #dc2626; }
   .cc-etpl-btn.primary.danger:hover { background: #b91c1c; }
   .cc-etpl-btn.ghost { background: #fff; color: #0f172a; border-color: #cbd5e1; }
