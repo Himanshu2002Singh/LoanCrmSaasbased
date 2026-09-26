@@ -313,23 +313,43 @@ export default function CasePayoutsScreen() {
     const loanAmt = item.loanAmount !== undefined && item.loanAmount !== null ? parseFloat(item.loanAmount) : 0;
     const bankPct = item.bankCommissionPercent !== undefined && item.bankCommissionPercent !== null ? parseFloat(item.bankCommissionPercent) : 2.0;
     const baseAmt = item.baseAmount !== undefined && item.baseAmount !== null ? parseFloat(item.baseAmount) : Math.round((loanAmt * bankPct) / 100);
-    const partyPct = item.partyCommissionPercent !== undefined && item.partyCommissionPercent !== null ? parseFloat(item.partyCommissionPercent) : 50.0;
-    const partyGross = item.partyCommissionDue !== undefined && item.partyCommissionDue !== null ? parseFloat(item.partyCommissionDue) : Math.round((baseAmt * partyPct) / 100);
-    const tdsPct = item.partyTdsPercent !== undefined && item.partyTdsPercent !== null ? parseFloat(item.partyTdsPercent) : 0;
-    const tdsAmt = item.partyTdsAmount !== undefined && item.partyTdsAmount !== null ? parseFloat(item.partyTdsAmount) : Math.round((partyGross * tdsPct) / 100);
-    const gstPct = item.partyGstPercent !== undefined && item.partyGstPercent !== null ? parseFloat(item.partyGstPercent) : 0;
-    const gstAmt = item.partyGstAmount !== undefined && item.partyGstAmount !== null ? parseFloat(item.partyGstAmount) : Math.round((partyGross * gstPct) / 100);
+
+    const bGstPct = item.bankGstPercent !== undefined && item.bankGstPercent !== null ? parseFloat(item.bankGstPercent) : 18;
+    const bGstAmt = item.bankGstAmount !== undefined && item.bankGstAmount !== null ? parseFloat(item.bankGstAmount) : Math.round((baseAmt * bGstPct) / 100);
+    const bTdsPct = item.bankTdsPercent !== undefined && item.bankTdsPercent !== null ? parseFloat(item.bankTdsPercent) : 5;
+    const bTdsAmt = item.bankTdsAmount !== undefined && item.bankTdsAmount !== null ? parseFloat(item.bankTdsAmount) : Math.round((baseAmt * bTdsPct) / 100);
+    const bankNet = item.bankNetReceivable !== undefined && item.bankNetReceivable !== null ? parseFloat(item.bankNetReceivable) : Math.max(0, baseAmt - bGstAmt - bTdsAmt);
+
+    const isSelfCase =
+      item.payoutType === "SELF" ||
+      (item.partyName || "").toLowerCase() === "self" ||
+      (item.partyName || "").toLowerCase() === "direct";
+
+    const pType = isSelfCase ? "SELF" : "VENDOR";
+
+    const partyPct = item.partyCommissionPercent !== undefined && item.partyCommissionPercent !== null ? parseFloat(item.partyCommissionPercent) : (isSelfCase ? 0 : 50.0);
+    const partyGross = isSelfCase ? 0 : (item.partyCommissionDue !== undefined && item.partyCommissionDue !== null ? parseFloat(item.partyCommissionDue) : Math.round((baseAmt * partyPct) / 100));
+    const tdsPct = isSelfCase ? 0 : (item.partyTdsPercent !== undefined && item.partyTdsPercent !== null ? parseFloat(item.partyTdsPercent) : 0);
+    const tdsAmt = isSelfCase ? 0 : (item.partyTdsAmount !== undefined && item.partyTdsAmount !== null ? parseFloat(item.partyTdsAmount) : Math.round((partyGross * tdsPct) / 100));
+    const gstPct = isSelfCase ? 0 : (item.partyGstPercent !== undefined && item.partyGstPercent !== null ? parseFloat(item.partyGstPercent) : 0);
+    const gstAmt = isSelfCase ? 0 : (item.partyGstAmount !== undefined && item.partyGstAmount !== null ? parseFloat(item.partyGstAmount) : Math.round((partyGross * gstPct) / 100));
     const extra = item.extraCharges !== undefined && item.extraCharges !== null ? parseFloat(item.extraCharges) : 0;
-    const netPayable = item.partyNetPayable !== undefined && item.partyNetPayable !== null ? parseFloat(item.partyNetPayable) : Math.max(0, partyGross - tdsAmt - gstAmt - extra);
+    const netPayable = isSelfCase ? 0 : (item.partyNetPayable !== undefined && item.partyNetPayable !== null ? parseFloat(item.partyNetPayable) : Math.max(0, partyGross - tdsAmt - gstAmt - extra));
+    const margin = isSelfCase ? Math.round(bankNet - extra) : Math.round(bankNet - netPayable);
 
     setEditForm({
       loanAmount: loanAmt,
       bankCommissionPercent: bankPct,
       baseAmount: baseAmt,
       disbursalDate: item.disbursalDate || "",
-      bankGstPercent: item.bankGstPercent !== undefined ? item.bankGstPercent : 18,
-      bankTdsPercent: item.bankTdsPercent !== undefined ? item.bankTdsPercent : 5,
-      partyCommissionPercent: partyPct,
+      bankGstPercent: bGstPct,
+      bankGstAmount: bGstAmt,
+      bankTdsPercent: bTdsPct,
+      bankTdsAmount: bTdsAmt,
+      bankNetReceivable: bankNet,
+      payoutType: pType,
+      partyName: isSelfCase ? "Self" : (item.partyName || "Direct"),
+      partyCommissionPercent: isSelfCase ? 0 : partyPct,
       partyCommissionDue: partyGross,
       partyTdsPercent: tdsPct,
       partyTdsAmount: tdsAmt,
@@ -337,11 +357,117 @@ export default function CasePayoutsScreen() {
       partyGstAmount: gstAmt,
       extraCharges: extra,
       partyNetPayable: netPayable,
+      netMargin: margin,
       invoiceNumber: item.invoiceNumber || "",
       invoiceDate: item.invoiceDate || "",
       notes: item.notes || "",
     });
     setEditModalOpen(true);
+  };
+
+  // Centralized real-time recalculator for edit modal
+  const recomputeEditForm = (updates) => {
+    setEditForm((prev) => {
+      const merged = { ...prev, ...updates };
+
+      const loan = parseFloat(merged.loanAmount) || 0;
+      const bankPct = parseFloat(merged.bankCommissionPercent) || 0;
+
+      // 1. Bank Gross Base Commission
+      let base = parseFloat(merged.baseAmount) || 0;
+      if (updates.loanAmount !== undefined || updates.bankCommissionPercent !== undefined || merged.baseAmount === "" || merged.baseAmount === undefined) {
+        base = Math.round((loan * bankPct) / 100);
+      } else if (updates.baseAmount !== undefined) {
+        base = parseFloat(updates.baseAmount) || 0;
+      }
+
+      // 2. Bank Deductions: GST & TDS deducted from Bank Commission
+      const bGstPct = parseFloat(merged.bankGstPercent) || 0;
+      let bGstAmt = parseFloat(merged.bankGstAmount) || 0;
+      if (updates.bankGstPercent !== undefined || updates.baseAmount !== undefined || updates.loanAmount !== undefined || updates.bankCommissionPercent !== undefined) {
+        bGstAmt = Math.round((base * bGstPct) / 100);
+      } else if (updates.bankGstAmount !== undefined) {
+        bGstAmt = parseFloat(updates.bankGstAmount) || 0;
+      }
+
+      const bTdsPct = parseFloat(merged.bankTdsPercent) || 0;
+      let bTdsAmt = parseFloat(merged.bankTdsAmount) || 0;
+      if (updates.bankTdsPercent !== undefined || updates.baseAmount !== undefined || updates.loanAmount !== undefined || updates.bankCommissionPercent !== undefined) {
+        bTdsAmt = Math.round((base * bTdsPct) / 100);
+      } else if (updates.bankTdsAmount !== undefined) {
+        bTdsAmt = parseFloat(updates.bankTdsAmount) || 0;
+      }
+
+      // Bank Net Payable/Receivable: (Bank Gross - Bank GST - Bank TDS)
+      const bankNet = Math.max(0, base - bGstAmt - bTdsAmt);
+
+      // 3. Payout Mode: SELF vs VENDOR
+      const isSelf = merged.payoutType === "SELF";
+
+      // 4. Manpower Cost:
+      const manpower = parseFloat(merged.extraCharges) || 0;
+
+      let pPct = 0;
+      let partyGross = 0;
+      let pTdsPct = 0;
+      let pTdsAmt = 0;
+      let pGstPct = 0;
+      let pGstAmt = 0;
+      let partyNet = 0;
+      let margin = 0;
+
+      if (isSelf) {
+        // SELF CASE:
+        // No vendor payout, only manpower cost is deducted from bank net inflow!
+        pPct = 0;
+        partyGross = 0;
+        pTdsPct = 0;
+        pTdsAmt = 0;
+        pGstPct = 0;
+        pGstAmt = 0;
+        partyNet = 0;
+        margin = Math.round(bankNet - manpower);
+      } else {
+        // VENDOR CASE:
+        pPct = parseFloat(merged.partyCommissionPercent) || 0;
+        partyGross = Math.round((base * pPct) / 100);
+
+        pTdsPct = parseFloat(merged.partyTdsPercent) || 0;
+        pTdsAmt = parseFloat(merged.partyTdsAmount) || 0;
+        if (updates.partyTdsPercent !== undefined || updates.partyCommissionPercent !== undefined || updates.baseAmount !== undefined || updates.loanAmount !== undefined) {
+          pTdsAmt = Math.round((partyGross * pTdsPct) / 100);
+        } else if (updates.partyTdsAmount !== undefined) {
+          pTdsAmt = parseFloat(updates.partyTdsAmount) || 0;
+        }
+
+        pGstPct = parseFloat(merged.partyGstPercent) || 0;
+        pGstAmt = parseFloat(merged.partyGstAmount) || 0;
+        if (updates.partyGstPercent !== undefined || updates.partyCommissionPercent !== undefined || updates.baseAmount !== undefined || updates.loanAmount !== undefined) {
+          pGstAmt = Math.round((partyGross * pGstPct) / 100);
+        } else if (updates.partyGstAmount !== undefined) {
+          pGstAmt = parseFloat(updates.partyGstAmount) || 0;
+        }
+
+        partyNet = Math.max(0, partyGross - pTdsAmt - pGstAmt - manpower);
+        margin = Math.round(bankNet - partyNet);
+      }
+
+      return {
+        ...merged,
+        baseAmount: base,
+        bankGstAmount: bGstAmt,
+        bankTdsAmount: bTdsAmt,
+        bankNetReceivable: bankNet,
+        partyCommissionPercent: pPct,
+        partyCommissionDue: partyGross,
+        partyTdsPercent: pTdsPct,
+        partyTdsAmount: pTdsAmt,
+        partyGstPercent: pGstPct,
+        partyGstAmount: pGstAmt,
+        partyNetPayable: partyNet,
+        netMargin: margin,
+      };
+    });
   };
 
   // Submit Rate Edit
@@ -465,32 +591,42 @@ export default function CasePayoutsScreen() {
       toast.info("No cases to export");
       return;
     }
-    const data = cases.map((c) => ({
-      "Lead ID": `#${c.leadId}`,
-      "Customer Name": c.customerName,
-      "Mobile": c.customerMobile || "—",
-      "Loan Product": c.loanProduct,
-      "Assigned Bank": c.bankName,
-      "Disbursal Date": c.disbursalDate || "—",
-      "Loan Disbursed (₹)": c.loanAmount || c.baseAmount,
-      "Bank Comm %": `${c.bankCommissionPercent}%`,
-      "Credit / Base Value (₹)": c.baseAmount,
-      "Bank Received (₹)": c.bankReceivedAmount,
-      "Bank Remaining (₹)": c.bankRemainingDue,
-      "Connector / Party": c.partyName,
-      "Party Code": c.partyCode || "—",
-      "Party Comm % (on Base)": `${c.partyCommissionPercent}%`,
-      "Gross Party Comm (₹)": c.partyCommissionDue,
-      "TDS Deducted (₹)": c.partyTdsAmount || 0,
-      "GST Deducted (₹)": c.partyGstAmount || 0,
-      "Manpower / Extra Charges (₹)": c.extraCharges || 0,
-      "Final Net Payable (₹)": c.partyNetPayable || c.partyCommissionDue,
-      "Party Paid (₹)": c.partyPaidAmount,
-      "Party Remaining (₹)": c.partyRemainingDue,
-      "Net Margin (₹)": c.netMargin,
-      "Invoice #": c.invoiceNumber || "—",
-      "Status": c.status,
-    }));
+    const data = cases.map((c) => {
+      const isSelf = c.payoutType === "SELF" || (c.partyName || "").toLowerCase() === "self" || (c.partyName || "").toLowerCase() === "direct";
+      const bGst = parseFloat(c.bankGstAmount) || Math.round(((parseFloat(c.baseAmount) || 0) * (parseFloat(c.bankGstPercent) || 0)) / 100);
+      const bTds = parseFloat(c.bankTdsAmount) || Math.round(((parseFloat(c.baseAmount) || 0) * (parseFloat(c.bankTdsPercent) || 0)) / 100);
+      const bNet = parseFloat(c.bankNetReceivable) || Math.max(0, (parseFloat(c.baseAmount) || 0) - bGst - bTds);
+      return {
+        "Lead ID": `#${c.leadId}`,
+        "Customer Name": c.customerName,
+        "Mobile": c.customerMobile || "—",
+        "Loan Product": c.loanProduct,
+        "Assigned Bank": c.bankName,
+        "Disbursal Date": c.disbursalDate || "—",
+        "Loan Disbursed (₹)": c.loanAmount || c.baseAmount,
+        "Bank Comm %": `${c.bankCommissionPercent}%`,
+        "Gross Bank Comm Base (₹)": c.baseAmount,
+        "Bank GST Deducted (₹)": bGst,
+        "Bank TDS Deducted (₹)": bTds,
+        "Bank Net Receivable (₹)": bNet,
+        "Bank Received (₹)": c.bankReceivedAmount,
+        "Bank Remaining Due (₹)": c.bankRemainingDue,
+        "Case Sourcing Type": isSelf ? "Self (In-House)" : "Vendor (Connector)",
+        "Connector / Party": isSelf ? "Self" : (c.partyName || "Direct"),
+        "Party Code": isSelf ? "—" : (c.partyCode || "—"),
+        "Party Comm % (on Base)": isSelf ? "0%" : `${c.partyCommissionPercent}%`,
+        "Gross Party Comm (₹)": isSelf ? 0 : c.partyCommissionDue,
+        "Vendor TDS Deducted (₹)": isSelf ? 0 : (c.partyTdsAmount || 0),
+        "Vendor GST Deducted (₹)": isSelf ? 0 : (c.partyGstAmount || 0),
+        "Manpower / Staff Cost (₹)": c.extraCharges || 0,
+        "Final Net Payable (₹)": isSelf ? 0 : (c.partyNetPayable || c.partyCommissionDue),
+        "Party Paid (₹)": isSelf ? 0 : c.partyPaidAmount,
+        "Party Remaining (₹)": isSelf ? 0 : c.partyRemainingDue,
+        "Net Company Margin (₹)": c.netMargin,
+        "Invoice #": c.invoiceNumber || "—",
+        "Status": c.status,
+      };
+    });
 
     // Grand total row
     data.push({
@@ -502,20 +638,24 @@ export default function CasePayoutsScreen() {
       "Disbursal Date": "—",
       "Loan Disbursed (₹)": grandTotals.totalLoanVolume || grandTotals.totalDisbursedVolume,
       "Bank Comm %": "—",
-      "Credit / Base Value (₹)": grandTotals.totalBaseAmount,
+      "Gross Bank Comm Base (₹)": grandTotals.totalBaseAmount,
+      "Bank GST Deducted (₹)": "—",
+      "Bank TDS Deducted (₹)": "—",
+      "Bank Net Receivable (₹)": grandTotals.totalBankCommissionDue,
       "Bank Received (₹)": grandTotals.totalBankReceived,
-      "Bank Remaining (₹)": grandTotals.totalBankRemainingDue,
+      "Bank Remaining Due (₹)": grandTotals.totalBankRemainingDue,
+      "Case Sourcing Type": "—",
       "Connector / Party": "—",
       "Party Code": "—",
       "Party Comm % (on Base)": "—",
       "Gross Party Comm (₹)": grandTotals.totalPartyCommissionDue,
-      "TDS Deducted (₹)": grandTotals.totalPartyTds,
-      "GST Deducted (₹)": grandTotals.totalPartyGst,
-      "Manpower / Extra Charges (₹)": grandTotals.totalExtraCharges,
+      "Vendor TDS Deducted (₹)": grandTotals.totalPartyTds,
+      "Vendor GST Deducted (₹)": grandTotals.totalPartyGst,
+      "Manpower / Staff Cost (₹)": grandTotals.totalExtraCharges,
       "Final Net Payable (₹)": grandTotals.totalPartyNetPayable,
       "Party Paid (₹)": grandTotals.totalPartyPaid,
       "Party Remaining (₹)": grandTotals.totalPartyRemainingDue,
-      "Net Margin (₹)": grandTotals.totalNetMargin,
+      "Net Company Margin (₹)": grandTotals.totalNetMargin,
       "Invoice #": "—",
       "Status": "—",
     });
@@ -902,15 +1042,15 @@ export default function CasePayoutsScreen() {
                   <th>Loan &amp; Disbursal</th>
                   <th>Loan Amount (₹)</th>
                   <th>Bank %</th>
-                  <th className="th-credit">Credit / Base Value (₹)</th>
-                  <th>Bank Rec / Due</th>
-                  <th>Vendor / Party</th>
+                  <th className="th-credit">Bank Gross Base (₹)</th>
+                  <th>Bank Deduct &amp; Net (₹)</th>
+                  <th>Vendor / Type</th>
                   <th>Vendor %</th>
-                  <th>Gross Comm (₹)</th>
-                  <th className="th-deduct">Deductions (Taxes/Charges)</th>
-                  <th className="th-net">Final Net Payable (₹)</th>
-                  <th>Vendor Paid / Due</th>
-                  <th className="th-margin">Net Margin (₹)</th>
+                  <th>Vendor Gross (₹)</th>
+                  <th className="th-deduct">Deductions (Taxes/Staff)</th>
+                  <th className="th-net">Party Net Payable (₹)</th>
+                  <th>Party Paid / Due</th>
+                  <th className="th-margin">Company Margin (₹)</th>
                   <th>Invoice / Taxes</th>
                   <th>Actions</th>
                 </tr>
@@ -931,8 +1071,23 @@ export default function CasePayoutsScreen() {
                   </tr>
                 ) : (
                   cases.map((c) => {
-                    const totalDeductions = (parseFloat(c.partyTdsAmount) || 0) + (parseFloat(c.partyGstAmount) || 0) + (parseFloat(c.extraCharges) || 0);
-                    const netPayable = parseFloat(c.partyNetPayable) || (parseFloat(c.partyCommissionDue || 0) - totalDeductions);
+                    const isSelfCase =
+                      c.payoutType === "SELF" ||
+                      (c.partyName || "").toLowerCase() === "self" ||
+                      (c.partyName || "").toLowerCase() === "direct";
+
+                    const bGstAmt = parseFloat(c.bankGstAmount) || Math.round(((parseFloat(c.baseAmount) || 0) * (parseFloat(c.bankGstPercent) || 0)) / 100);
+                    const bTdsAmt = parseFloat(c.bankTdsAmount) || Math.round(((parseFloat(c.baseAmount) || 0) * (parseFloat(c.bankTdsPercent) || 0)) / 100);
+                    const bNet = parseFloat(c.bankNetReceivable) || Math.max(0, (parseFloat(c.baseAmount) || 0) - bGstAmt - bTdsAmt);
+
+                    const totalDeductions = isSelfCase
+                      ? (parseFloat(c.extraCharges) || 0)
+                      : (parseFloat(c.partyTdsAmount) || 0) + (parseFloat(c.partyGstAmount) || 0) + (parseFloat(c.extraCharges) || 0);
+
+                    const netPayable = isSelfCase
+                      ? 0
+                      : parseFloat(c.partyNetPayable) || Math.max(0, parseFloat(c.partyCommissionDue || 0) - totalDeductions);
+
                     return (
                       <tr key={c.id}>
                         {/* 1. Lead & Customer */}
@@ -979,62 +1134,92 @@ export default function CasePayoutsScreen() {
                           </small>
                         </td>
 
-                        {/* 5. Base Amount / Incoming Credit from Bank */}
+                        {/* 5. Gross Base Amount from Bank */}
                         <td className="cell-credit">
                           <strong style={{ fontSize: 13.5, color: "#047857" }}>
                             {currencyFormatter.format(c.baseAmount)}
                           </strong>
                           <div style={{ fontSize: 10.5, color: "#059669" }}>
-                            (Bank Comm Due)
+                            Gross ({c.bankCommissionPercent}%)
                           </div>
                         </td>
 
-                        {/* 6. Bank Received & Remaining Due */}
+                        {/* 6. Bank Deduct (GST+TDS) & Net Due / Received */}
                         <td>
-                          <div style={{ fontSize: 11, color: "#059669" }}>
-                            Rec: <strong>{currencyFormatter.format(c.bankReceivedAmount)}</strong>
+                          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <span style={{ fontSize: 10, color: "#64748b" }}>Net:</span>
+                            <strong style={{ fontSize: 13, color: "#047857" }}>{currencyFormatter.format(bNet)}</strong>
                           </div>
-                          <div style={{ fontSize: 11, color: c.bankRemainingDue > 0 ? "#b45309" : "#64748b" }}>
-                            Due: <strong>{currencyFormatter.format(c.bankRemainingDue)}</strong>
+                          <div style={{ fontSize: 10, color: "#dc2626", marginTop: 1 }}>
+                            -(GST {c.bankGstPercent || 18}%: ₹{numberFormatter.format(bGstAmt)} + TDS {c.bankTdsPercent || 5}%: ₹{numberFormatter.format(bTdsAmt)})
+                          </div>
+                          <div style={{ fontSize: 10.5, marginTop: 3 }}>
+                            <span style={{ color: "#059669" }}>Rec: <strong>{currencyFormatter.format(c.bankReceivedAmount)}</strong></span>
+                            {" • "}
+                            <span style={{ color: c.bankRemainingDue > 0 ? "#b45309" : "#64748b" }}>Due: <strong>{currencyFormatter.format(c.bankRemainingDue)}</strong></span>
                           </div>
                         </td>
 
-                        {/* 7. Vendor / Connector Name */}
+                        {/* 7. Vendor / Connector / Self */}
                         <td>
-                          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                            <span className="cc-party-pill">{c.partyName || "Direct"}</span>
-                            {c.partyCode && <span className="cc-code-mini">{c.partyCode}</span>}
-                          </div>
+                          {isSelfCase ? (
+                            <span className="cc-party-pill" style={{ background: "#e0e7ff", color: "#3730a3", border: "1px solid #c7d2fe", fontWeight: 700 }}>
+                              🏢 Self Sourced
+                            </span>
+                          ) : (
+                            <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                              <span className="cc-party-pill">{c.partyName || "Direct"}</span>
+                              {c.partyCode && <span className="cc-code-mini">{c.partyCode}</span>}
+                            </div>
+                          )}
                         </td>
 
                         {/* 8. Vendor % (Applied on Base Value) */}
                         <td>
-                          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                            <span className="cc-rate-tag purple">{c.partyCommissionPercent}%</span>
-                            <button
-                              type="button"
-                              className="cc-inline-edit-btn"
-                              onClick={() => openEditModal(c)}
-                              title="Edit Vendor %"
-                            >
-                              <Edit3 size={11} />
-                            </button>
-                          </div>
-                          <small style={{ color: "#7c3aed", fontSize: 10, display: "block", marginTop: 2 }}>
-                            on Base Value
-                          </small>
+                          {isSelfCase ? (
+                            <span style={{ color: "#94a3b8", fontSize: 11 }}>—</span>
+                          ) : (
+                            <>
+                              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                <span className="cc-rate-tag purple">{c.partyCommissionPercent}%</span>
+                                <button
+                                  type="button"
+                                  className="cc-inline-edit-btn"
+                                  onClick={() => openEditModal(c)}
+                                  title="Edit Vendor %"
+                                >
+                                  <Edit3 size={11} />
+                                </button>
+                              </div>
+                              <small style={{ color: "#7c3aed", fontSize: 10, display: "block", marginTop: 2 }}>
+                                on Base Value
+                              </small>
+                            </>
+                          )}
                         </td>
 
                         {/* 9. Gross Vendor Commission */}
                         <td>
-                          <strong style={{ fontSize: 13, color: "#7c3aed" }}>
-                            {currencyFormatter.format(c.partyCommissionDue)}
-                          </strong>
+                          {isSelfCase ? (
+                            <span style={{ color: "#94a3b8", fontSize: 11 }}>₹0 (Self)</span>
+                          ) : (
+                            <strong style={{ fontSize: 13, color: "#7c3aed" }}>
+                              {currencyFormatter.format(c.partyCommissionDue)}
+                            </strong>
+                          )}
                         </td>
 
                         {/* 10. Deductions (TDS, GST, Manpower) */}
                         <td className="cell-deduct">
-                          {totalDeductions > 0 ? (
+                          {isSelfCase ? (
+                            parseFloat(c.extraCharges) > 0 ? (
+                              <div style={{ fontSize: 11, color: "#d97706", fontWeight: 700 }}>
+                                - Manpower: {currencyFormatter.format(c.extraCharges)}
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: 11, color: "#94a3b8" }}>₹0 Deductions</span>
+                            )
+                          ) : totalDeductions > 0 ? (
                             <div style={{ fontSize: 11, lineHeight: "1.3" }}>
                               {parseFloat(c.partyTdsAmount) > 0 && (
                                 <div style={{ color: "#dc2626" }}>
@@ -1062,36 +1247,51 @@ export default function CasePayoutsScreen() {
 
                         {/* 11. Final Net Payable to Vendor */}
                         <td className="cell-net">
-                          <strong style={{ fontSize: 13.5, color: "#6d28d9" }}>
-                            {currencyFormatter.format(netPayable)}
-                          </strong>
-                          <div style={{ fontSize: 10, color: "#7c3aed" }}>
-                            (Net Outflow)
-                          </div>
+                          {isSelfCase ? (
+                            <div>
+                              <strong style={{ fontSize: 13, color: "#059669" }}>₹0</strong>
+                              <div style={{ fontSize: 10, color: "#64748b" }}>(100% to Company)</div>
+                            </div>
+                          ) : (
+                            <div>
+                              <strong style={{ fontSize: 13.5, color: "#6d28d9" }}>
+                                {currencyFormatter.format(netPayable)}
+                              </strong>
+                              <div style={{ fontSize: 10, color: "#7c3aed" }}>
+                                (Net Outflow)
+                              </div>
+                            </div>
+                          )}
                         </td>
 
                         {/* 12. Vendor Paid & Remaining Due */}
                         <td>
-                          <div style={{ fontSize: 11, color: "#059669" }}>
-                            Paid: <strong>{currencyFormatter.format(c.partyPaidAmount)}</strong>
-                          </div>
-                          <div style={{ fontSize: 11, color: c.partyRemainingDue > 0 ? "#b45309" : "#64748b" }}>
-                            Due: <strong>{currencyFormatter.format(c.partyRemainingDue)}</strong>
-                          </div>
+                          {isSelfCase ? (
+                            <span style={{ color: "#94a3b8", fontSize: 11 }}>N/A (Self)</span>
+                          ) : (
+                            <div>
+                              <div style={{ fontSize: 11, color: "#059669" }}>
+                                Paid: <strong>{currencyFormatter.format(c.partyPaidAmount)}</strong>
+                              </div>
+                              <div style={{ fontSize: 11, color: c.partyRemainingDue > 0 ? "#b45309" : "#64748b" }}>
+                                Due: <strong>{currencyFormatter.format(c.partyRemainingDue)}</strong>
+                              </div>
+                            </div>
+                          )}
                         </td>
 
                         {/* 13. Net Company Margin */}
                         <td className="cell-margin">
                           <strong
                             style={{
-                              fontSize: 13,
-                              color: c.netMargin >= 0 ? "#0284c7" : "#dc2626",
+                              fontSize: 13.5,
+                              color: c.netMargin >= 0 ? "#047857" : "#dc2626",
                             }}
                           >
                             {currencyFormatter.format(c.netMargin)}
                           </strong>
-                          <small style={{ display: "block", color: "#64748b", fontSize: 10 }}>
-                            Spread Profit
+                          <small style={{ display: "block", color: isSelfCase ? "#047857" : "#64748b", fontSize: 10 }}>
+                            {isSelfCase ? "Net Inflow − Manpower" : "Spread Profit"}
                           </small>
                         </td>
 
@@ -1112,7 +1312,7 @@ export default function CasePayoutsScreen() {
                               type="button"
                               className="cc-action-btn edit"
                               onClick={() => openEditModal(c)}
-                              title="Edit Bank %, Base Value, Vendor % & Deductions"
+                              title="Edit Bank %, Base Value, Deductions & Manpower"
                             >
                               <Sliders size={12} /> Edit
                             </button>
@@ -1124,14 +1324,16 @@ export default function CasePayoutsScreen() {
                             >
                               + Bank Rec
                             </button>
-                            <button
-                              type="button"
-                              className="cc-action-btn pay"
-                              onClick={() => openPartyPayoutModal(c)}
-                              title="Record commission payout to Connector"
-                            >
-                              + Pay Party
-                            </button>
+                            {!isSelfCase && (
+                              <button
+                                type="button"
+                                className="cc-action-btn pay"
+                                onClick={() => openPartyPayoutModal(c)}
+                                title="Record commission payout to Connector"
+                              >
+                                + Pay Party
+                              </button>
+                            )}
                             <button
                               type="button"
                               className="cc-action-btn invoice"
@@ -1166,14 +1368,17 @@ export default function CasePayoutsScreen() {
                     <td>—</td>
                     <td className="cell-credit">
                       <strong style={{ color: "#047857", fontSize: 13.5 }}>
-                        {currencyFormatter.format(grandTotals.totalBaseAmount || grandTotals.totalBankCommissionDue)}
+                        {currencyFormatter.format(grandTotals.totalBaseAmount)}
                       </strong>
                     </td>
                     <td>
                       <div style={{ fontSize: 11 }}>
+                        Net Due: {currencyFormatter.format(grandTotals.totalBankCommissionDue)}
+                      </div>
+                      <div style={{ fontSize: 10.5, color: "#059669" }}>
                         Rec: {currencyFormatter.format(grandTotals.totalBankReceived)}
                       </div>
-                      <div style={{ color: "#b45309", fontWeight: 700 }}>
+                      <div style={{ color: "#b45309", fontWeight: 700, fontSize: 11 }}>
                         Due: {currencyFormatter.format(grandTotals.totalBankRemainingDue)}
                       </div>
                     </td>
@@ -1191,7 +1396,7 @@ export default function CasePayoutsScreen() {
                     </td>
                     <td className="cell-net">
                       <strong style={{ color: "#6d28d9", fontSize: 13.5 }}>
-                        {currencyFormatter.format(grandTotals.totalPartyNetPayable || grandTotals.totalPartyCommissionDue)}
+                        {currencyFormatter.format(grandTotals.totalPartyNetPayable)}
                       </strong>
                     </td>
                     <td>
@@ -1688,13 +1893,78 @@ export default function CasePayoutsScreen() {
             </div>
 
             <form onSubmit={handleEditSubmit} className="cc-modal-form">
-              {/* SECTION 1: LOAN & BANK CREDIT VALUE */}
-              <div style={{ background: "#f0fdf4", padding: "14px", borderRadius: 8, border: "1px solid #bbf7d0" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
-                  <Building2 size={16} color="#166534" />
-                  <strong style={{ fontSize: 13, color: "#166534" }}>
-                    Bank Inflow: Loan Amount &amp; Credit Base ({editingCase.bankName})
-                  </strong>
+              {/* TOP SEGMENTED SWITCHER: SELF / DIRECT VS VENDOR / CONNECTOR */}
+              <div style={{ display: "flex", gap: 10, background: "#f1f5f9", padding: "6px", borderRadius: 10, marginBottom: 4 }}>
+                <button
+                  type="button"
+                  style={{
+                    flex: 1,
+                    padding: "9px 12px",
+                    borderRadius: 8,
+                    fontWeight: 700,
+                    fontSize: 12.5,
+                    border: "1px solid",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                    background: editForm.payoutType === "SELF" ? "#4f46e5" : "transparent",
+                    color: editForm.payoutType === "SELF" ? "#fff" : "#475569",
+                    borderColor: editForm.payoutType === "SELF" ? "#4338ca" : "transparent",
+                    boxShadow: editForm.payoutType === "SELF" ? "0 2px 4px rgba(79,70,229,0.25)" : "none",
+                    transition: "all 0.15s",
+                  }}
+                  onClick={() => recomputeEditForm({ payoutType: "SELF", partyName: "Self" })}
+                >
+                  <Building2 size={15} /> 🏢 Self / In-House Case
+                </button>
+                <button
+                  type="button"
+                  style={{
+                    flex: 1,
+                    padding: "9px 12px",
+                    borderRadius: 8,
+                    fontWeight: 700,
+                    fontSize: 12.5,
+                    border: "1px solid",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                    background: editForm.payoutType === "VENDOR" ? "#7c3aed" : "transparent",
+                    color: editForm.payoutType === "VENDOR" ? "#fff" : "#475569",
+                    borderColor: editForm.payoutType === "VENDOR" ? "#6d28d9" : "transparent",
+                    boxShadow: editForm.payoutType === "VENDOR" ? "0 2px 4px rgba(124,58,237,0.25)" : "none",
+                    transition: "all 0.15s",
+                  }}
+                  onClick={() =>
+                    recomputeEditForm({
+                      payoutType: "VENDOR",
+                      partyName:
+                        editingCase.partyName && editingCase.partyName.toLowerCase() !== "self"
+                          ? editingCase.partyName
+                          : "Channel Partner",
+                    })
+                  }
+                >
+                  <Wallet size={15} /> 🤝 Vendor / Connector Case
+                </button>
+              </div>
+
+              {/* SECTION 1: BANK INFLOW & BANK DEDUCTIONS */}
+              <div style={{ background: "#f0fdf4", padding: "14px", borderRadius: 10, border: "1px solid #bbf7d0" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <Building2 size={16} color="#166534" />
+                    <strong style={{ fontSize: 13, color: "#166534" }}>
+                      1. Bank Commission Inflow ({editingCase.bankName})
+                    </strong>
+                  </div>
+                  <span style={{ fontSize: 11, color: "#15803d", fontWeight: 600 }}>
+                    Bank comm me se GST &amp; TDS cut hokar net receivable aayega
+                  </span>
                 </div>
 
                 <div className="cc-form-row" style={{ gridTemplateColumns: "1.2fr 0.8fr 1.2fr" }}>
@@ -1706,28 +1976,7 @@ export default function CasePayoutsScreen() {
                       min="1"
                       required
                       value={editForm.loanAmount}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        const loan = parseFloat(val) || 0;
-                        const bPct = parseFloat(editForm.bankCommissionPercent) || 0;
-                        const newBase = Math.round((loan * bPct) / 100);
-                        const pPct = parseFloat(editForm.partyCommissionPercent) || 0;
-                        const grossParty = Math.round((newBase * pPct) / 100);
-                        const tds = Math.round((grossParty * (parseFloat(editForm.partyTdsPercent) || 0)) / 100);
-                        const gst = Math.round((grossParty * (parseFloat(editForm.partyGstPercent) || 0)) / 100);
-                        const extra = parseFloat(editForm.extraCharges) || 0;
-                        const net = Math.max(0, grossParty - tds - gst - extra);
-
-                        setEditForm((prev) => ({
-                          ...prev,
-                          loanAmount: val,
-                          baseAmount: newBase,
-                          partyCommissionDue: grossParty,
-                          partyTdsAmount: tds,
-                          partyGstAmount: gst,
-                          partyNetPayable: net,
-                        }));
-                      }}
+                      onChange={(e) => recomputeEditForm({ loanAmount: e.target.value })}
                     />
                   </div>
 
@@ -1740,33 +1989,12 @@ export default function CasePayoutsScreen() {
                       max="100"
                       required
                       value={editForm.bankCommissionPercent}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        const bPct = parseFloat(val) || 0;
-                        const loan = parseFloat(editForm.loanAmount) || 0;
-                        const newBase = Math.round((loan * bPct) / 100);
-                        const pPct = parseFloat(editForm.partyCommissionPercent) || 0;
-                        const grossParty = Math.round((newBase * pPct) / 100);
-                        const tds = Math.round((grossParty * (parseFloat(editForm.partyTdsPercent) || 0)) / 100);
-                        const gst = Math.round((grossParty * (parseFloat(editForm.partyGstPercent) || 0)) / 100);
-                        const extra = parseFloat(editForm.extraCharges) || 0;
-                        const net = Math.max(0, grossParty - tds - gst - extra);
-
-                        setEditForm((prev) => ({
-                          ...prev,
-                          bankCommissionPercent: val,
-                          baseAmount: newBase,
-                          partyCommissionDue: grossParty,
-                          partyTdsAmount: tds,
-                          partyGstAmount: gst,
-                          partyNetPayable: net,
-                        }));
-                      }}
+                      onChange={(e) => recomputeEditForm({ bankCommissionPercent: e.target.value })}
                     />
                   </div>
 
                   <div className="cc-fgroup">
-                    <label>Credit Base Amount (₹) *</label>
+                    <label>Gross Bank Comm Base (₹) *</label>
                     <input
                       type="number"
                       step="0.01"
@@ -1774,246 +2002,317 @@ export default function CasePayoutsScreen() {
                       required
                       style={{ fontWeight: 700, color: "#047857" }}
                       value={editForm.baseAmount}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        const newBase = parseFloat(val) || 0;
-                        const pPct = parseFloat(editForm.partyCommissionPercent) || 0;
-                        const grossParty = Math.round((newBase * pPct) / 100);
-                        const tds = Math.round((grossParty * (parseFloat(editForm.partyTdsPercent) || 0)) / 100);
-                        const gst = Math.round((grossParty * (parseFloat(editForm.partyGstPercent) || 0)) / 100);
-                        const extra = parseFloat(editForm.extraCharges) || 0;
-                        const net = Math.max(0, grossParty - tds - gst - extra);
-
-                        setEditForm((prev) => ({
-                          ...prev,
-                          baseAmount: val,
-                          partyCommissionDue: grossParty,
-                          partyTdsAmount: tds,
-                          partyGstAmount: gst,
-                          partyNetPayable: net,
-                        }));
-                      }}
+                      onChange={(e) => recomputeEditForm({ baseAmount: e.target.value })}
                     />
+                    <small style={{ color: "#64748b", fontSize: 10 }}>Calculated: Loan × Bank Comm %</small>
                   </div>
                 </div>
 
-                <div className="cc-form-row" style={{ gridTemplateColumns: "1fr 1fr 1fr", marginTop: 8 }}>
-                  <div className="cc-fgroup">
-                    <label>Disbursal Date</label>
-                    <input
-                      type="date"
-                      value={editForm.disbursalDate}
-                      onChange={(e) => setEditForm((prev) => ({ ...prev, disbursalDate: e.target.value }))}
-                    />
-                  </div>
-                  <div className="cc-fgroup">
-                    <label>Bank GST %</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={editForm.bankGstPercent}
-                      onChange={(e) => setEditForm((prev) => ({ ...prev, bankGstPercent: e.target.value }))}
-                    />
-                  </div>
-                  <div className="cc-fgroup">
-                    <label>Bank TDS %</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={editForm.bankTdsPercent}
-                      onChange={(e) => setEditForm((prev) => ({ ...prev, bankTdsPercent: e.target.value }))}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* SECTION 2: VENDOR COMMISSION & DEDUCTIONS */}
-              <div style={{ background: "#f5f3ff", padding: "14px", borderRadius: 8, border: "1px solid #ddd6fe" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
-                  <Wallet size={16} color="#5b21b6" />
-                  <strong style={{ fontSize: 13, color: "#5b21b6" }}>
-                    Vendor Commission &amp; Deductions ({editingCase.partyName})
-                  </strong>
-                </div>
-
-                <div className="cc-form-row" style={{ gridTemplateColumns: "1fr 1fr" }}>
-                  <div className="cc-fgroup">
-                    <label>Vendor Comm % (Applied on Base Value) *</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max="100"
-                      required
-                      value={editForm.partyCommissionPercent}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        const pPct = parseFloat(val) || 0;
-                        const base = parseFloat(editForm.baseAmount) || 0;
-                        const grossParty = Math.round((base * pPct) / 100);
-                        const tds = Math.round((grossParty * (parseFloat(editForm.partyTdsPercent) || 0)) / 100);
-                        const gst = Math.round((grossParty * (parseFloat(editForm.partyGstPercent) || 0)) / 100);
-                        const extra = parseFloat(editForm.extraCharges) || 0;
-                        const net = Math.max(0, grossParty - tds - gst - extra);
-
-                        setEditForm((prev) => ({
-                          ...prev,
-                          partyCommissionPercent: val,
-                          partyCommissionDue: grossParty,
-                          partyTdsAmount: tds,
-                          partyGstAmount: gst,
-                          partyNetPayable: net,
-                        }));
-                      }}
-                    />
-                  </div>
-
-                  <div className="cc-fgroup">
-                    <label>Gross Vendor Comm (₹)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      readOnly
-                      style={{ background: "#ede9fe", fontWeight: 700, color: "#6d28d9" }}
-                      value={editForm.partyCommissionDue}
-                    />
-                  </div>
-                </div>
-
-                {/* DEDUCTIONS ROW: TDS, GST, MANPOWER */}
-                <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed #c4b5fd" }}>
-                  <span style={{ fontSize: 11.5, fontWeight: 700, color: "#6b21a8", display: "block", marginBottom: 6 }}>
-                    Deductions (Subtracted from Vendor Payout):
+                {/* Bank Deductions Row: GST & TDS */}
+                <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed #86efac" }}>
+                  <span style={{ fontSize: 11.5, fontWeight: 700, color: "#166534", display: "block", marginBottom: 6 }}>
+                    Bank Deductions (Deducted directly from Bank Gross Commission):
                   </span>
-
-                  <div className="cc-form-row" style={{ gridTemplateColumns: "1fr 1fr 1.2fr" }}>
+                  <div className="cc-form-row" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
                     <div className="cc-fgroup">
-                      <label>TDS % on Vendor</label>
+                      <label>Bank GST %</label>
                       <input
                         type="number"
                         step="0.01"
-                        min="0"
-                        placeholder="0%"
-                        value={editForm.partyTdsPercent}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          const tPct = parseFloat(val) || 0;
-                          const gross = parseFloat(editForm.partyCommissionDue) || 0;
-                          const newTdsAmt = Math.round((gross * tPct) / 100);
-                          const gstAmt = parseFloat(editForm.partyGstAmount) || 0;
-                          const extra = parseFloat(editForm.extraCharges) || 0;
-                          const net = Math.max(0, gross - newTdsAmt - gstAmt - extra);
-
-                          setEditForm((prev) => ({
-                            ...prev,
-                            partyTdsPercent: val,
-                            partyTdsAmount: newTdsAmt,
-                            partyNetPayable: net,
-                          }));
-                        }}
+                        value={editForm.bankGstPercent}
+                        onChange={(e) => recomputeEditForm({ bankGstPercent: e.target.value })}
                       />
-                      <small style={{ color: "#64748b", fontSize: 10 }}>
-                        Amt: ₹{numberFormatter.format(editForm.partyTdsAmount || 0)}
+                      <small style={{ color: "#dc2626", fontSize: 10.5, fontWeight: 600 }}>
+                        - GST: ₹{numberFormatter.format(editForm.bankGstAmount || 0)}
                       </small>
                     </div>
 
                     <div className="cc-fgroup">
-                      <label>GST % on Vendor</label>
+                      <label>Bank TDS %</label>
                       <input
                         type="number"
                         step="0.01"
-                        min="0"
-                        placeholder="0%"
-                        value={editForm.partyGstPercent}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          const gPct = parseFloat(val) || 0;
-                          const gross = parseFloat(editForm.partyCommissionDue) || 0;
-                          const newGstAmt = Math.round((gross * gPct) / 100);
-                          const tdsAmt = parseFloat(editForm.partyTdsAmount) || 0;
-                          const extra = parseFloat(editForm.extraCharges) || 0;
-                          const net = Math.max(0, gross - tdsAmt - newGstAmt - extra);
-
-                          setEditForm((prev) => ({
-                            ...prev,
-                            partyGstPercent: val,
-                            partyGstAmount: newGstAmt,
-                            partyNetPayable: net,
-                          }));
-                        }}
+                        value={editForm.bankTdsPercent}
+                        onChange={(e) => recomputeEditForm({ bankTdsPercent: e.target.value })}
                       />
-                      <small style={{ color: "#64748b", fontSize: 10 }}>
-                        Amt: ₹{numberFormatter.format(editForm.partyGstAmount || 0)}
+                      <small style={{ color: "#dc2626", fontSize: 10.5, fontWeight: 600 }}>
+                        - TDS: ₹{numberFormatter.format(editForm.bankTdsAmount || 0)}
                       </small>
                     </div>
 
                     <div className="cc-fgroup">
-                      <label>Manpower / Employee Incentive (₹)</label>
+                      <label>Disbursal Date</label>
                       <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        placeholder="₹0"
-                        value={editForm.extraCharges}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          const extra = parseFloat(val) || 0;
-                          const gross = parseFloat(editForm.partyCommissionDue) || 0;
-                          const tdsAmt = parseFloat(editForm.partyTdsAmount) || 0;
-                          const gstAmt = parseFloat(editForm.partyGstAmount) || 0;
-                          const net = Math.max(0, gross - tdsAmt - gstAmt - extra);
-
-                          setEditForm((prev) => ({
-                            ...prev,
-                            extraCharges: val,
-                            partyNetPayable: net,
-                          }));
-                        }}
+                        type="date"
+                        value={editForm.disbursalDate}
+                        onChange={(e) => recomputeEditForm({ disbursalDate: e.target.value })}
                       />
-                      <small style={{ color: "#b45309", fontSize: 10 }}>
-                        Incentive to working employee (deducted from party payout)
-                      </small>
                     </div>
+                  </div>
+                </div>
+
+                {/* Bank Net Payable Highlight Box */}
+                <div
+                  style={{
+                    marginTop: 12,
+                    padding: "10px 14px",
+                    background: "#dcfce7",
+                    border: "1.5px solid #86efac",
+                    borderRadius: 8,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    flexWrap: "wrap",
+                    gap: 8,
+                  }}
+                >
+                  <div>
+                    <span style={{ fontSize: 11, color: "#166534", fontWeight: 700, display: "block" }}>
+                      BANK NET PAYABLE / RECEIVABLE AMOUNT:
+                    </span>
+                    <span style={{ fontSize: 11, color: "#15803d" }}>
+                      Gross ₹{numberFormatter.format(editForm.baseAmount || 0)} − Bank GST ₹{numberFormatter.format(editForm.bankGstAmount || 0)} − Bank TDS ₹{numberFormatter.format(editForm.bankTdsAmount || 0)}
+                    </span>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <strong style={{ fontSize: 18, color: "#047857" }}>
+                      {currencyFormatter.format(editForm.bankNetReceivable || 0)}
+                    </strong>
+                    <div style={{ fontSize: 10, color: "#166534" }}>Actual Net Inflow from Bank</div>
                   </div>
                 </div>
               </div>
 
-              {/* SECTION 3: LIVE REAL-TIME BREAKDOWN */}
-              <div className="cc-calc-preview">
+              {/* SECTION 2: SELF / IN-HOUSE CASE VS VENDOR CASE */}
+              {editForm.payoutType === "SELF" ? (
+                /* SELF CASE */
+                <div style={{ background: "#eef2ff", padding: "14px", borderRadius: 10, border: "1.5px solid #c7d2fe" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                    <Building2 size={16} color="#3730a3" />
+                    <strong style={{ fontSize: 13, color: "#3730a3" }}>
+                      2. Self / In-House Case: Manpower Cost &amp; Company Margin
+                    </strong>
+                  </div>
+
+                  <div
+                    style={{
+                      background: "#fff",
+                      border: "1px solid #c7d2fe",
+                      borderRadius: 8,
+                      padding: "10px 12px",
+                      marginBottom: 12,
+                      fontSize: 12,
+                      color: "#3730a3",
+                      lineHeight: "1.4",
+                    }}
+                  >
+                    🏢 <strong>Direct In-House Lead:</strong> Is case me koi external vendor commission nahi hai. 
+                    Kewal <strong>Manpower Cost (Staff Incentive)</strong> deduct hoga aur bacha hua saara amount 
+                    company ka hi net margin hoga.
+                  </div>
+
+                  <div className="cc-form-row" style={{ gridTemplateColumns: "1fr 1fr" }}>
+                    <div className="cc-fgroup">
+                      <label style={{ color: "#3730a3", fontWeight: 700 }}>
+                        Manpower / Staff Processing Cost (₹) *
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder="e.g. 500 or 1000"
+                        style={{ borderColor: "#a5b4fc", fontWeight: 700, color: "#b45309" }}
+                        value={editForm.extraCharges}
+                        onChange={(e) => recomputeEditForm({ extraCharges: e.target.value })}
+                      />
+                      <small style={{ color: "#64748b", fontSize: 10.5 }}>
+                        File process karne wale staff ka incentive / operational manpower cost.
+                      </small>
+                    </div>
+
+                    <div className="cc-fgroup">
+                      <label style={{ color: "#166534", fontWeight: 700 }}>Company Net Profit Margin (₹)</label>
+                      <input
+                        type="text"
+                        readOnly
+                        style={{
+                          background: "#ecfdf5",
+                          borderColor: "#86efac",
+                          fontWeight: 800,
+                          fontSize: 15,
+                          color: "#047857",
+                        }}
+                        value={currencyFormatter.format(editForm.netMargin || 0)}
+                      />
+                      <small style={{ color: "#047857", fontSize: 10.5, fontWeight: 600 }}>
+                        = Bank Net Inflow (₹{numberFormatter.format(editForm.bankNetReceivable || 0)}) − Manpower (₹{numberFormatter.format(editForm.extraCharges || 0)})
+                      </small>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* VENDOR / CONNECTOR CASE */
+                <div style={{ background: "#f5f3ff", padding: "14px", borderRadius: 10, border: "1px solid #ddd6fe" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <Wallet size={16} color="#5b21b6" />
+                      <strong style={{ fontSize: 13, color: "#5b21b6" }}>
+                        2. Vendor Commission, Deductions &amp; Manpower
+                      </strong>
+                    </div>
+                    <span style={{ fontSize: 11, color: "#6d28d9", fontWeight: 600 }}>
+                      Vendor payment me se GST, TDS aur Manpower cut hoga
+                    </span>
+                  </div>
+
+                  <div className="cc-form-row" style={{ gridTemplateColumns: "1.2fr 0.8fr 1fr" }}>
+                    <div className="cc-fgroup">
+                      <label>Vendor / Connector Name</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Ramesh DSA"
+                        value={editForm.partyName}
+                        onChange={(e) => recomputeEditForm({ partyName: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="cc-fgroup">
+                      <label>Vendor Comm % *</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        max="100"
+                        required
+                        value={editForm.partyCommissionPercent}
+                        onChange={(e) => recomputeEditForm({ partyCommissionPercent: e.target.value })}
+                      />
+                      <small style={{ color: "#64748b", fontSize: 10 }}>on Base Value</small>
+                    </div>
+
+                    <div className="cc-fgroup">
+                      <label>Gross Vendor Comm (₹)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        readOnly
+                        style={{ background: "#ede9fe", fontWeight: 700, color: "#6d28d9" }}
+                        value={editForm.partyCommissionDue}
+                      />
+                    </div>
+                  </div>
+
+                  {/* DEDUCTIONS ROW: TDS, GST, MANPOWER */}
+                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed #c4b5fd" }}>
+                    <span style={{ fontSize: 11.5, fontWeight: 700, color: "#6b21a8", display: "block", marginBottom: 6 }}>
+                      Vendor Deductions (Vendor payment me se cut hone wale charges):
+                    </span>
+
+                    <div className="cc-form-row" style={{ gridTemplateColumns: "1fr 1fr 1.2fr" }}>
+                      <div className="cc-fgroup">
+                        <label>Vendor TDS %</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0%"
+                          value={editForm.partyTdsPercent}
+                          onChange={(e) => recomputeEditForm({ partyTdsPercent: e.target.value })}
+                        />
+                        <small style={{ color: "#dc2626", fontSize: 10.5, fontWeight: 600 }}>
+                          - TDS: ₹{numberFormatter.format(editForm.partyTdsAmount || 0)}
+                        </small>
+                      </div>
+
+                      <div className="cc-fgroup">
+                        <label>Vendor GST %</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0%"
+                          value={editForm.partyGstPercent}
+                          onChange={(e) => recomputeEditForm({ partyGstPercent: e.target.value })}
+                        />
+                        <small style={{ color: "#dc2626", fontSize: 10.5, fontWeight: 600 }}>
+                          - GST: ₹{numberFormatter.format(editForm.partyGstAmount || 0)}
+                        </small>
+                      </div>
+
+                      <div className="cc-fgroup">
+                        <label>Manpower Cost / Incentive (₹)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="₹0"
+                          value={editForm.extraCharges}
+                          onChange={(e) => recomputeEditForm({ extraCharges: e.target.value })}
+                        />
+                        <small style={{ color: "#d97706", fontSize: 10.5, fontWeight: 600 }}>
+                          - Manpower: ₹{numberFormatter.format(editForm.extraCharges || 0)}
+                        </small>
+                      </div>
+                    </div>
+
+                    {/* Vendor Net Highlight Box */}
+                    <div
+                      style={{
+                        marginTop: 10,
+                        padding: "8px 12px",
+                        background: "#ede9fe",
+                        border: "1px solid #c4b5fd",
+                        borderRadius: 6,
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <span style={{ fontSize: 11.5, color: "#5b21b6", fontWeight: 600 }}>
+                        Vendor Final Net Payable:
+                      </span>
+                      <strong style={{ fontSize: 15, color: "#6d28d9" }}>
+                        {currencyFormatter.format(editForm.partyNetPayable || 0)}
+                      </strong>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* SECTION 3: LIVE REAL-TIME FINANCIAL SUMMARY STRIP */}
+              <div className="cc-calc-preview" style={{ background: "#f8fafc", padding: "12px", borderRadius: 8 }}>
                 <div>
-                  <small>Credit Base (Bank Comm)</small>
+                  <small>Bank Gross Base</small>
                   <strong style={{ color: "#047857" }}>
                     {currencyFormatter.format(parseFloat(editForm.baseAmount) || 0)}
                   </strong>
                 </div>
                 <div>
-                  <small>Gross Vendor Comm</small>
-                  <strong style={{ color: "#7c3aed" }}>
-                    {currencyFormatter.format(parseFloat(editForm.partyCommissionDue) || 0)}
-                  </strong>
-                </div>
-                <div>
-                  <small>Total Deductions</small>
+                  <small>Bank Deduct (GST+TDS)</small>
                   <strong style={{ color: "#dc2626" }}>
                     -{currencyFormatter.format(
-                      (parseFloat(editForm.partyTdsAmount) || 0) +
-                        (parseFloat(editForm.partyGstAmount) || 0) +
-                        (parseFloat(editForm.extraCharges) || 0)
+                      (parseFloat(editForm.bankGstAmount) || 0) + (parseFloat(editForm.bankTdsAmount) || 0)
                     )}
                   </strong>
                 </div>
                 <div>
-                  <small>Final Net Payable</small>
-                  <strong style={{ color: "#6d28d9", fontSize: 14 }}>
-                    {currencyFormatter.format(parseFloat(editForm.partyNetPayable) || 0)}
+                  <small>Bank Net Inflow</small>
+                  <strong style={{ color: "#047857", fontSize: 13 }}>
+                    {currencyFormatter.format(parseFloat(editForm.bankNetReceivable) || 0)}
+                  </strong>
+                </div>
+                <div>
+                  <small>{editForm.payoutType === "SELF" ? "Manpower Cost" : "Vendor Net Outflow"}</small>
+                  <strong style={{ color: editForm.payoutType === "SELF" ? "#d97706" : "#6d28d9" }}>
+                    {editForm.payoutType === "SELF"
+                      ? `-${currencyFormatter.format(parseFloat(editForm.extraCharges) || 0)}`
+                      : currencyFormatter.format(parseFloat(editForm.partyNetPayable) || 0)}
                   </strong>
                 </div>
                 <div>
                   <small>Company Margin</small>
-                  <strong style={{ color: "#0284c7", fontSize: 14 }}>
-                    {currencyFormatter.format(
-                      (parseFloat(editForm.baseAmount) || 0) - (parseFloat(editForm.partyNetPayable) || 0)
-                    )}
+                  <strong style={{ color: "#047857", fontSize: 14 }}>
+                    {currencyFormatter.format(parseFloat(editForm.netMargin) || 0)}
                   </strong>
                 </div>
               </div>
@@ -2058,7 +2357,7 @@ export default function CasePayoutsScreen() {
                   Cancel
                 </button>
                 <button type="submit" className="cc-pbtn primary" disabled={savingEdit}>
-                  {savingEdit ? "Updating..." : "Save Rates & Deductions"}
+                  {savingEdit ? "Updating..." : "Save Rates, Deductions & Payout"}
                 </button>
               </div>
             </form>

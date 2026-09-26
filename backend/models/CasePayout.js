@@ -111,11 +111,32 @@ const CasePayout = sequelize.define(
       defaultValue: 18.0,
       field: "bank_gst_percent",
     },
+    bankGstAmount: {
+      type: DataTypes.DECIMAL(15, 2),
+      allowNull: false,
+      defaultValue: 0.0,
+      field: "bank_gst_amount",
+      comment: "GST amount deducted or applicable on bank commission",
+    },
     bankTdsPercent: {
       type: DataTypes.DECIMAL(5, 2),
       allowNull: false,
       defaultValue: 5.0,
       field: "bank_tds_percent",
+    },
+    bankTdsAmount: {
+      type: DataTypes.DECIMAL(15, 2),
+      allowNull: false,
+      defaultValue: 0.0,
+      field: "bank_tds_amount",
+      comment: "TDS amount deducted by bank",
+    },
+    bankNetReceivable: {
+      type: DataTypes.DECIMAL(15, 2),
+      allowNull: false,
+      defaultValue: 0.0,
+      field: "bank_net_receivable",
+      comment: "Net commission receivable from bank: baseAmount - bankGstAmount - bankTdsAmount",
     },
     bankReceivedAmount: {
       type: DataTypes.DECIMAL(15, 2),
@@ -128,6 +149,13 @@ const CasePayout = sequelize.define(
       allowNull: false,
       defaultValue: 0.0,
       field: "bank_remaining_due",
+    },
+    payoutType: {
+      type: DataTypes.STRING(50),
+      allowNull: false,
+      defaultValue: "VENDOR",
+      field: "payout_type",
+      comment: "VENDOR or SELF (In-house case where no vendor payout exists, only manpower cost)",
     },
     partyName: {
       type: DataTypes.STRING(100),

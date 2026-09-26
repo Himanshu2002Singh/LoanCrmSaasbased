@@ -126,23 +126,37 @@ const autoSyncDisbursedCases = async (companyId) => {
         ? parseFloat(lender.payoutCommissionPercent)
         : 2.0;
 
-      // Base Amount = Incoming / Credit Amount from Bank = (Loan Amount × Bank Comm %) / 100
+      // Base Amount = Gross Credit / Commission from Bank = (Loan Amount × Bank Comm %) / 100
       const baseAmount = Math.round((loanAmount * bankCommPct) / 100);
-      const bankCommDue = baseAmount;
+      const bankGstPct = 18.0;
+      const bankTdsPct = 5.0;
+      const bankGstAmount = Math.round((baseAmount * bankGstPct) / 100);
+      const bankTdsAmount = Math.round((baseAmount * bankTdsPct) / 100);
 
-      // Vendor Gross Commission = (Base Amount × Party Comm %) / 100
-      const partyCommDue = Math.round((baseAmount * partyCommPct) / 100);
+      // Bank Net Payable / Receivable = Base Gross - Bank GST - Bank TDS
+      const bankNetReceivable = Math.max(0, baseAmount - bankGstAmount - bankTdsAmount);
+      const bankCommDue = bankNetReceivable;
 
-      // Default deductions = 0 (user can add TDS, GST, extra charges)
-      const partyTdsPercent = 0.0;
-      const partyTdsAmount = 0.0;
-      const partyGstPercent = 0.0;
-      const partyGstAmount = 0.0;
-      const extraCharges = 0.0;
+      // Check if lead is Self / Direct sourced
+      const isSelf =
+        partyName.toLowerCase() === "self" ||
+        partyName.toLowerCase() === "direct" ||
+        (sourceConfig && (sourceConfig.value || "").toLowerCase() === "self");
+      const payoutType = isSelf ? "SELF" : "VENDOR";
 
-      // Final Net Amount payable to Party
-      const partyNetPayable = Math.max(0, partyCommDue - partyTdsAmount - partyGstAmount - extraCharges);
-      const netMargin = Math.round(baseAmount - partyNetPayable);
+      let partyCommPctFinal = isSelf ? 0.0 : partyCommPct;
+      let partyCommDue = isSelf ? 0.0 : Math.round((baseAmount * partyCommPctFinal) / 100);
+      let partyTdsPercent = 0.0;
+      let partyTdsAmount = 0.0;
+      let partyGstPercent = 0.0;
+      let partyGstAmount = 0.0;
+      let extraCharges = 0.0; // Manpower / Staff incentive cost
+
+      // In case of Self: only manpower cost is deducted, rest is company margin
+      let partyNetPayable = isSelf ? 0.0 : Math.max(0, partyCommDue - partyTdsAmount - partyGstAmount - extraCharges);
+      let netMargin = isSelf
+        ? Math.round(bankNetReceivable - extraCharges)
+        : Math.round(bankNetReceivable - partyNetPayable);
 
       if (!payout) {
         // Generate Invoice Number
@@ -163,14 +177,18 @@ const autoSyncDisbursedCases = async (companyId) => {
           baseAmount,
           bankCommissionPercent: bankCommPct,
           bankCommissionDue: bankCommDue,
-          bankGstPercent: 18.0,
-          bankTdsPercent: 5.0,
+          bankGstPercent: bankGstPct,
+          bankGstAmount,
+          bankTdsPercent: bankTdsPct,
+          bankTdsAmount,
+          bankNetReceivable,
           bankReceivedAmount: 0.0,
           bankRemainingDue: bankCommDue,
-          partyName,
-          partyCode,
-          partyCommissionPercent: partyCommPct,
-          partyCommissionDue: partyCommDue,
+          payoutType,
+          partyName: isSelf ? "Self" : partyName,
+          partyCode: isSelf ? "—" : partyCode,
+          partyCommissionPercent: partyCommPctFinal,
+          partyCommissionDue,
           partyTdsPercent,
           partyTdsAmount,
           partyGstPercent,
@@ -390,7 +408,12 @@ exports.updateCasePayoutRates = async (req, res) => {
       disbursalDate,
       bankCommissionPercent,
       bankGstPercent,
+      bankGstAmount,
       bankTdsPercent,
+      bankTdsAmount,
+      payoutType,
+      partyName,
+      partyCode,
       partyCommissionPercent,
       partyTdsPercent,
       partyTdsAmount,
@@ -418,49 +441,78 @@ exports.updateCasePayoutRates = async (req, res) => {
     const newLoan = loanAmount !== undefined && loanAmount !== "" ? parseFloat(loanAmount) : parseFloat(casePayout.loanAmount || 0);
     const newBankPct = bankCommissionPercent !== undefined && bankCommissionPercent !== "" ? parseFloat(bankCommissionPercent) : parseFloat(casePayout.bankCommissionPercent || 0);
 
-    // Base Amount = Incoming / Credit Amount from Bank (Loan Amount × Bank Comm %) / 100
-    // If user passed explicit baseAmount, respect it
+    // 1. Base Amount = Gross Credit / Commission from Bank
     let newBase = baseAmount !== undefined && baseAmount !== "" ? parseFloat(baseAmount) : null;
     if (newBase === null || isNaN(newBase)) {
       newBase = Math.round((newLoan * newBankPct) / 100);
     }
 
-    const bankCommissionDue = newBase;
+    // 2. Bank Deductions (GST & TDS deducted from Bank Gross Commission)
+    const newBankGstPct = bankGstPercent !== undefined && bankGstPercent !== "" ? parseFloat(bankGstPercent) : parseFloat(casePayout.bankGstPercent || 0);
+    let newBankGstAmt = bankGstAmount !== undefined && bankGstAmount !== "" ? parseFloat(bankGstAmount) : Math.round((newBase * newBankGstPct) / 100);
+
+    const newBankTdsPct = bankTdsPercent !== undefined && bankTdsPercent !== "" ? parseFloat(bankTdsPercent) : parseFloat(casePayout.bankTdsPercent || 0);
+    let newBankTdsAmt = bankTdsAmount !== undefined && bankTdsAmount !== "" ? parseFloat(bankTdsAmount) : Math.round((newBase * newBankTdsPct) / 100);
+
+    // Bank Net Payable / Receivable: Bank Commission Due is after subtracting GST & TDS
+    const bankNetReceivable = Math.max(0, newBase - newBankGstAmt - newBankTdsAmt);
+    const bankCommissionDue = bankNetReceivable;
     const bankReceived = parseFloat(casePayout.bankReceivedAmount || 0);
     const bankRemainingDue = Math.max(0, bankCommissionDue - bankReceived);
 
-    // Vendor / Party commission % applied on Base Value (Credit Amount)
-    const newPartyPct = partyCommissionPercent !== undefined && partyCommissionPercent !== "" ? parseFloat(partyCommissionPercent) : parseFloat(casePayout.partyCommissionPercent || 0);
-    const partyCommissionDue = Math.round((newBase * newPartyPct) / 100);
+    // 3. Payout Type (SELF vs VENDOR)
+    const effectivePayoutType =
+      payoutType !== undefined
+        ? payoutType
+        : (casePayout.payoutType === "SELF" || (casePayout.partyName || "").toLowerCase() === "self" || (casePayout.partyName || "").toLowerCase() === "direct")
+        ? "SELF"
+        : "VENDOR";
 
-    // Deductions from Vendor Gross Commission:
-    // 1. Taxes / TDS
-    const newPartyTdsPct = partyTdsPercent !== undefined && partyTdsPercent !== "" ? parseFloat(partyTdsPercent) : parseFloat(casePayout.partyTdsPercent || 0);
-    let newPartyTdsAmt = partyTdsAmount !== undefined && partyTdsAmount !== "" ? parseFloat(partyTdsAmount) : null;
-    if (newPartyTdsAmt === null || isNaN(newPartyTdsAmt)) {
-      newPartyTdsAmt = Math.round((partyCommissionDue * newPartyTdsPct) / 100);
-    }
+    const isSelf = effectivePayoutType === "SELF";
 
-    // 2. GST
-    const newPartyGstPct = partyGstPercent !== undefined && partyGstPercent !== "" ? parseFloat(partyGstPercent) : parseFloat(casePayout.partyGstPercent || 0);
-    let newPartyGstAmt = partyGstAmount !== undefined && partyGstAmount !== "" ? parseFloat(partyGstAmount) : null;
-    if (newPartyGstAmt === null || isNaN(newPartyGstAmt)) {
-      newPartyGstAmt = Math.round((partyCommissionDue * newPartyGstPct) / 100);
-    }
-
-    // 3. Extra Charges / Manpower / Operational
+    // 4. Manpower / Staff incentive cost
     const newExtraCharges = extraCharges !== undefined && extraCharges !== "" ? parseFloat(extraCharges) : parseFloat(casePayout.extraCharges || 0);
 
-    // Final Net Amount Payable to Vendor
-    const partyNetPayable = Math.max(0, partyCommissionDue - newPartyTdsAmt - newPartyGstAmt - newExtraCharges);
-
+    let newPartyPct = 0.0;
+    let partyCommissionDue = 0.0;
+    let newPartyTdsPct = 0.0;
+    let newPartyTdsAmt = 0.0;
+    let newPartyGstPct = 0.0;
+    let newPartyGstAmt = 0.0;
+    let partyNetPayable = 0.0;
+    let partyRemainingDue = 0.0;
+    let netMargin = 0.0;
     const partyPaid = parseFloat(casePayout.partyPaidAmount || 0);
-    const partyRemainingDue = Math.max(0, partyNetPayable - partyPaid);
 
-    const netMargin = Math.round(newBase - partyNetPayable);
+    if (isSelf) {
+      // In case of Self: NO vendor payout, only manpower cost is deducted, rest is 100% company margin
+      newPartyPct = 0.0;
+      partyCommissionDue = 0.0;
+      newPartyTdsPct = 0.0;
+      newPartyTdsAmt = 0.0;
+      newPartyGstPct = 0.0;
+      newPartyGstAmt = 0.0;
+      partyNetPayable = 0.0;
+      partyRemainingDue = 0.0;
+      netMargin = Math.round(bankNetReceivable - newExtraCharges);
+    } else {
+      // VENDOR Payout: Gross Vendor Comm minus Vendor TDS, GST, and Manpower cost
+      newPartyPct = partyCommissionPercent !== undefined && partyCommissionPercent !== "" ? parseFloat(partyCommissionPercent) : parseFloat(casePayout.partyCommissionPercent || 0);
+      partyCommissionDue = Math.round((newBase * newPartyPct) / 100);
+
+      newPartyTdsPct = partyTdsPercent !== undefined && partyTdsPercent !== "" ? parseFloat(partyTdsPercent) : parseFloat(casePayout.partyTdsPercent || 0);
+      newPartyTdsAmt = partyTdsAmount !== undefined && partyTdsAmount !== "" ? parseFloat(partyTdsAmount) : Math.round((partyCommissionDue * newPartyTdsPct) / 100);
+
+      newPartyGstPct = partyGstPercent !== undefined && partyGstPercent !== "" ? parseFloat(partyGstPercent) : parseFloat(casePayout.partyGstPercent || 0);
+      newPartyGstAmt = partyGstAmount !== undefined && partyGstAmount !== "" ? parseFloat(partyGstAmount) : Math.round((partyCommissionDue * newPartyGstPct) / 100);
+
+      partyNetPayable = Math.max(0, partyCommissionDue - newPartyTdsAmt - newPartyGstAmt - newExtraCharges);
+      partyRemainingDue = Math.max(0, partyNetPayable - partyPaid);
+      netMargin = Math.round(bankNetReceivable - partyNetPayable);
+    }
 
     let status = "PENDING";
-    if (bankRemainingDue === 0 && partyRemainingDue === 0 && (bankCommissionDue > 0 || partyNetPayable > 0)) {
+    if (bankRemainingDue === 0 && partyRemainingDue === 0 && (bankCommissionDue > 0 || partyNetPayable > 0 || isSelf)) {
       status = "SETTLED";
     } else if (bankReceived > 0 || partyPaid > 0) {
       status = "PARTIALLY_SETTLED";
@@ -473,9 +525,15 @@ exports.updateCasePayoutRates = async (req, res) => {
         disbursalDate: disbursalDate || casePayout.disbursalDate,
         bankCommissionPercent: newBankPct,
         bankCommissionDue,
-        bankGstPercent: bankGstPercent !== undefined ? parseFloat(bankGstPercent) : casePayout.bankGstPercent,
-        bankTdsPercent: bankTdsPercent !== undefined ? parseFloat(bankTdsPercent) : casePayout.bankTdsPercent,
+        bankGstPercent: newBankGstPct,
+        bankGstAmount: newBankGstAmt,
+        bankTdsPercent: newBankTdsPct,
+        bankTdsAmount: newBankTdsAmt,
+        bankNetReceivable,
         bankRemainingDue,
+        payoutType: effectivePayoutType,
+        partyName: isSelf ? "Self" : (partyName !== undefined ? partyName : casePayout.partyName),
+        partyCode: isSelf ? "—" : (partyCode !== undefined ? partyCode : casePayout.partyCode),
         partyCommissionPercent: newPartyPct,
         partyCommissionDue,
         partyTdsPercent: newPartyTdsPct,
