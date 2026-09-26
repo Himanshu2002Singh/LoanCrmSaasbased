@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import 'package:capital_care/core/constants/app_colors.dart';
 import 'package:capital_care/core/networking/api_client.dart';
 import 'package:capital_care/core/widgets/app_drawer.dart';
 import 'package:capital_care/core/widgets/subscription_expired_dialog.dart';
@@ -54,11 +56,78 @@ class _AppShellState extends State<AppShell> {
     super.dispose();
   }
 
+  Future<void> _handlePop() async {
+    final location = GoRouterState.of(context).uri.path;
+
+    // 1. If currently on a sub-route or any other screen, navigate back to Dashboard
+    if (location != '/dashboard' && location != '/') {
+      if (context.canPop()) {
+        context.pop();
+      } else {
+        context.go('/dashboard');
+      }
+      return;
+    }
+
+    // 2. If on /dashboard: Ask for confirmation before exiting
+    final shouldExit = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: const Row(
+          children: [
+            Icon(Icons.exit_to_app_rounded, color: AppColors.error, size: 24),
+            SizedBox(width: 8),
+            Text(
+              'Exit App',
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18),
+            ),
+          ],
+        ),
+        content: const Text(
+          'Are you sure you want to exit the Loan CRM app?',
+          style: TextStyle(fontSize: 14, color: AppColors.textPrimary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: AppColors.textSecondary, fontWeight: FontWeight.w600),
+            ),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.error,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text(
+              'Exit',
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldExit == true) {
+      SystemNavigator.pop();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      drawer: const AppDrawer(),
-      body: widget.child,
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        _handlePop();
+      },
+      child: Scaffold(
+        drawer: const AppDrawer(),
+        body: widget.child,
+      ),
     );
   }
 }

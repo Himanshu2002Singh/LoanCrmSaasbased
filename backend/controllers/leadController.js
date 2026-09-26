@@ -55,7 +55,7 @@ const remarkOf = (body) => {
  * The panel and the mobile app read a flat lead row with the customer's
  * details inlined. Keep that shape and hang the nested records off it.
  */
-const serializeLead = (lead, statusMap = {}) => {
+const serializeLead = (lead, statusMap = {}, requestingUser = null) => {
   const customer = lead.customer || {};
   const status = statusMap[lead.status];
   const apps = lead.applications || [];
@@ -71,13 +71,15 @@ const serializeLead = (lead, statusMap = {}) => {
     : null;
   const bankName = primaryApp?.lender?.name || null;
   const sanctionDate = primaryApp?.sanctionedAmount ? primaryApp.updatedAt : null;
+  
+  const isEmployee = requestingUser && (requestingUser.role === ROLES.EMPLOYEE || requestingUser.role === "EMPLOYEE");
   const commPercent =
-    lead.commissionPercent !== null && lead.commissionPercent !== undefined
+    !isEmployee && lead.commissionPercent !== null && lead.commissionPercent !== undefined
       ? parseFloat(lead.commissionPercent)
       : null;
   const baseAmount = sanctionedAmount || appliedAmount || (lead.requiredAmount ? parseFloat(lead.requiredAmount) : null);
   const commissionAmount =
-    baseAmount !== null && commPercent !== null ? Math.round((baseAmount * commPercent) / 100) : null;
+    !isEmployee && baseAmount !== null && commPercent !== null ? Math.round((baseAmount * commPercent) / 100) : null;
 
   return {
     lead_id: lead.id,
@@ -350,7 +352,7 @@ exports.getLeads = async (req, res) => {
       distinct: true,
     });
 
-    const payload = paginated({ count, rows: rows.map((r) => serializeLead(r, statuses.byValue)), page, limit });
+    const payload = paginated({ count, rows: rows.map((r) => serializeLead(r, statuses.byValue, req.user)), page, limit });
     // The panel's table reads pagination.totalItems.
     payload.pagination.totalItems = count;
     return res.status(200).json(payload);
@@ -424,7 +426,7 @@ exports.getLeadById = async (req, res) => {
     return res.status(200).json({
       message: "success",
       data: {
-        ...serializeLead(lead, statuses.byValue),
+        ...serializeLead(lead, statuses.byValue, req.user),
         remarks: creationActivity?.remarks || null,
         initial_remark: creationActivity?.remarks || null,
         last_remark: lastActivity?.remarks || null,
@@ -653,7 +655,7 @@ exports.updateLead = async (req, res) => {
       await lead.customer.update(customerPatch);
     }
 
-    return res.status(200).json({ message: "Lead updated", data: serializeLead(lead, statuses.byValue) });
+    return res.status(200).json({ message: "Lead updated", data: serializeLead(lead, statuses.byValue, req.user) });
   } catch (error) {
     console.error("[leads] updateLead error:", error);
     return res.status(500).json({ message: "Internal Server Error", error: error.message });
@@ -696,7 +698,7 @@ exports.updateLeadStatus = async (req, res) => {
       companyId: lead.companyId,
     });
 
-    return res.status(200).json({ message: "Status updated", data: serializeLead(lead, statuses.byValue) });
+    return res.status(200).json({ message: "Status updated", data: serializeLead(lead, statuses.byValue, req.user) });
   } catch (error) {
     console.error("[leads] updateLeadStatus error:", error);
     return res.status(500).json({ message: "Internal Server Error", error: error.message });
@@ -751,7 +753,7 @@ exports.getUnassignedLeads = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      leads: leads.map((l) => serializeLead(l, statuses.byValue)),
+      leads: leads.map((l) => serializeLead(l, statuses.byValue, req.user)),
       availableCount,
       maxAssignable: MAX_SELF_ASSIGN_LEADS,
     });
@@ -908,7 +910,7 @@ exports.getFollowups = async (req, res) => {
       distinct: true,
     });
 
-    const payload = paginated({ count, rows: rows.map((r) => serializeLead(r, statuses.byValue)), page, limit });
+    const payload = paginated({ count, rows: rows.map((r) => serializeLead(r, statuses.byValue, req.user)), page, limit });
     payload.pagination.totalItems = count;
     return res.status(200).json(payload);
   } catch (error) {

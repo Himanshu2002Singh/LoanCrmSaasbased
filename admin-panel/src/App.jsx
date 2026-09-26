@@ -101,7 +101,7 @@ function App() {
         <Route
           path="/leads"
           element={
-            <PageShell>
+            <PageShell allowedRoles={["manager", "operations", "calling", "employee"]}>
               <LeadsList />
             </PageShell>
           }
@@ -125,7 +125,7 @@ function App() {
         <Route
           path="/lead-details/:id"
           element={
-            <PageShell allowedRoles={["manager", "operations"]}>
+            <PageShell allowedRoles={["manager", "operations", "calling", "employee"]}>
               <RedesignPageFrame pageKey="lead-details">
                 <LeadDetailScreen />
               </RedesignPageFrame>
@@ -135,7 +135,7 @@ function App() {
         <Route
           path="/lead-edit/:id"
           element={
-            <PageShell allowedRoles={["manager", "operations"]}>
+            <PageShell allowedRoles={["manager", "operations", "calling", "employee"]}>
               <RedesignPageFrame pageKey="lead-edit">
                 <LeadEditScreen />
               </RedesignPageFrame>

@@ -79,6 +79,10 @@ const bankerNavItems = [
   { path: "/company", label: "Company Profile", icon: Building2 },
 ];
 
+const employeeNavItems = [
+  { path: "/leads", label: "Leads", icon: FileText },
+];
+
 const defaultStatusLabels = [
   "Fresh Lead",
   "Interested",
@@ -138,6 +142,10 @@ function AdminRedesignLayout({ children }) {
     ["COMPANY_ADMIN", "SUPERADMIN"].includes(userRole.toUpperCase()) ||
     ["admin", "superadmin"].includes(employeeRole?.toLowerCase());
 
+  const isEmployee =
+    userRole.toUpperCase() === "EMPLOYEE" ||
+    ["calling", "employee"].includes(employeeRole?.toLowerCase());
+
   const userPermissions = useMemo(() => {
     try {
       return JSON.parse(localStorage.getItem("userPermissions") || "{}");
@@ -151,21 +159,26 @@ function AdminRedesignLayout({ children }) {
       ? bankerNavItems
       : employeeRole === "operations"
       ? operationsNavItems
+      : isEmployee
+      ? employeeNavItems
       : managerNavItems;
 
   const navItems = useMemo(() => {
     if (isCompanyAdmin) return rawNavItems;
+    if (isEmployee) return employeeNavItems;
     return rawNavItems.filter((item) => {
       if (!item.permission) return true;
       return Boolean(userPermissions[item.permission]);
     });
-  }, [rawNavItems, isCompanyAdmin, userPermissions]);
+  }, [rawNavItems, isCompanyAdmin, isEmployee, userPermissions]);
 
   const homePath =
     employeeRole === "banker"
       ? "/banker"
       : employeeRole === "operations"
       ? "/operations"
+      : isEmployee
+      ? "/leads"
       : "/";
   const isDashboard = location.pathname === "/" || location.pathname === "/banker";
 

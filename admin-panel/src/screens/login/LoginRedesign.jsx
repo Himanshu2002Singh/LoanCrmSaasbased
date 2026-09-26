@@ -73,12 +73,15 @@ function LoginRedesign() {
 
       // A super admin operates the platform, not a company, so they land on
       // their own console. Bankers land on the banker underwriting portal.
+      // Sales callers/employees land directly on the leads page.
       if (role === "SUPERADMIN") {
         navigate("/platform");
       } else if (panelRole === "banker") {
         navigate("/banker");
       } else if (panelRole === "operations") {
         navigate("/operations");
+      } else if (panelRole === "calling" || role === "EMPLOYEE") {
+        navigate("/leads");
       } else {
         navigate("/");
       }

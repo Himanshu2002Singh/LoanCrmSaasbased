@@ -28,6 +28,7 @@ const ADMIN_PANEL_ROLES = [
   ROLES.MANAGER,
   ROLES.OPS,
   ROLES.BANKER,
+  ROLES.EMPLOYEE,
 ];
 
 module.exports = {

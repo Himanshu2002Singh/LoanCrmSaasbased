@@ -22,6 +22,23 @@ export default function AddLeadModal({ open, onClose, onCreated }) {
   const [submitting, setSubmitting] = useState(false);
   const fileInputRef = useRef(null);
 
+  const userRole = localStorage.getItem("userRole") || "";
+  const employeeRole = localStorage.getItem("employeeRole") || "";
+  const isEmployee =
+    userRole.toUpperCase() === "EMPLOYEE" ||
+    ["calling", "employee"].includes(employeeRole?.toLowerCase());
+
+  const userPermissions = (() => {
+    try {
+      return JSON.parse(localStorage.getItem("userPermissions") || "{}");
+    } catch {
+      return {};
+    }
+  })();
+
+  const canViewCommission = !isEmployee && Boolean(userPermissions.viewPayouts || userPermissions.viewConnectors || userRole === "COMPANY_ADMIN" || userRole === "SUPERADMIN");
+  const canUploadExcel = !isEmployee && userPermissions.exportData !== false;
+
   useEffect(() => {
     if (!open) return;
     const fetchSources = async () => {
@@ -170,21 +187,23 @@ export default function AddLeadModal({ open, onClose, onCreated }) {
           </button>
         </div>
 
-        <div className="cc-modal-tabs">
-          {MODES.map((entry) => {
-            const Icon = entry.icon;
-            return (
-              <button
-                key={entry.key}
-                type="button"
-                className={`cc-modal-tab ${mode === entry.key ? "on" : ""}`}
-                onClick={() => setMode(entry.key)}
-              >
-                <Icon size={14} /> {entry.label}
-              </button>
-            );
-          })}
-        </div>
+        {canUploadExcel && (
+          <div className="cc-modal-tabs">
+            {MODES.map((entry) => {
+              const Icon = entry.icon;
+              return (
+                <button
+                  key={entry.key}
+                  type="button"
+                  className={`cc-modal-tab ${mode === entry.key ? "on" : ""}`}
+                  onClick={() => setMode(entry.key)}
+                >
+                  <Icon size={14} /> {entry.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {mode === "manual" ? (
           <form className="cc-modal-form" onSubmit={handleManual}>
@@ -211,7 +230,7 @@ export default function AddLeadModal({ open, onClose, onCreated }) {
               />
             </label>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: "10px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: canViewCommission ? "1.3fr 1fr" : "1fr", gap: "10px" }}>
               <label className="cc-modal-field">
                 <span>
                   <Share2 size={12} /> Source / Party <span style={{ fontWeight: 400, color: "#94a3b8" }}>(Optional)</span>
@@ -225,30 +244,32 @@ export default function AddLeadModal({ open, onClose, onCreated }) {
                     .filter((s) => String(s.value || "").toLowerCase() !== "self")
                     .map((s) => (
                       <option key={s.id || s.value} value={s.label || s.value}>
-                        {s.label || s.value} {s.commissionPercent ? `(${s.commissionPercent}%)` : ""}
+                        {s.label || s.value} {canViewCommission && s.commissionPercent ? `(${s.commissionPercent}%)` : ""}
                       </option>
                     ))}
                 </select>
               </label>
 
-              <label className="cc-modal-field">
-                <span>
-                  <Percent size={12} /> Commission (%) <span style={{ fontWeight: 400, color: "#94a3b8" }}>(Optional)</span>
-                </span>
-                <div style={{ position: "relative" }}>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    max="100"
-                    value={commissionPercent}
-                    onChange={(event) => setCommissionPercent(event.target.value)}
-                    placeholder="e.g. 1.5"
-                    style={{ paddingRight: "26px", width: "100%", boxSizing: "border-box" }}
-                  />
-                  <span style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", color: "#94a3b8", fontWeight: 700, fontSize: "12px", pointerEvents: "none" }}>%</span>
-                </div>
-              </label>
+              {canViewCommission && (
+                <label className="cc-modal-field">
+                  <span>
+                    <Percent size={12} /> Commission (%) <span style={{ fontWeight: 400, color: "#94a3b8" }}>(Optional)</span>
+                  </span>
+                  <div style={{ position: "relative" }}>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="100"
+                      value={commissionPercent}
+                      onChange={(event) => setCommissionPercent(event.target.value)}
+                      placeholder="e.g. 1.5"
+                      style={{ paddingRight: "26px", width: "100%", boxSizing: "border-box" }}
+                    />
+                    <span style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", color: "#94a3b8", fontWeight: 700, fontSize: "12px", pointerEvents: "none" }}>%</span>
+                  </div>
+                </label>
+              )}
             </div>
 
             <div className="cc-modal-actions">

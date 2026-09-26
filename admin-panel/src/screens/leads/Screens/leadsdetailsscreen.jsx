@@ -90,6 +90,23 @@ export default function LeadDetailScreen() {
   const [activeTab, setActiveTab] = useState("applications");
   const [loading, setLoading] = useState(true);
 
+  const userRole = localStorage.getItem("userRole") || "";
+  const employeeRole = localStorage.getItem("employeeRole") || "";
+  const isEmployee =
+    userRole.toUpperCase() === "EMPLOYEE" ||
+    ["calling", "employee"].includes(employeeRole?.toLowerCase());
+
+  const userPermissions = (() => {
+    try {
+      return JSON.parse(localStorage.getItem("userPermissions") || "{}");
+    } catch {
+      return {};
+    }
+  })();
+
+  const canExport = !isEmployee && userPermissions.exportData !== false;
+  const canViewCommission = !isEmployee && Boolean(userPermissions.viewPayouts || userPermissions.viewConnectors || userRole === "COMPANY_ADMIN" || userRole === "SUPERADMIN");
+
   // Upload Doc Modal state
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [selectedDocType, setSelectedDocType] = useState("");
@@ -276,32 +293,34 @@ export default function LeadDetailScreen() {
     const wb = XLSX.utils.book_new();
 
     // Sheet 1: Lead Details
-    const leadDetailsData = [
-      {
-        "Lead ID": lead?.lead_id || lead?.id || "N/A",
-        Name: lead?.name || "N/A",
-        Phone: lead?.number || "N/A",
-        Email: lead?.email || "N/A",
-        City: lead?.city || "N/A",
-        "Assigned To": `${lead?.person_id || ""}-${lead?.owner || "Unassigned"}`,
-        Status: lead?.status || "N/A",
-        "Source / Party": lead?.source || "Self",
-        "Commission (%)":
-          lead?.commission_percent !== null && lead?.commission_percent !== undefined
-            ? `${lead.commission_percent}%`
-            : "0%",
-        Priority: lead?.priority || "N/A",
-        "Loan Product": lead?.loan_type || "N/A",
-        "Estimated Budget": lead?.est_budget || "N/A",
-        "Monthly Income": lead?.monthly_income || lead?.income || "N/A",
-        "Next Meeting": lead?.next_meeting
-          ? new Date(lead.next_meeting).toLocaleString("en-IN")
-          : "N/A",
-        "Created At": lead?.createdAt
-          ? new Date(lead.createdAt).toLocaleString("en-IN")
-          : "N/A",
-      },
-    ];
+    const leadProfileRow = {
+      "Lead ID": lead?.lead_id || lead?.id || "N/A",
+      Name: lead?.name || "N/A",
+      Phone: lead?.number || "N/A",
+      Email: lead?.email || "N/A",
+      City: lead?.city || "N/A",
+      "Assigned To": `${lead?.person_id || ""}-${lead?.owner || "Unassigned"}`,
+      Status: lead?.status || "N/A",
+      "Source / Party": lead?.source || "Self",
+    };
+    if (canViewCommission) {
+      leadProfileRow["Commission (%)"] =
+        lead?.commission_percent !== null && lead?.commission_percent !== undefined
+          ? `${lead.commission_percent}%`
+          : "0%";
+    }
+    leadProfileRow["Priority"] = lead?.priority || "N/A";
+    leadProfileRow["Loan Product"] = lead?.loan_type || "N/A";
+    leadProfileRow["Estimated Budget"] = lead?.est_budget || "N/A";
+    leadProfileRow["Monthly Income"] = lead?.monthly_income || lead?.income || "N/A";
+    leadProfileRow["Next Meeting"] = lead?.next_meeting
+      ? new Date(lead.next_meeting).toLocaleString("en-IN")
+      : "N/A";
+    leadProfileRow["Created At"] = lead?.createdAt
+      ? new Date(lead.createdAt).toLocaleString("en-IN")
+      : "N/A";
+
+    const leadDetailsData = [leadProfileRow];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(leadDetailsData), "Lead Profile");
 
     // Sheet 2: Loan Applications
@@ -440,7 +459,7 @@ export default function LeadDetailScreen() {
               >
                 <Share2 size={11} />
                 {leadSourceDisplay}
-                {lead.commission_percent !== null && lead.commission_percent !== undefined && (
+                {canViewCommission && lead.commission_percent !== null && lead.commission_percent !== undefined && (
                   <span style={{ marginLeft: "4px", fontWeight: 700 }}>
                     ({lead.commission_percent}%)
                   </span>
@@ -464,14 +483,16 @@ export default function LeadDetailScreen() {
             <Pencil size={15} />
             <span>Edit Lead</span>
           </button>
-          <button
-            type="button"
-            className="cc-header-action-btn excel"
-            onClick={downloadexcel}
-          >
-            <Download size={15} />
-            <span>Export Excel</span>
-          </button>
+          {canExport && (
+            <button
+              type="button"
+              className="cc-header-action-btn excel"
+              onClick={downloadexcel}
+            >
+              <Download size={15} />
+              <span>Export Excel</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -509,17 +530,17 @@ export default function LeadDetailScreen() {
             <span className="label">Party / Source</span>
             <span className="value">
               {leadSourceDisplay}
-              {lead.commission_percent !== null && lead.commission_percent !== undefined && (
+              {canViewCommission && lead.commission_percent !== null && lead.commission_percent !== undefined && (
                 <span style={{ fontSize: "12px", color: "#047857", fontWeight: 700, marginLeft: "6px" }}>
                   ({lead.commission_percent}%)
                 </span>
               )}
             </span>
             <small>
-              {lead.commission_percent !== null && lead.commission_percent !== undefined
-                ? `Commission: ${lead.commission_percent}%`
-                : "No commission set"}
-              {" • "}Priority: {lead.priority || "Medium"}
+              {canViewCommission && lead.commission_percent !== null && lead.commission_percent !== undefined
+                ? `Commission: ${lead.commission_percent}% • `
+                : ""}
+              Priority: {lead.priority || "Medium"}
             </small>
           </div>
         </div>

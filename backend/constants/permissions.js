@@ -168,7 +168,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
     viewTasks: true,
   },
   EMPLOYEE: {
-    viewDashboard: true,
+    viewDashboard: false,
     viewLeads: true,
     viewAllLeads: false,
     manageLeads: true,
@@ -183,8 +183,8 @@ const DEFAULT_ROLE_PERMISSIONS = {
     manageSettings: false,
     exportData: false,
     deleteRecords: false,
-    viewAttendance: true,
-    viewTasks: true,
+    viewAttendance: false,
+    viewTasks: false,
   },
   BANKER: {
     viewDashboard: true,

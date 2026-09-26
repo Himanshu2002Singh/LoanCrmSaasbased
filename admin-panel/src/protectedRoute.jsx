@@ -29,6 +29,9 @@ function ProtectedRoute({ children, allowedRoles = ["manager", "operations"], re
     if (employeeRole === "banker") {
       return <Navigate to="/banker" replace />;
     }
+    if (employeeRole === "calling" || employeeRole === "employee" || userRole === "EMPLOYEE") {
+      return <Navigate to="/leads" replace />;
+    }
     localStorage.clear();
     return <Navigate to="/login" replace />;
   }
@@ -43,7 +46,14 @@ function ProtectedRoute({ children, allowedRoles = ["manager", "operations"], re
     }
 
     if (permissions[requiredPermission] === false) {
-      const fallbackHome = employeeRole === "operations" ? "/operations" : employeeRole === "banker" ? "/banker" : "/";
+      const fallbackHome =
+        employeeRole === "operations"
+          ? "/operations"
+          : employeeRole === "banker"
+          ? "/banker"
+          : employeeRole === "calling" || employeeRole === "employee" || userRole === "EMPLOYEE"
+          ? "/leads"
+          : "/";
       return <Navigate to={fallbackHome} replace />;
     }
   }

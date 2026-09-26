@@ -55,6 +55,24 @@ export default function LeadsListRedesign() {
   const [debouncedAssignQuery, setDebouncedAssignQuery] = useState("");
   const menuRef = useRef(null);
 
+  const userRole = localStorage.getItem("userRole") || "";
+  const employeeRole = localStorage.getItem("employeeRole") || "";
+  const isEmployee =
+    userRole.toUpperCase() === "EMPLOYEE" ||
+    ["calling", "employee"].includes(employeeRole?.toLowerCase());
+
+  const userPermissions = useMemo(() => {
+    try {
+      return JSON.parse(localStorage.getItem("userPermissions") || "{}");
+    } catch {
+      return {};
+    }
+  }, []);
+
+  const canExport = !isEmployee && userPermissions.exportData !== false;
+  const canDelete = !isEmployee && Boolean(userPermissions.deleteRecords);
+  const canViewCommission = !isEmployee && Boolean(userPermissions.viewPayouts || userPermissions.viewConnectors || userRole === "COMPANY_ADMIN" || userRole === "SUPERADMIN");
+
   const fetchEmployees = () => {
     axios
       .get(`${API_URL}/users`, { params: { limit: 200 } })
@@ -192,24 +210,29 @@ export default function LeadsListRedesign() {
         });
         return;
       }
-      const excel = all.map((row) => ({
-        "Lead ID": row.lead_id,
-        Name: row.name || "",
-        Phone: row.number || "",
-        Email: row.email || "",
-        Status: row.status || "",
-        "Assigned To": row.owner || "Unassigned",
-        "Loan Type": row.loan_type || "",
-        Source: row.source || "",
-        "Commission (%)":
-          row.commission_percent !== null && row.commission_percent !== undefined
-            ? `${row.commission_percent}%`
-            : "0%",
-        "Next Meeting": row.next_meeting
+      const excel = all.map((row) => {
+        const item = {
+          "Lead ID": row.lead_id,
+          Name: row.name || "",
+          Phone: row.number || "",
+          Email: row.email || "",
+          Status: row.status || "",
+          "Assigned To": row.owner || "Unassigned",
+          "Loan Type": row.loan_type || "",
+          Source: row.source || "",
+        };
+        if (canViewCommission) {
+          item["Commission (%)"] =
+            row.commission_percent !== null && row.commission_percent !== undefined
+              ? `${row.commission_percent}%`
+              : "0%";
+        }
+        item["Next Meeting"] = row.next_meeting
           ? moment(row.next_meeting).format("DD MMM YYYY, hh:mm A")
-          : "",
-        "Created At": row.createdAt ? moment(row.createdAt).format("DD MMM YYYY") : "",
-      }));
+          : "";
+        item["Created At"] = row.createdAt ? moment(row.createdAt).format("DD MMM YYYY") : "";
+        return item;
+      });
       const sheet = XLSX.utils.json_to_sheet(excel);
       const book = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(book, sheet, "Leads");
@@ -338,9 +361,11 @@ export default function LeadsListRedesign() {
             />
           </label>
           <div className="cc-leads-actions">
-            <button type="button" className="cc-leads-btn ghost" onClick={handleDownloadExcel}>
-              <Download size={16} /> Excel
-            </button>
+            {canExport && (
+              <button type="button" className="cc-leads-btn ghost" onClick={handleDownloadExcel}>
+                <Download size={16} /> Excel
+              </button>
+            )}
             <button type="button" className="cc-leads-btn primary" onClick={() => setShowAddModal(true)}>
               <Plus size={16} /> Add lead
             </button>
@@ -393,7 +418,7 @@ export default function LeadsListRedesign() {
                 <th>Name</th>
                 <th>Phone</th>
                 <th>Source / Party</th>
-                <th>Party Commission</th>
+                {canViewCommission && <th>Party Commission</th>}
                 <th>Status</th>
                 <th>Assigned to</th>
                 <th>Actions</th>
@@ -402,11 +427,11 @@ export default function LeadsListRedesign() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="cc-report-empty">Loading leads...</td>
+                  <td colSpan={canViewCommission ? 8 : 7} className="cc-report-empty">Loading leads...</td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="cc-report-empty">No leads match the filters</td>
+                  <td colSpan={canViewCommission ? 8 : 7} className="cc-report-empty">No leads match the filters</td>
                 </tr>
               ) : (
                 rows.map((row) => (
@@ -435,40 +460,52 @@ export default function LeadsListRedesign() {
                         {row.source || "Self"}
                       </span>
                     </td>
-                    <td>
-                      {row.commission_percent !== null && row.commission_percent !== undefined ? (
-                        <span
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            padding: "2px 8px",
-                            borderRadius: "10px",
-                            fontSize: "12px",
-                            fontWeight: 700,
-                            background: "#ecfdf5",
-                            color: "#047857",
-                            border: "1px solid #a7f3d0",
-                          }}
-                        >
-                          {row.commission_percent}%
-                        </span>
-                      ) : (
-                        <span style={{ fontSize: "12px", color: "#94a3b8" }}>--</span>
-                      )}
-                    </td>
+                    {canViewCommission && (
+                      <td>
+                        {row.commission_percent !== null && row.commission_percent !== undefined ? (
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              padding: "2px 8px",
+                              borderRadius: "10px",
+                              fontSize: "12px",
+                              fontWeight: 700,
+                              background: "#ecfdf5",
+                              color: "#047857",
+                              border: "1px solid #a7f3d0",
+                            }}
+                          >
+                            {row.commission_percent}%
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: "12px", color: "#94a3b8" }}>--</span>
+                        )}
+                      </td>
+                    )}
                     <td>
                       <span className="cc-report-status">{row.status || "Unassigned"}</span>
                     </td>
                     <td>
-                      <button
-                        type="button"
-                        className={`cc-leads-assign-btn ${row.owner ? "assigned" : ""}`}
-                        onClick={(event) => openAssignMenu(event, row.lead_id)}
-                        title="Assign lead to employee"
-                      >
-                        <UserCog size={14} />
-                        {row.owner || "Unassigned"}
-                      </button>
+                      {isEmployee ? (
+                        <span
+                          className={`cc-leads-assign-btn ${row.owner ? "assigned" : ""}`}
+                          style={{ cursor: "default" }}
+                        >
+                          <UserCog size={14} />
+                          {row.owner || "Unassigned"}
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          className={`cc-leads-assign-btn ${row.owner ? "assigned" : ""}`}
+                          onClick={(event) => openAssignMenu(event, row.lead_id)}
+                          title="Assign lead to employee"
+                        >
+                          <UserCog size={14} />
+                          {row.owner || "Unassigned"}
+                        </button>
+                      )}
                     </td>
                     <td>
                       <div className="cc-leads-row-actions">
@@ -488,14 +525,16 @@ export default function LeadsListRedesign() {
                         >
                           <Pencil size={15} />
                         </button>
-                        <button
-                          type="button"
-                          className="cc-leads-icon-btn danger"
-                          title="Delete lead"
-                          onClick={() => setDeleteTarget(row)}
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                        {canDelete && (
+                          <button
+                            type="button"
+                            className="cc-leads-icon-btn danger"
+                            title="Delete lead"
+                            onClick={() => setDeleteTarget(row)}
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

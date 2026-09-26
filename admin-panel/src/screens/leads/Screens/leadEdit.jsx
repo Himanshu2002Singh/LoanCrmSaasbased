@@ -34,6 +34,22 @@ const LeadEditScreen = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isFetching, setIsFetching] = useState(true);
 
+  const userRole = localStorage.getItem("userRole") || "";
+  const employeeRole = localStorage.getItem("employeeRole") || "";
+  const isEmployee =
+    userRole.toUpperCase() === "EMPLOYEE" ||
+    ["calling", "employee"].includes(employeeRole?.toLowerCase());
+
+  const userPermissions = (() => {
+    try {
+      return JSON.parse(localStorage.getItem("userPermissions") || "{}");
+    } catch {
+      return {};
+    }
+  })();
+
+  const canViewCommission = !isEmployee && Boolean(userPermissions.viewPayouts || userPermissions.viewConnectors || userRole === "COMPANY_ADMIN" || userRole === "SUPERADMIN");
+
   useEffect(() => {
     fetchLeadDetails();
     fetchEmployees();
@@ -191,7 +207,8 @@ const LeadEditScreen = () => {
             <select
               value={lead.person_id}
               onChange={handleEmployeeChange}
-              className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
+              disabled={isEmployee}
+              className={`mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 ${isEmployee ? "bg-gray-100 text-gray-500 cursor-not-allowed" : "bg-white"}`}
             >
               <option value="" disabled>Select Employee</option>
               {employees.map((emp) => (
@@ -228,7 +245,7 @@ const LeadEditScreen = () => {
                 setLead((prev) => ({
                   ...prev,
                   source: val,
-                  ...(matched && matched.commissionPercent !== undefined && matched.commissionPercent !== null && !prev.commission_percent
+                  ...(canViewCommission && matched && matched.commissionPercent !== undefined && matched.commissionPercent !== null && !prev.commission_percent
                     ? { commission_percent: String(matched.commissionPercent) }
                     : {}),
                 }));
@@ -240,7 +257,7 @@ const LeadEditScreen = () => {
                 .filter((s) => String(s.value || "").toLowerCase() !== "self")
                 .map((s) => (
                   <option key={s.id || s.value} value={s.label || s.value}>
-                    {s.label || s.value} {s.commissionPercent ? `(${s.commissionPercent}%)` : ""}
+                    {s.label || s.value} {canViewCommission && s.commissionPercent ? `(${s.commissionPercent}%)` : ""}
                   </option>
                 ))}
               {lead.source &&
@@ -250,23 +267,25 @@ const LeadEditScreen = () => {
                 )}
             </select>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Commission (%)</label>
-            <div className="relative mt-1">
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                max="100"
-                name="commission_percent"
-                value={lead.commission_percent}
-                onChange={handleInputChange}
-                placeholder="e.g. 1.5"
-                className="block w-full border border-gray-300 rounded-md shadow-sm p-2 pr-8"
-              />
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 font-semibold text-sm pointer-events-none">%</span>
+          {canViewCommission && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Commission (%)</label>
+              <div className="relative mt-1">
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="100"
+                  name="commission_percent"
+                  value={lead.commission_percent}
+                  onChange={handleInputChange}
+                  placeholder="e.g. 1.5"
+                  className="block w-full border border-gray-300 rounded-md shadow-sm p-2 pr-8"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 font-semibold text-sm pointer-events-none">%</span>
+              </div>
             </div>
-          </div>
+          )}
           <div>
             <label className="block text-sm font-medium text-gray-700">Priority</label>
             <select
