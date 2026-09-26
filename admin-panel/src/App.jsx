@@ -193,7 +193,7 @@ function App() {
         <Route
           path="/lead-statuses"
           element={
-            <PageShell requiredPermission="manageSettings">
+            <PageShell allowedRoles={["manager", "operations", "calling", "employee"]}>
               <LeadStatusesScreen />
             </PageShell>
           }
@@ -201,7 +201,7 @@ function App() {
         <Route
           path="/loan-products"
           element={
-            <PageShell requiredPermission="manageSettings">
+            <PageShell allowedRoles={["manager", "operations", "calling", "employee"]}>
               <LoanProductsScreen />
             </PageShell>
           }
@@ -209,7 +209,7 @@ function App() {
         <Route
           path="/lead-sources"
           element={
-            <PageShell requiredPermission="manageSettings">
+            <PageShell allowedRoles={["manager", "operations", "calling", "employee"]}>
               <LeadSourcesScreen />
             </PageShell>
           }

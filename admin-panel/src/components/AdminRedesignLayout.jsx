@@ -81,6 +81,10 @@ const bankerNavItems = [
 
 const employeeNavItems = [
   { path: "/leads", label: "Leads", icon: FileText },
+  { path: "/lead-statuses", label: "Lead Statuses", icon: Tags },
+  { path: "/loan-products", label: "Loan Types", icon: Coins },
+  { path: "/lead-sources", label: "Lead Sources", icon: Share2 },
+  { path: "/expenses", label: "My Expenses", icon: Wallet },
 ];
 
 const defaultStatusLabels = [
