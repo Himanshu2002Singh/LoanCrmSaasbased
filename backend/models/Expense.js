@@ -120,6 +120,23 @@ const Expense = sequelize.define(
       },
       onDelete: "SET NULL",
     },
+    expenseType: {
+      type: DataTypes.STRING(50),
+      allowNull: false,
+      defaultValue: "OFFICE",
+      field: "expense_type",
+      comment: "OFFICE or EMPLOYEE",
+    },
+    employeeId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      field: "employee_id",
+      references: {
+        model: "users",
+        key: "id",
+      },
+      onDelete: "SET NULL",
+    },
   },
   {
     tableName: "expenses",

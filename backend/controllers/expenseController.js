@@ -10,8 +10,12 @@ const DEFAULT_CATEGORIES = [
   "Software & Subscriptions",
   "Stationery & Printing",
   "Travel & Fuel",
+  "Client Meeting & Food",
   "Office Maintenance",
   "Marketing & Advertising",
+  "Courier & Postage",
+  "Mobile Recharge",
+  "Staff Welfare",
   "Legal & Accounting",
   "Miscellaneous",
 ];
@@ -27,7 +31,7 @@ const getMonthStr = (dateInput) => {
 
 /**
  * GET /api/expenses
- * Query params: month (YYYY-MM), category, status, search, fromDate, toDate, page, limit
+ * Query params: month (YYYY-MM), category, status, search, fromDate, toDate, expenseType, employeeId, page, limit
  */
 exports.getExpenses = async (req, res) => {
   try {
@@ -39,11 +43,39 @@ exports.getExpenses = async (req, res) => {
       search,
       fromDate,
       toDate,
+      expenseType,
+      employeeId,
       page = 1,
       limit = 50,
     } = req.query;
 
+    const isAdminOrHasPerm =
+      req.user.role === "SUPERADMIN" ||
+      req.user.role === "COMPANY_ADMIN" ||
+      Boolean(req.permissions?.viewExpenses);
+
     const where = { ...scope };
+
+    // Role-based visibility
+    if (!isAdminOrHasPerm) {
+      // Employees, Operations, Sales Managers without full viewExpenses see only their own expenses
+      where[Op.or] = [
+        { createdById: req.user.id },
+        { employeeId: req.user.id },
+      ];
+    } else {
+      // Admin / Manager with viewExpenses
+      if (expenseType && expenseType !== "ALL") {
+        where.expenseType = expenseType.toUpperCase();
+      }
+
+      if (employeeId && employeeId !== "ALL") {
+        const empId = parseInt(employeeId, 10);
+        if (!isNaN(empId)) {
+          where[Op.or] = [{ employeeId: empId }, { createdById: empId }];
+        }
+      }
+    }
 
     if (month && month !== "ALL") {
       where.expenseMonth = month;
@@ -67,13 +99,37 @@ exports.getExpenses = async (req, res) => {
 
     if (search && search.trim()) {
       const term = `%${search.trim()}%`;
-      where[Op.or] = [
+      const matchingUsers = await User.findAll({
+        where: {
+          ...scope,
+          name: { [Op.like]: term },
+        },
+        attributes: ["id"],
+        raw: true,
+      });
+      const matchingUserIds = matchingUsers.map((u) => u.id);
+
+      const searchConditions = [
         { expenseCode: { [Op.like]: term } },
         { vendorName: { [Op.like]: term } },
         { description: { [Op.like]: term } },
         { category: { [Op.like]: term } },
         { remarks: { [Op.like]: term } },
       ];
+
+      if (matchingUserIds.length > 0) {
+        searchConditions.push(
+          { createdById: { [Op.in]: matchingUserIds } },
+          { employeeId: { [Op.in]: matchingUserIds } }
+        );
+      }
+
+      if (where[Op.or]) {
+        where[Op.and] = [{ [Op.or]: where[Op.or] }, { [Op.or]: searchConditions }];
+        delete where[Op.or];
+      } else {
+        where[Op.or] = searchConditions;
+      }
     }
 
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
@@ -86,7 +142,13 @@ exports.getExpenses = async (req, res) => {
         {
           model: User,
           as: "createdBy",
-          attributes: ["id", "name", "email"],
+          attributes: ["id", "name", "email", "role", "phone"],
+          required: false,
+        },
+        {
+          model: User,
+          as: "employee",
+          attributes: ["id", "name", "email", "role", "phone"],
           required: false,
         },
       ],
@@ -95,14 +157,16 @@ exports.getExpenses = async (req, res) => {
       offset,
     });
 
-    // Calculate totals across ALL matched records (not just this page)
+    // Calculate totals across ALL matched records (no include needed to avoid only_full_group_by)
     const allMatches = await Expense.findAll({
       where,
       attributes: [
-        [fn("SUM", col("base_amount")), "totalBase"],
-        [fn("SUM", col("gst_amount")), "totalGst"],
-        [fn("SUM", col("total_amount")), "totalAmount"],
-        [fn("COUNT", col("id")), "matchCount"],
+        [fn("SUM", col("Expense.base_amount")), "totalBase"],
+        [fn("SUM", col("Expense.gst_amount")), "totalGst"],
+        [fn("SUM", col("Expense.total_amount")), "totalAmount"],
+        [fn("SUM", literal("CASE WHEN Expense.status = 'PAID' THEN Expense.total_amount ELSE 0 END")), "totalPaid"],
+        [fn("SUM", literal("CASE WHEN Expense.status = 'PENDING' THEN Expense.total_amount ELSE 0 END")), "totalPending"],
+        [fn("COUNT", col("Expense.id")), "matchCount"],
       ],
       raw: true,
     });
@@ -111,6 +175,8 @@ exports.getExpenses = async (req, res) => {
       totalBase: parseFloat(allMatches[0]?.totalBase) || 0,
       totalGst: parseFloat(allMatches[0]?.totalGst) || 0,
       totalAmount: parseFloat(allMatches[0]?.totalAmount) || 0,
+      totalPaid: parseFloat(allMatches[0]?.totalPaid) || 0,
+      totalPending: parseFloat(allMatches[0]?.totalPending) || 0,
       totalCount: parseInt(allMatches[0]?.matchCount, 10) || count,
     };
 
@@ -135,10 +201,11 @@ exports.getExpenses = async (req, res) => {
  * GET /api/expenses/summary
  * Master Monthly Overview:
  *  1. Office Running Costs (Expenses)
- *  2. Employee Salaries (from Users)
- *  3. Employee Incentives (from CasePayout manpower extraCharges with assigned lead employee)
- *  4. Partner / Connector Payouts (from PartyPayment / CasePayouts)
- *  5. Bank Commission Inflow vs Total Outflows
+ *  2. Employee Expenses (Submitted by employees)
+ *  3. Employee Salaries (from Users)
+ *  4. Employee Incentives (from CasePayout manpower extraCharges with assigned lead employee)
+ *  5. Partner / Connector Payouts (from PartyPayment / CasePayouts)
+ *  6. Bank Commission Inflow vs Total Outflows
  */
 exports.getExpenseSummary = async (req, res) => {
   try {
@@ -153,10 +220,11 @@ exports.getExpenseSummary = async (req, res) => {
     const lastDay = new Date(year, monthIndex + 1, 0).getDate();
     const endOfMonth = `${targetMonth}-${String(lastDay).padStart(2, "0")}`;
 
-    // 1. Office Running Costs
+    // 1. Office Running Costs (OFFICE expenses)
     const officeExpenses = await Expense.findAll({
       where: {
         ...scope,
+        expenseType: "OFFICE",
         [Op.or]: [
           { expenseMonth: targetMonth },
           { expenseDate: { [Op.between]: [startOfMonth, endOfMonth] } },
@@ -187,6 +255,77 @@ exports.getExpenseSummary = async (req, res) => {
     }
 
     const officeCategoryBreakdown = Object.values(categoryMap).sort((a, b) => b.amount - a.amount);
+
+    // 1b. Employee Expenses for target month
+    const employeeExpenses = await Expense.findAll({
+      where: {
+        ...scope,
+        expenseType: "EMPLOYEE",
+        [Op.or]: [
+          { expenseMonth: targetMonth },
+          { expenseDate: { [Op.between]: [startOfMonth, endOfMonth] } },
+        ],
+      },
+      include: [
+        {
+          model: User,
+          as: "employee",
+          attributes: ["id", "name", "email", "role"],
+          required: false,
+        },
+        {
+          model: User,
+          as: "createdBy",
+          attributes: ["id", "name", "email", "role"],
+          required: false,
+        },
+      ],
+    });
+
+    let employeeExpTotal = 0;
+    let employeeExpPaid = 0;
+    let employeeExpPending = 0;
+    const employeeExpUserMap = {};
+
+    for (const exp of employeeExpenses) {
+      const tot = parseFloat(exp.totalAmount ?? exp.total_amount) || 0;
+      employeeExpTotal += tot;
+      if (exp.status === "PAID") {
+        employeeExpPaid += tot;
+      } else {
+        employeeExpPending += tot;
+      }
+
+      const emp = exp.employee || exp.createdBy;
+      const empId = emp ? emp.id : 0;
+      const empName = emp ? emp.name : "Unassigned";
+      const empRole = emp ? emp.role : "EMPLOYEE";
+      const empEmail = emp ? emp.email : "";
+
+      if (!employeeExpUserMap[empId]) {
+        employeeExpUserMap[empId] = {
+          employeeId: empId,
+          name: empName,
+          role: empRole,
+          email: empEmail,
+          totalAmount: 0,
+          paidAmount: 0,
+          pendingAmount: 0,
+          count: 0,
+        };
+      }
+      employeeExpUserMap[empId].totalAmount += tot;
+      if (exp.status === "PAID") {
+        employeeExpUserMap[empId].paidAmount += tot;
+      } else {
+        employeeExpUserMap[empId].pendingAmount += tot;
+      }
+      employeeExpUserMap[empId].count += 1;
+    }
+
+    const employeeExpensesBreakdown = Object.values(employeeExpUserMap).sort(
+      (a, b) => b.totalAmount - a.totalAmount
+    );
 
     // 2. Active Employees & Base Salaries
     const employees = await User.findAll({
@@ -302,12 +441,11 @@ exports.getExpenseSummary = async (req, res) => {
       totalDirectPartyPayments += parseFloat(pp.amount) || 0;
     }
 
-    // If direct party payments are logged, use them or take the max of recorded payments vs case dues
     const totalPartyPayout = Math.max(totalDirectPartyPayments, totalPartyPayoutsFromCases);
 
     // 5. Grand Totals
     const grandTotalExpenses =
-      officeGrandTotal + totalStaffSalary + totalStaffIncentives + totalPartyPayout;
+      officeGrandTotal + employeeExpTotal + totalStaffSalary + totalStaffIncentives + totalPartyPayout;
 
     const netProfitOrLoss = totalBankCommissionReceived - grandTotalExpenses;
 
@@ -324,6 +462,10 @@ exports.getExpenseSummary = async (req, res) => {
         officeRunningCosts: officeGrandTotal,
         officeBaseTotal,
         officeGstTotal,
+        employeeExpensesTotal: employeeExpTotal,
+        employeeExpensesPaid: employeeExpPaid,
+        employeeExpensesPending: employeeExpPending,
+        employeeExpenseCount: employeeExpenses.length,
         staffSalaries: totalStaffSalary,
         staffIncentives: totalStaffIncentives,
         staffTotalCost: totalStaffSalary + totalStaffIncentives,
@@ -336,6 +478,13 @@ exports.getExpenseSummary = async (req, res) => {
         disbursedCaseCount: casePayouts.length,
       },
       officeCategoryBreakdown,
+      employeeExpensesSummary: {
+        totalAmount: employeeExpTotal,
+        paidAmount: employeeExpPaid,
+        pendingAmount: employeeExpPending,
+        count: employeeExpenses.length,
+      },
+      employeeExpensesBreakdown,
       staffBreakdown,
       incentiveCases,
     });
@@ -347,6 +496,7 @@ exports.getExpenseSummary = async (req, res) => {
 
 /**
  * POST /api/expenses
+ * Submits an expense: Office Expense or Employee Expense
  */
 exports.createExpense = async (req, res) => {
   try {
@@ -355,36 +505,65 @@ exports.createExpense = async (req, res) => {
       return res.status(400).json({ message: "companyId is required" });
     }
 
+    const isAdminOrManager =
+      req.user.role === "SUPERADMIN" ||
+      req.user.role === "COMPANY_ADMIN" ||
+      Boolean(req.permissions?.manageExpenses);
+
     const {
       expenseDate,
       category,
       vendorName,
       description,
+      amount,
       baseAmount,
       gstPercent,
       paymentMode,
       status,
       remarks,
+      expenseType: requestedType,
+      employeeId: requestedEmployeeId,
     } = req.body;
 
-    if (!expenseDate) {
-      return res.status(400).json({ message: "expenseDate is required" });
-    }
-
-    const dateStr = String(expenseDate).slice(0, 10);
+    const chosenDate = expenseDate || new Date().toISOString().slice(0, 10);
+    const dateStr = String(chosenDate).slice(0, 10);
     const monthStr = dateStr.slice(0, 7);
 
-    const base = Math.max(0, parseFloat(baseAmount) || 0);
+    // Accept either baseAmount or amount
+    const rawAmount = baseAmount !== undefined ? baseAmount : amount;
+    const base = Math.max(0, parseFloat(rawAmount) || 0);
     const gstPct = Math.max(0, parseFloat(gstPercent) || 0);
     const gstAmt = Math.round(base * (gstPct / 100) * 100) / 100;
     const total = Math.round((base + gstAmt) * 100) / 100;
 
-    // Generate readable code e.g. EXP-202609-001
+    // Determine expenseType and employeeId
+    let finalExpenseType = "EMPLOYEE";
+    let finalEmployeeId = req.user.id;
+
+    if (isAdminOrManager) {
+      if (requestedType === "OFFICE") {
+        finalExpenseType = "OFFICE";
+        finalEmployeeId = null;
+      } else if (requestedType === "EMPLOYEE") {
+        finalExpenseType = "EMPLOYEE";
+        finalEmployeeId = requestedEmployeeId ? parseInt(requestedEmployeeId, 10) : req.user.id;
+      } else {
+        finalExpenseType = requestedEmployeeId ? "EMPLOYEE" : "OFFICE";
+        finalEmployeeId = requestedEmployeeId ? parseInt(requestedEmployeeId, 10) : null;
+      }
+    } else {
+      // Normal employee / sales manager / operations always records EMPLOYEE expense
+      finalExpenseType = "EMPLOYEE";
+      finalEmployeeId = req.user.id;
+    }
+
+    // Generate readable code e.g. EXP-EMP-202609-001 or EXP-202609-001
     const countThisMonth = await Expense.count({
       where: { companyId, expenseMonth: monthStr },
     });
     const suffix = String(countThisMonth + 1).padStart(3, "0");
-    const expenseCode = `EXP-${monthStr.replace("-", "")}-${suffix}`;
+    const prefix = finalExpenseType === "EMPLOYEE" ? "EXP-EMP" : "EXP";
+    const expenseCode = `${prefix}-${monthStr.replace("-", "")}-${suffix}`;
 
     const expense = await Expense.create({
       companyId,
@@ -398,15 +577,19 @@ exports.createExpense = async (req, res) => {
       gstPercent: gstPct,
       gstAmount: gstAmt,
       totalAmount: total,
+      amount: total,
       paymentMode: paymentMode || "UPI",
       status: (status || "PAID").toUpperCase(),
       remarks: remarks ? String(remarks).trim() : "",
       createdById: req.user.id || null,
+      expenseType: finalExpenseType,
+      employeeId: finalEmployeeId,
     });
 
     const created = await Expense.findByPk(expense.id, {
       include: [
-        { model: User, as: "createdBy", attributes: ["id", "name", "email"], required: false },
+        { model: User, as: "createdBy", attributes: ["id", "name", "email", "role", "phone"], required: false },
+        { model: User, as: "employee", attributes: ["id", "name", "email", "role", "phone"], required: false },
       ],
     });
 
@@ -427,6 +610,11 @@ exports.createExpense = async (req, res) => {
 exports.updateExpense = async (req, res) => {
   try {
     const scope = companyScope(req);
+    const isAdminOrManager =
+      req.user.role === "SUPERADMIN" ||
+      req.user.role === "COMPANY_ADMIN" ||
+      Boolean(req.permissions?.manageExpenses);
+
     const expense = await Expense.findOne({
       where: { id: req.params.id, ...scope },
     });
@@ -435,27 +623,38 @@ exports.updateExpense = async (req, res) => {
       return res.status(404).json({ message: "Expense record not found" });
     }
 
+    // Non-admin can only update their own expense
+    if (!isAdminOrManager) {
+      if (expense.createdById !== req.user.id && expense.employeeId !== req.user.id) {
+        return res.status(403).json({ message: "You are not authorized to edit this expense" });
+      }
+    }
+
     const {
       expenseDate,
       category,
       vendorName,
       description,
+      amount,
       baseAmount,
       gstPercent,
       paymentMode,
       status,
       remarks,
+      expenseType,
+      employeeId,
     } = req.body;
 
     const dateStr = expenseDate !== undefined ? String(expenseDate).slice(0, 10) : expense.expenseDate;
     const monthStr = dateStr.slice(0, 7);
 
-    const base = baseAmount !== undefined ? Math.max(0, parseFloat(baseAmount) || 0) : parseFloat(expense.baseAmount) || 0;
+    const rawAmount = baseAmount !== undefined ? baseAmount : amount;
+    const base = rawAmount !== undefined ? Math.max(0, parseFloat(rawAmount) || 0) : parseFloat(expense.baseAmount) || 0;
     const gstPct = gstPercent !== undefined ? Math.max(0, parseFloat(gstPercent) || 0) : parseFloat(expense.gstPercent) || 0;
     const gstAmt = Math.round(base * (gstPct / 100) * 100) / 100;
     const total = Math.round((base + gstAmt) * 100) / 100;
 
-    await expense.update({
+    const updatePayload = {
       expenseDate: dateStr,
       expenseMonth: monthStr,
       category: category !== undefined ? String(category).trim() : expense.category,
@@ -465,14 +664,23 @@ exports.updateExpense = async (req, res) => {
       gstPercent: gstPct,
       gstAmount: gstAmt,
       totalAmount: total,
+      amount: total,
       paymentMode: paymentMode !== undefined ? paymentMode : expense.paymentMode,
       status: status !== undefined ? String(status).toUpperCase() : expense.status,
       remarks: remarks !== undefined ? String(remarks).trim() : expense.remarks,
-    });
+    };
+
+    if (isAdminOrManager) {
+      if (expenseType !== undefined) updatePayload.expenseType = expenseType;
+      if (employeeId !== undefined) updatePayload.employeeId = employeeId ? parseInt(employeeId, 10) : null;
+    }
+
+    await expense.update(updatePayload);
 
     const updated = await Expense.findByPk(expense.id, {
       include: [
-        { model: User, as: "createdBy", attributes: ["id", "name", "email"], required: false },
+        { model: User, as: "createdBy", attributes: ["id", "name", "email", "role", "phone"], required: false },
+        { model: User, as: "employee", attributes: ["id", "name", "email", "role", "phone"], required: false },
       ],
     });
 
@@ -493,12 +701,24 @@ exports.updateExpense = async (req, res) => {
 exports.deleteExpense = async (req, res) => {
   try {
     const scope = companyScope(req);
+    const isAdminOrManager =
+      req.user.role === "SUPERADMIN" ||
+      req.user.role === "COMPANY_ADMIN" ||
+      Boolean(req.permissions?.manageExpenses) ||
+      Boolean(req.permissions?.deleteRecords);
+
     const expense = await Expense.findOne({
       where: { id: req.params.id, ...scope },
     });
 
     if (!expense) {
       return res.status(404).json({ message: "Expense record not found" });
+    }
+
+    if (!isAdminOrManager) {
+      if (expense.createdById !== req.user.id && expense.employeeId !== req.user.id) {
+        return res.status(403).json({ message: "You are not authorized to delete this expense" });
+      }
     }
 
     await expense.destroy();

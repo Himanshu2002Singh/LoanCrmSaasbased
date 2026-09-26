@@ -24,6 +24,8 @@ import {
   Clock,
   ArrowUpRight,
   Building,
+  UserCheck,
+  AlertCircle,
 } from "lucide-react";
 import API_URL from "../../config";
 
@@ -41,8 +43,12 @@ const DEFAULT_CATEGORIES = [
   "Software & Subscriptions",
   "Stationery & Printing",
   "Travel & Fuel",
+  "Client Meeting & Food",
   "Office Maintenance",
   "Marketing & Advertising",
+  "Courier & Postage",
+  "Mobile Recharge",
+  "Staff Welfare",
   "Legal & Accounting",
   "Miscellaneous",
 ];
@@ -61,30 +67,61 @@ const formatMonthDisplay = (monthStr) => {
   return date.toLocaleString("en-IN", { month: "long", year: "numeric" });
 };
 
-const emptyForm = () => {
+const emptyForm = (type = "OFFICE") => {
   const today = new Date().toISOString().slice(0, 10);
   return {
     expenseDate: today,
-    category: "Office Rent",
+    category: type === "EMPLOYEE" ? "Travel & Fuel" : "Office Rent",
     vendorName: "",
     description: "",
+    amount: "",
     baseAmount: "",
-    gstPercent: 18,
+    gstPercent: type === "EMPLOYEE" ? 0 : 18,
     paymentMode: "UPI",
     status: "PAID",
     remarks: "",
+    expenseType: type,
+    employeeId: "",
   };
 };
 
 export default function ExpenseTrackerScreen() {
+  const userRole = localStorage.getItem("userRole") || "";
+  const employeeRole = localStorage.getItem("employeeRole") || "";
+  const currentUserId = parseInt(localStorage.getItem("employeeId"), 10) || null;
+  const currentUserName = localStorage.getItem("name") || "";
+
+  const isCompanyAdmin =
+    ["COMPANY_ADMIN", "SUPERADMIN"].includes(userRole.toUpperCase()) ||
+    ["admin", "superadmin"].includes(employeeRole?.toLowerCase());
+
+  const userPermissions = useMemo(() => {
+    try {
+      return JSON.parse(localStorage.getItem("userPermissions") || "{}");
+    } catch {
+      return {};
+    }
+  }, []);
+
+  const canViewFullExpenses = isCompanyAdmin || Boolean(userPermissions.viewExpenses);
+
   const [selectedMonth, setSelectedMonth] = useState(getTodayMonthStr);
-  const [activeTab, setActiveTab] = useState("OFFICE"); // 'OFFICE' | 'STAFF' | 'PARTNER' | 'ANALYTICS'
-  
+  // Admin tabs: 'OFFICE' | 'EMPLOYEE_EXPENSES' | 'STAFF' | 'PARTNER' | 'ANALYTICS'
+  const [activeTab, setActiveTab] = useState(canViewFullExpenses ? "OFFICE" : "MY_EXPENSES");
+
   // Data states
   const [expenses, setExpenses] = useState([]);
-  const [totals, setTotals] = useState({ totalBase: 0, totalGst: 0, totalAmount: 0, totalCount: 0 });
+  const [totals, setTotals] = useState({
+    totalBase: 0,
+    totalGst: 0,
+    totalAmount: 0,
+    totalPaid: 0,
+    totalPending: 0,
+    totalCount: 0,
+  });
   const [summaryData, setSummaryData] = useState(null);
   const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
+  const [staffList, setStaffList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [summaryLoading, setSummaryLoading] = useState(true);
 
@@ -92,16 +129,31 @@ export default function ExpenseTrackerScreen() {
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("ALL");
   const [selectedStatus, setSelectedStatus] = useState("ALL");
+  const [selectedEmployee, setSelectedEmployee] = useState("ALL");
 
   // Modals
   const [showAddModal, setShowAddModal] = useState(false);
+  const [modalExpenseType, setModalExpenseType] = useState("OFFICE"); // 'OFFICE' or 'EMPLOYEE'
   const [editExpense, setEditExpense] = useState(null);
   const [deleteExpense, setDeleteExpense] = useState(null);
-  const [formData, setFormData] = useState(emptyForm);
+  const [formData, setFormData] = useState(() => emptyForm("OFFICE"));
   const [submitting, setSubmitting] = useState(false);
 
-  // Fetch summary data
+  // Fetch staff list for admin dropdown
+  const fetchStaffList = async () => {
+    try {
+      const res = await axios.get(`${API_URL}/users`, { params: { limit: 200 } });
+      if (res.data?.success && res.data.data) {
+        setStaffList(res.data.data.filter((u) => u.role !== "SUPERADMIN"));
+      }
+    } catch (e) {
+      // Handled via summaryData fallback
+    }
+  };
+
+  // Fetch summary data (for admin)
   const fetchSummary = async (month = selectedMonth) => {
+    if (!canViewFullExpenses) return;
     try {
       setSummaryLoading(true);
       const res = await axios.get(`${API_URL}/expenses/summary`, {
@@ -109,6 +161,9 @@ export default function ExpenseTrackerScreen() {
       });
       if (res.data?.success) {
         setSummaryData(res.data);
+        if (res.data.staffBreakdown && staffList.length === 0) {
+          setStaffList(res.data.staffBreakdown);
+        }
       }
     } catch (err) {
       console.error("Error fetching expense summary:", err);
@@ -121,18 +176,38 @@ export default function ExpenseTrackerScreen() {
   const fetchExpenses = async () => {
     try {
       setLoading(true);
-      const res = await axios.get(`${API_URL}/expenses`, {
-        params: {
-          month: selectedMonth,
-          category: selectedCategory,
-          status: selectedStatus,
-          search: search.trim() || undefined,
-          limit: 100,
-        },
-      });
+      const params = {
+        month: selectedMonth,
+        category: selectedCategory,
+        status: selectedStatus,
+        search: search.trim() || undefined,
+        limit: 150,
+      };
+
+      if (canViewFullExpenses) {
+        if (activeTab === "OFFICE") {
+          params.expenseType = "OFFICE";
+        } else if (activeTab === "EMPLOYEE_EXPENSES") {
+          params.expenseType = "EMPLOYEE";
+          if (selectedEmployee !== "ALL") {
+            params.employeeId = selectedEmployee;
+          }
+        }
+      }
+
+      const res = await axios.get(`${API_URL}/expenses`, { params });
       if (res.data?.success) {
         setExpenses(res.data.data || []);
-        setTotals(res.data.totals || { totalBase: 0, totalGst: 0, totalAmount: 0, totalCount: 0 });
+        setTotals(
+          res.data.totals || {
+            totalBase: 0,
+            totalGst: 0,
+            totalAmount: 0,
+            totalPaid: 0,
+            totalPending: 0,
+            totalCount: 0,
+          }
+        );
       }
     } catch (err) {
       console.error("Error fetching expenses:", err);
@@ -156,12 +231,17 @@ export default function ExpenseTrackerScreen() {
 
   useEffect(() => {
     fetchCategories();
-  }, []);
+    if (canViewFullExpenses) {
+      fetchStaffList();
+    }
+  }, [canViewFullExpenses]);
 
   useEffect(() => {
-    fetchSummary(selectedMonth);
+    if (canViewFullExpenses) {
+      fetchSummary(selectedMonth);
+    }
     fetchExpenses();
-  }, [selectedMonth, selectedCategory, selectedStatus, search]);
+  }, [selectedMonth, selectedCategory, selectedStatus, selectedEmployee, search, activeTab, canViewFullExpenses]);
 
   // Month navigation
   const handlePrevMonth = () => {
@@ -181,32 +261,62 @@ export default function ExpenseTrackerScreen() {
     setFormData((prev) => ({ ...prev, [field]: val }));
   };
 
-  // Live calculation for modal
+  // Live calculation for Office modal
   const computedGstAmount = useMemo(() => {
-    const base = parseFloat(formData.baseAmount) || 0;
+    const base = parseFloat(formData.baseAmount || formData.amount) || 0;
     const pct = parseFloat(formData.gstPercent) || 0;
     return Math.round(base * (pct / 100) * 100) / 100;
-  }, [formData.baseAmount, formData.gstPercent]);
+  }, [formData.baseAmount, formData.amount, formData.gstPercent]);
 
   const computedTotalAmount = useMemo(() => {
-    const base = parseFloat(formData.baseAmount) || 0;
+    const base = parseFloat(formData.baseAmount || formData.amount) || 0;
     return Math.round((base + computedGstAmount) * 100) / 100;
-  }, [formData.baseAmount, computedGstAmount]);
+  }, [formData.baseAmount, formData.amount, computedGstAmount]);
+
+  // Open Add Modal
+  const openAddModal = (type = "OFFICE") => {
+    const targetType = !canViewFullExpenses ? "EMPLOYEE" : type;
+    setModalExpenseType(targetType);
+    setEditExpense(null);
+    setFormData({
+      ...emptyForm(targetType),
+      employeeId: canViewFullExpenses && selectedEmployee !== "ALL" ? selectedEmployee : (currentUserId || ""),
+    });
+    setShowAddModal(true);
+  };
 
   // Open Edit Modal
   const openEditModal = (exp) => {
     setEditExpense(exp);
+    const expType = exp.expenseType || "OFFICE";
+    setModalExpenseType(expType);
     setFormData({
       expenseDate: exp.expenseDate || new Date().toISOString().slice(0, 10),
       category: exp.category || "Miscellaneous",
       vendorName: exp.vendorName || "",
       description: exp.description || "",
-      baseAmount: exp.baseAmount || "",
-      gstPercent: exp.gstPercent !== undefined ? exp.gstPercent : 18,
+      amount: exp.baseAmount || exp.totalAmount || "",
+      baseAmount: exp.baseAmount || exp.totalAmount || "",
+      gstPercent: exp.gstPercent !== undefined ? exp.gstPercent : (expType === "EMPLOYEE" ? 0 : 18),
       paymentMode: exp.paymentMode || "UPI",
       status: exp.status || "PAID",
       remarks: exp.remarks || "",
+      expenseType: expType,
+      employeeId: exp.employeeId || "",
     });
+  };
+
+  // Quick toggle between PAID and PENDING for Admin
+  const handleQuickStatusToggle = async (exp, newStatus) => {
+    try {
+      await axios.put(`${API_URL}/expenses/${exp.id}`, { status: newStatus });
+      toast.success(`Expense ${exp.expenseCode || ""} marked as ${newStatus}`);
+      fetchExpenses();
+      if (canViewFullExpenses) fetchSummary(selectedMonth);
+    } catch (err) {
+      console.error("Status toggle error:", err);
+      toast.error(err.response?.data?.message || "Failed to update status");
+    }
   };
 
   // Save new or updated expense
@@ -216,23 +326,28 @@ export default function ExpenseTrackerScreen() {
       toast.error("Please select a date");
       return;
     }
-    if (!formData.baseAmount || parseFloat(formData.baseAmount) <= 0) {
-      toast.error("Please enter a valid base amount");
+    const valAmount = parseFloat(formData.baseAmount || formData.amount);
+    if (!valAmount || valAmount <= 0) {
+      toast.error("Please enter a valid amount");
       return;
     }
 
     setSubmitting(true);
     try {
+      const finalType = modalExpenseType || (!canViewFullExpenses ? "EMPLOYEE" : activeTab === "OFFICE" ? "OFFICE" : "EMPLOYEE");
       const payload = {
         expenseDate: formData.expenseDate,
         category: formData.category,
         vendorName: formData.vendorName,
         description: formData.description,
-        baseAmount: parseFloat(formData.baseAmount) || 0,
-        gstPercent: parseFloat(formData.gstPercent) || 0,
+        amount: valAmount,
+        baseAmount: valAmount,
+        gstPercent: finalType === "EMPLOYEE" ? 0 : parseFloat(formData.gstPercent) || 0,
         paymentMode: formData.paymentMode,
         status: formData.status,
         remarks: formData.remarks,
+        expenseType: finalType,
+        employeeId: formData.employeeId || undefined,
       };
 
       if (editExpense) {
@@ -241,13 +356,17 @@ export default function ExpenseTrackerScreen() {
         setEditExpense(null);
       } else {
         await axios.post(`${API_URL}/expenses`, payload);
-        toast.success("Expense added successfully");
+        toast.success(
+          finalType === "EMPLOYEE"
+            ? "Employee expense recorded successfully"
+            : "Office expense added successfully"
+        );
         setShowAddModal(false);
       }
 
-      setFormData(emptyForm());
+      setFormData(emptyForm(modalExpenseType));
       fetchExpenses();
-      fetchSummary(selectedMonth);
+      if (canViewFullExpenses) fetchSummary(selectedMonth);
       fetchCategories();
     } catch (err) {
       console.error("Save error:", err);
@@ -265,7 +384,7 @@ export default function ExpenseTrackerScreen() {
       toast.success("Expense deleted successfully");
       setDeleteExpense(null);
       fetchExpenses();
-      fetchSummary(selectedMonth);
+      if (canViewFullExpenses) fetchSummary(selectedMonth);
     } catch (err) {
       console.error("Delete error:", err);
       toast.error("Failed to delete expense");
@@ -282,14 +401,12 @@ export default function ExpenseTrackerScreen() {
     const headers = [
       "Expense ID",
       "Date",
-      "Month",
+      "Type",
+      "Employee / Submitter",
       "Category",
       "Vendor / Payee",
       "Description",
-      "Base Amount (₹)",
-      "GST %",
-      "GST Amount (₹)",
-      "Total Amount (₹)",
+      "Amount (₹)",
       "Payment Mode",
       "Status",
       "Remarks",
@@ -298,20 +415,19 @@ export default function ExpenseTrackerScreen() {
     const rows = expenses.map((exp) => [
       `"${exp.expenseCode || ""}"`,
       `"${exp.expenseDate || ""}"`,
-      `"${exp.expenseMonth || ""}"`,
+      `"${exp.expenseType || "OFFICE"}"`,
+      `"${(exp.employee?.name || exp.createdBy?.name || "").replace(/"/g, '""')}"`,
       `"${exp.category || ""}"`,
       `"${(exp.vendorName || "").replace(/"/g, '""')}"`,
       `"${(exp.description || "").replace(/"/g, '""')}"`,
-      parseFloat(exp.baseAmount || 0).toFixed(2),
-      parseFloat(exp.gstPercent || 0).toFixed(2),
-      parseFloat(exp.gstAmount || 0).toFixed(2),
-      parseFloat(exp.totalAmount || 0).toFixed(2),
+      parseFloat(exp.totalAmount || exp.baseAmount || 0).toFixed(2),
       `"${exp.paymentMode || ""}"`,
       `"${exp.status || ""}"`,
       `"${(exp.remarks || "").replace(/"/g, '""')}"`,
     ]);
 
-    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const csvContent =
+      "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
@@ -332,11 +448,18 @@ export default function ExpenseTrackerScreen() {
       <div className="cc-exp-header-bar">
         <div>
           <div className="cc-exp-breadcrumb">
-            <span>Accounting & Finance</span> / <strong>Expense Tracker</strong>
+            <span>Accounting & Finance</span> /{" "}
+            <strong>{canViewFullExpenses ? "Expense Tracker" : "My Expenses & Claims"}</strong>
           </div>
-          <h1 className="cc-exp-title">Expenses — office running costs</h1>
+          <h1 className="cc-exp-title">
+            {canViewFullExpenses
+              ? "Expenses — Business Outflow & Staff Claims"
+              : "My Expenses & Reimbursements"}
+          </h1>
           <p className="cc-exp-subtitle">
-            Month, GST Amount and Total Amount calculate on their own. Complete business outflow audit.
+            {canViewFullExpenses
+              ? "Office running costs, staff claims, deal payouts, and monthly outflows audit."
+              : `Submit and track your business expenses, travel, pantry, meetings and claims.`}
           </p>
         </div>
 
@@ -365,132 +488,237 @@ export default function ExpenseTrackerScreen() {
             <Download size={15} /> Export CSV
           </button>
 
+          {canViewFullExpenses ? (
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                type="button"
+                className="cc-exp-btn secondary-btn-green"
+                onClick={() => openAddModal("EMPLOYEE")}
+                title="Add expense submitted by or for an employee"
+              >
+                <Users size={15} /> + Add Employee Expense
+              </button>
+              <button
+                type="button"
+                className="cc-exp-btn primary"
+                onClick={() => openAddModal("OFFICE")}
+                title="Add direct office running bill"
+              >
+                <Plus size={16} /> + Add Office Expense
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="cc-exp-btn primary"
+              onClick={() => openAddModal("EMPLOYEE")}
+            >
+              <Plus size={16} /> + Add New Expense
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ADMIN OVERVIEW METRIC CARDS */}
+      {canViewFullExpenses && (
+        <div className="cc-exp-cards-grid">
+          {/* Card 1: Total Outflow */}
+          <div className="cc-exp-stat-card grand-total">
+            <div className="cc-exp-stat-head">
+              <span>Total Month Outflow</span>
+              <span className="cc-exp-stat-icon red"><TrendingDown size={18} /></span>
+            </div>
+            <div className="cc-exp-stat-val">
+              {currencyFormatter.format(summary.grandTotalExpenses || 0)}
+            </div>
+            <div className="cc-exp-stat-sub">
+              All Costs: Office + Employee Claims + Salaries + Incentives + Payouts
+            </div>
+          </div>
+
+          {/* Card 2: Office Running Costs */}
+          <div
+            className={`cc-exp-stat-card clickable ${activeTab === "OFFICE" ? "active-card" : ""}`}
+            onClick={() => setActiveTab("OFFICE")}
+          >
+            <div className="cc-exp-stat-head">
+              <span>Office Running Costs</span>
+              <span className="cc-exp-stat-icon blue"><Building size={18} /></span>
+            </div>
+            <div className="cc-exp-stat-val">
+              {currencyFormatter.format(summary.officeRunningCosts || 0)}
+            </div>
+            <div className="cc-exp-stat-sub">
+              {summary.officeExpenseCount || 0} Bills (Base: {currencyFormatter.format(summary.officeBaseTotal || 0)})
+            </div>
+          </div>
+
+          {/* Card 3: Expenses by Employees (NEW) */}
+          <div
+            className={`cc-exp-stat-card clickable ${activeTab === "EMPLOYEE_EXPENSES" ? "active-card" : ""}`}
+            onClick={() => setActiveTab("EMPLOYEE_EXPENSES")}
+            style={{ borderColor: activeTab === "EMPLOYEE_EXPENSES" ? "#0284c7" : undefined }}
+          >
+            <div className="cc-exp-stat-head">
+              <span style={{ color: "#0369a1", fontWeight: 700 }}>Expenses by Employees</span>
+              <span className="cc-exp-stat-icon cyan"><Users size={18} /></span>
+            </div>
+            <div className="cc-exp-stat-val" style={{ color: "#0284c7" }}>
+              {currencyFormatter.format(summary.employeeExpensesTotal || 0)}
+            </div>
+            <div className="cc-exp-stat-sub">
+              Paid: {currencyFormatter.format(summary.employeeExpensesPaid || 0)} | Pending:{" "}
+              <strong style={{ color: "#ea580c" }}>{currencyFormatter.format(summary.employeeExpensesPending || 0)}</strong>
+            </div>
+          </div>
+
+          {/* Card 4: Staff Salaries */}
+          <div
+            className={`cc-exp-stat-card clickable ${activeTab === "STAFF" ? "active-card" : ""}`}
+            onClick={() => setActiveTab("STAFF")}
+          >
+            <div className="cc-exp-stat-head">
+              <span>Staff Salaries (Fixed)</span>
+              <span className="cc-exp-stat-icon green"><UserCheck size={18} /></span>
+            </div>
+            <div className="cc-exp-stat-val">
+              {currencyFormatter.format(summary.staffSalaries || 0)}
+            </div>
+            <div className="cc-exp-stat-sub">
+              {summary.employeeCount || 0} active employees on payroll
+            </div>
+          </div>
+
+          {/* Card 5: Staff Incentives */}
+          <div
+            className={`cc-exp-stat-card clickable ${activeTab === "PARTNER" ? "active-card" : ""}`}
+            onClick={() => setActiveTab("PARTNER")}
+          >
+            <div className="cc-exp-stat-head">
+              <span>Staff Incentives (Deals)</span>
+              <span className="cc-exp-stat-icon amber"><Wallet size={18} /></span>
+            </div>
+            <div className="cc-exp-stat-val" style={{ color: "#d97706" }}>
+              {currencyFormatter.format(summary.staffIncentives || 0)}
+            </div>
+            <div className="cc-exp-stat-sub">
+              Earned from Manpower charges on disbursed payouts
+            </div>
+          </div>
+
+          {/* Card 6: Partner Payouts */}
+          <div className="cc-exp-stat-card">
+            <div className="cc-exp-stat-head">
+              <span>Source / Partner Payouts</span>
+              <span className="cc-exp-stat-icon purple"><Layers size={18} /></span>
+            </div>
+            <div className="cc-exp-stat-val">
+              {currencyFormatter.format(summary.partnerPayouts || 0)}
+            </div>
+            <div className="cc-exp-stat-sub">
+              Connector & vendor commissions disbursed
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* STAFF PORTAL METRIC CARDS (When not admin) */}
+      {!canViewFullExpenses && (
+        <div className="cc-exp-cards-grid employee-portal-grid">
+          <div className="cc-exp-stat-card grand-total">
+            <div className="cc-exp-stat-head">
+              <span>My Total Month Claims</span>
+              <span className="cc-exp-stat-icon blue"><Wallet size={18} /></span>
+            </div>
+            <div className="cc-exp-stat-val">
+              {currencyFormatter.format(totals.totalAmount || 0)}
+            </div>
+            <div className="cc-exp-stat-sub">
+              Total {totals.totalCount || 0} claims submitted in {formatMonthDisplay(selectedMonth)}
+            </div>
+          </div>
+
+          <div className="cc-exp-stat-card">
+            <div className="cc-exp-stat-head">
+              <span>Paid / Reimbursed</span>
+              <span className="cc-exp-stat-icon green"><CheckCircle2 size={18} /></span>
+            </div>
+            <div className="cc-exp-stat-val" style={{ color: "#047857" }}>
+              {currencyFormatter.format(totals.totalPaid || 0)}
+            </div>
+            <div className="cc-exp-stat-sub">
+              Approved and paid out to you
+            </div>
+          </div>
+
+          <div className="cc-exp-stat-card">
+            <div className="cc-exp-stat-head">
+              <span>Pending Reimbursement</span>
+              <span className="cc-exp-stat-icon amber"><Clock size={18} /></span>
+            </div>
+            <div className="cc-exp-stat-val" style={{ color: "#d97706" }}>
+              {currencyFormatter.format(totals.totalPending || 0)}
+            </div>
+            <div className="cc-exp-stat-sub">
+              Awaiting admin approval / settlement
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ADMIN TABS BAR */}
+      {canViewFullExpenses && (
+        <div className="cc-exp-tabs-container">
           <button
             type="button"
-            className="cc-exp-btn primary"
-            onClick={() => {
-              setFormData(emptyForm());
-              setShowAddModal(true);
-            }}
+            className={`cc-exp-tab-btn ${activeTab === "OFFICE" ? "active" : ""}`}
+            onClick={() => setActiveTab("OFFICE")}
           >
-            <Plus size={16} /> Add Office Expense
+            <Receipt size={16} /> Office Running Costs Table
+            <span className="cc-exp-badge">{summaryData?.summary?.officeExpenseCount || 0}</span>
+          </button>
+
+          <button
+            type="button"
+            className={`cc-exp-tab-btn highlight-tab ${activeTab === "EMPLOYEE_EXPENSES" ? "active" : ""}`}
+            onClick={() => setActiveTab("EMPLOYEE_EXPENSES")}
+          >
+            <Users size={16} /> Expenses by Employees
+            <span className="cc-exp-badge cyan-badge">
+              {summaryData?.summary?.employeeExpenseCount || 0}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            className={`cc-exp-tab-btn ${activeTab === "STAFF" ? "active" : ""}`}
+            onClick={() => setActiveTab("STAFF")}
+          >
+            <UserCheck size={16} /> Staff Salaries & Incentives
+            <span className="cc-exp-badge">{summaryData?.staffBreakdown?.length || 0}</span>
+          </button>
+
+          <button
+            type="button"
+            className={`cc-exp-tab-btn ${activeTab === "PARTNER" ? "active" : ""}`}
+            onClick={() => setActiveTab("PARTNER")}
+          >
+            <Layers size={16} /> Deal Wise Incentives & Payouts
+            <span className="cc-exp-badge">{summaryData?.incentiveCases?.length || 0}</span>
+          </button>
+
+          <button
+            type="button"
+            className={`cc-exp-tab-btn ${activeTab === "ANALYTICS" ? "active" : ""}`}
+            onClick={() => setActiveTab("ANALYTICS")}
+          >
+            <ArrowUpRight size={16} /> Monthly P&L Overview
           </button>
         </div>
-      </div>
+      )}
 
-      {/* Overview Metric Summary Cards */}
-      <div className="cc-exp-cards-grid">
-        {/* Card 1: Total Outflow */}
-        <div className="cc-exp-stat-card grand-total">
-          <div className="cc-exp-stat-head">
-            <span>Total Month Outflow</span>
-            <span className="cc-exp-stat-icon red"><TrendingDown size={18} /></span>
-          </div>
-          <div className="cc-exp-stat-val">
-            {currencyFormatter.format(summary.grandTotalExpenses || 0)}
-          </div>
-          <div className="cc-exp-stat-sub">
-            All Costs: Office + Salaries + Incentives + Payouts
-          </div>
-        </div>
-
-        {/* Card 2: Office Running Costs */}
-        <div className="cc-exp-stat-card">
-          <div className="cc-exp-stat-head">
-            <span>Office Running Costs</span>
-            <span className="cc-exp-stat-icon blue"><Building size={18} /></span>
-          </div>
-          <div className="cc-exp-stat-val">
-            {currencyFormatter.format(summary.officeRunningCosts || 0)}
-          </div>
-          <div className="cc-exp-stat-sub">
-            {summary.officeExpenseCount || 0} Bills (Base: {currencyFormatter.format(summary.officeBaseTotal || 0)})
-          </div>
-        </div>
-
-        {/* Card 3: Staff Salaries */}
-        <div className="cc-exp-stat-card">
-          <div className="cc-exp-stat-head">
-            <span>Staff Salaries (Fixed)</span>
-            <span className="cc-exp-stat-icon green"><Users size={18} /></span>
-          </div>
-          <div className="cc-exp-stat-val">
-            {currencyFormatter.format(summary.staffSalaries || 0)}
-          </div>
-          <div className="cc-exp-stat-sub">
-            {summary.employeeCount || 0} active employees on payroll
-          </div>
-        </div>
-
-        {/* Card 4: Staff Incentives (Manpower) */}
-        <div className="cc-exp-stat-card">
-          <div className="cc-exp-stat-head">
-            <span>Staff Incentives (Deals)</span>
-            <span className="cc-exp-stat-icon amber"><Wallet size={18} /></span>
-          </div>
-          <div className="cc-exp-stat-val" style={{ color: "#d97706" }}>
-            {currencyFormatter.format(summary.staffIncentives || 0)}
-          </div>
-          <div className="cc-exp-stat-sub">
-            Earned from Manpower charges on disbursed payouts
-          </div>
-        </div>
-
-        {/* Card 5: Partner Payouts */}
-        <div className="cc-exp-stat-card">
-          <div className="cc-exp-stat-head">
-            <span>Source / Partner Payouts</span>
-            <span className="cc-exp-stat-icon purple"><Layers size={18} /></span>
-          </div>
-          <div className="cc-exp-stat-val">
-            {currencyFormatter.format(summary.partnerPayouts || 0)}
-          </div>
-          <div className="cc-exp-stat-sub">
-            Connector & vendor commissions disbursed
-          </div>
-        </div>
-      </div>
-
-      {/* Tabs Bar */}
-      <div className="cc-exp-tabs-container">
-        <button
-          type="button"
-          className={`cc-exp-tab-btn ${activeTab === "OFFICE" ? "active" : ""}`}
-          onClick={() => setActiveTab("OFFICE")}
-        >
-          <Receipt size={16} /> Office Running Costs Table
-          <span className="cc-exp-badge">{expenses.length}</span>
-        </button>
-
-        <button
-          type="button"
-          className={`cc-exp-tab-btn ${activeTab === "STAFF" ? "active" : ""}`}
-          onClick={() => setActiveTab("STAFF")}
-        >
-          <Users size={16} /> Staff Salaries & Incentives
-          <span className="cc-exp-badge">{summaryData?.staffBreakdown?.length || 0}</span>
-        </button>
-
-        <button
-          type="button"
-          className={`cc-exp-tab-btn ${activeTab === "PARTNER" ? "active" : ""}`}
-          onClick={() => setActiveTab("PARTNER")}
-        >
-          <Layers size={16} /> Deal Wise Incentives & Payouts
-          <span className="cc-exp-badge">{summaryData?.incentiveCases?.length || 0}</span>
-        </button>
-
-        <button
-          type="button"
-          className={`cc-exp-tab-btn ${activeTab === "ANALYTICS" ? "active" : ""}`}
-          onClick={() => setActiveTab("ANALYTICS")}
-        >
-          <ArrowUpRight size={16} /> Monthly P&L Overview
-        </button>
-      </div>
-
-      {/* TAB 1: OFFICE RUNNING COSTS (Exact spreadsheet replica from User's uploaded screenshot) */}
-      {activeTab === "OFFICE" && (
+      {/* TAB 1: OFFICE RUNNING COSTS (Exact spreadsheet replica for Admin) */}
+      {canViewFullExpenses && activeTab === "OFFICE" && (
         <div className="cc-exp-table-section">
           {/* Table Filters Bar */}
           <div className="cc-exp-filter-bar">
@@ -579,7 +807,7 @@ export default function ExpenseTrackerScreen() {
                   ) : expenses.length === 0 ? (
                     <tr>
                       <td colSpan={14} className="cc-exp-empty-cell">
-                        No expenses found for this month / filter. Click <strong>"+ Add Office Expense"</strong> to add one.
+                        No office expenses found for this month / filter. Click <strong>"+ Add Office Expense"</strong> to add one.
                       </td>
                     </tr>
                   ) : (
@@ -688,8 +916,446 @@ export default function ExpenseTrackerScreen() {
         </div>
       )}
 
-      {/* TAB 2: STAFF SALARIES & INCENTIVES */}
-      {activeTab === "STAFF" && (
+      {/* TAB 2: EXPENSES BY EMPLOYEES (THE NEW REQUESTED TAB FOR ADMIN) */}
+      {canViewFullExpenses && activeTab === "EMPLOYEE_EXPENSES" && (
+        <div className="cc-exp-table-section">
+          {/* Sub-Header Banner */}
+          <div className="cc-exp-tab-head-banner cyan-banner">
+            <div>
+              <h3>Expenses Submitted by Employees & Team Managers</h3>
+              <p>
+                Claims and business expenses incurred by Sales Managers, Operations Team, Calling Staff and Employees for{" "}
+                <strong>{formatMonthDisplay(selectedMonth)}</strong>.
+              </p>
+            </div>
+            <div className="cc-exp-tab-head-pills">
+              <span className="pill blue">
+                Total Claims: {currencyFormatter.format(summary.employeeExpensesTotal || totals.totalAmount || 0)}
+              </span>
+              <span className="pill green">
+                Paid: {currencyFormatter.format(summary.employeeExpensesPaid || totals.totalPaid || 0)}
+              </span>
+              <span className="pill amber">
+                Pending Reimbursement: {currencyFormatter.format(summary.employeeExpensesPending || totals.totalPending || 0)}
+              </span>
+            </div>
+          </div>
+
+          {/* Table Filters Bar */}
+          <div className="cc-exp-filter-bar">
+            <div className="cc-exp-search-box">
+              <Search size={16} />
+              <input
+                type="text"
+                placeholder="Search by Employee, Category, Remarks, Code..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+
+            <div className="cc-exp-select-filters">
+              {/* Filter by Employee */}
+              <div className="cc-exp-filter-group">
+                <span>Employee:</span>
+                <select value={selectedEmployee} onChange={(e) => setSelectedEmployee(e.target.value)}>
+                  <option value="ALL">All Employees</option>
+                  {staffList.map((emp) => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.name} ({emp.role})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Filter by Category */}
+              <div className="cc-exp-filter-group">
+                <span>Category:</span>
+                <select value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)}>
+                  <option value="ALL">All Categories</option>
+                  {categories.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Filter by Status */}
+              <div className="cc-exp-filter-group">
+                <span>Status:</span>
+                <select value={selectedStatus} onChange={(e) => setSelectedStatus(e.target.value)}>
+                  <option value="ALL">All Status</option>
+                  <option value="PAID">Paid</option>
+                  <option value="PENDING">Pending</option>
+                </select>
+              </div>
+
+              {(search || selectedEmployee !== "ALL" || selectedCategory !== "ALL" || selectedStatus !== "ALL") && (
+                <button
+                  type="button"
+                  className="cc-exp-reset-btn"
+                  onClick={() => {
+                    setSearch("");
+                    setSelectedEmployee("ALL");
+                    setSelectedCategory("ALL");
+                    setSelectedStatus("ALL");
+                  }}
+                >
+                  <RefreshCw size={13} /> Reset
+                </button>
+              )}
+
+              <button
+                type="button"
+                className="cc-exp-btn primary"
+                onClick={() => openAddModal("EMPLOYEE")}
+                style={{ marginLeft: "auto" }}
+              >
+                <Plus size={15} /> Add Employee Expense
+              </button>
+            </div>
+          </div>
+
+          {/* Employee Expenses Table */}
+          <div className="cc-exp-sheet-wrapper">
+            <div className="cc-exp-table-scroll">
+              <table className="cc-exp-sheet-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: 120 }}>Claim Code</th>
+                    <th style={{ width: 105 }}>Date</th>
+                    <th>Employee Name & Role</th>
+                    <th style={{ width: 160 }}>Category</th>
+                    <th style={{ width: 140, textAlign: "right" }}>Amount (₹)</th>
+                    <th style={{ width: 130, textAlign: "center" }}>Status</th>
+                    <th style={{ width: 120 }}>Payment Mode</th>
+                    <th style={{ minWidth: 200 }}>Remarks & Notes</th>
+                    <th style={{ width: 130, textAlign: "center" }}>Quick Action</th>
+                    <th style={{ width: 85, textAlign: "center" }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr>
+                      <td colSpan={10} className="cc-exp-empty-cell">
+                        <RefreshCw size={20} className="cc-spin" /> Loading employee expenses...
+                      </td>
+                    </tr>
+                  ) : expenses.length === 0 ? (
+                    <tr>
+                      <td colSpan={10} className="cc-exp-empty-cell">
+                        No employee expenses recorded for this month. Click{" "}
+                        <strong>"+ Add Employee Expense"</strong> or wait for employee submissions.
+                      </td>
+                    </tr>
+                  ) : (
+                    expenses.map((exp) => {
+                      const empUser = exp.employee || exp.createdBy;
+                      const empName = empUser?.name || "Direct";
+                      const empRole = empUser?.role || "EMPLOYEE";
+                      const empEmail = empUser?.email || "";
+                      const amount = parseFloat(exp.totalAmount || exp.baseAmount || 0);
+
+                      return (
+                        <tr key={exp.id} className="cc-exp-row">
+                          <td>
+                            <span className="cc-exp-id-pill cyan">{exp.expenseCode || `EXP-EMP-${exp.id}`}</span>
+                          </td>
+                          <td>
+                            <span style={{ fontWeight: 600, color: "#1e293b", fontSize: 13 }}>
+                              {exp.expenseDate}
+                            </span>
+                          </td>
+                          <td>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                              <span className="cc-exp-user-avatar cyan">
+                                {(empName || "?").slice(0, 2).toUpperCase()}
+                              </span>
+                              <div>
+                                <strong style={{ color: "#0f172a", fontSize: 13.5, display: "block" }}>
+                                  {empName}
+                                </strong>
+                                <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
+                                  <span className={`cc-exp-role-badge ${empRole.toLowerCase()}`}>
+                                    {empRole === "OPS" ? "Operations" : empRole === "MANAGER" ? "Sales Manager" : empRole}
+                                  </span>
+                                  {empEmail && (
+                                    <span style={{ fontSize: 11.5, color: "#64748b" }}>{empEmail}</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                          <td>
+                            <span className="cc-exp-cat-badge">{exp.category}</span>
+                          </td>
+                          <td style={{ textAlign: "right", fontWeight: 700, fontSize: 14, color: "#0f172a" }}>
+                            {currencyFormatter.format(amount)}
+                          </td>
+                          <td style={{ textAlign: "center" }}>
+                            <span className={`cc-exp-status-pill ${exp.status?.toLowerCase()}`}>
+                              {exp.status === "PAID" ? <CheckCircle2 size={12} /> : <Clock size={12} />}
+                              {exp.status}
+                            </span>
+                          </td>
+                          <td>
+                            <span className="cc-exp-mode-tag">{exp.paymentMode || "UPI"}</span>
+                          </td>
+                          <td>
+                            <div className="cc-exp-remarks-cell">
+                              {exp.remarks || exp.description || "--"}
+                            </div>
+                          </td>
+                          <td style={{ textAlign: "center" }}>
+                            {exp.status === "PENDING" ? (
+                              <button
+                                type="button"
+                                className="cc-exp-quick-pay-btn"
+                                onClick={() => handleQuickStatusToggle(exp, "PAID")}
+                                title="Click to approve and mark as PAID"
+                              >
+                                <CheckCircle2 size={12} /> Mark Paid
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="cc-exp-quick-pending-btn"
+                                onClick={() => handleQuickStatusToggle(exp, "PENDING")}
+                                title="Click to mark as PENDING"
+                              >
+                                <Clock size={12} /> Mark Pending
+                              </button>
+                            )}
+                          </td>
+                          <td style={{ textAlign: "center" }}>
+                            <div className="cc-exp-row-actions">
+                              <button
+                                type="button"
+                                className="cc-exp-act-btn edit"
+                                title="Edit Expense"
+                                onClick={() => openEditModal(exp)}
+                              >
+                                <Edit2 size={13} />
+                              </button>
+                              <button
+                                type="button"
+                                className="cc-exp-act-btn delete"
+                                title="Delete Expense"
+                                onClick={() => setDeleteExpense(exp)}
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+
+                {/* Table Footer with Summary Totals */}
+                {expenses.length > 0 && (
+                  <tfoot>
+                    <tr className="cc-exp-sheet-total-row">
+                      <td colSpan={4} style={{ textAlign: "right", fontWeight: 700, paddingRight: 16 }}>
+                        TOTAL EMPLOYEE EXPENSES ({totals.totalCount} Claims):
+                      </td>
+                      <td style={{ textAlign: "right", fontWeight: 800, color: "#0284c7", fontSize: 14 }}>
+                        {currencyFormatter.format(totals.totalAmount)}
+                      </td>
+                      <td colSpan={2} style={{ textAlign: "center", fontSize: 12, color: "#475569" }}>
+                        Paid: <strong>{currencyFormatter.format(totals.totalPaid)}</strong> | Pending:{" "}
+                        <strong style={{ color: "#ea580c" }}>{currencyFormatter.format(totals.totalPending)}</strong>
+                      </td>
+                      <td colSpan={3}></td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* STAFF PORTAL VIEW (For Employees, Sales Managers, Operations viewing their own claims) */}
+      {!canViewFullExpenses && (
+        <div className="cc-exp-table-section">
+          {/* Table Filters Bar */}
+          <div className="cc-exp-filter-bar">
+            <div className="cc-exp-search-box">
+              <Search size={16} />
+              <input
+                type="text"
+                placeholder="Search your expense remark, category, code..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+
+            <div className="cc-exp-select-filters">
+              {/* Category Filter */}
+              <div className="cc-exp-filter-group">
+                <span>Category:</span>
+                <select value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)}>
+                  <option value="ALL">All Categories</option>
+                  {categories.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Status Filter */}
+              <div className="cc-exp-filter-group">
+                <span>Status:</span>
+                <select value={selectedStatus} onChange={(e) => setSelectedStatus(e.target.value)}>
+                  <option value="ALL">All Status</option>
+                  <option value="PAID">Paid</option>
+                  <option value="PENDING">Pending</option>
+                </select>
+              </div>
+
+              {(search || selectedCategory !== "ALL" || selectedStatus !== "ALL") && (
+                <button
+                  type="button"
+                  className="cc-exp-reset-btn"
+                  onClick={() => {
+                    setSearch("");
+                    setSelectedCategory("ALL");
+                    setSelectedStatus("ALL");
+                  }}
+                >
+                  <RefreshCw size={13} /> Reset
+                </button>
+              )}
+
+              <button
+                type="button"
+                className="cc-exp-btn primary"
+                onClick={() => openAddModal("EMPLOYEE")}
+                style={{ marginLeft: "auto" }}
+              >
+                <Plus size={15} /> Add Expense
+              </button>
+            </div>
+          </div>
+
+          {/* Claims Table */}
+          <div className="cc-exp-sheet-wrapper">
+            <div className="cc-exp-table-scroll">
+              <table className="cc-exp-sheet-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: 120 }}>Claim Code</th>
+                    <th style={{ width: 105 }}>Date</th>
+                    <th style={{ width: 170 }}>Category</th>
+                    <th style={{ width: 130, textAlign: "right" }}>Amount (₹)</th>
+                    <th style={{ width: 120, textAlign: "center" }}>Status</th>
+                    <th style={{ width: 120 }}>Payment Mode</th>
+                    <th style={{ minWidth: 220 }}>Remarks & Description</th>
+                    <th style={{ width: 85, textAlign: "center" }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr>
+                      <td colSpan={8} className="cc-exp-empty-cell">
+                        <RefreshCw size={20} className="cc-spin" /> Loading your expenses...
+                      </td>
+                    </tr>
+                  ) : expenses.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="cc-exp-empty-cell">
+                        No expenses found for {formatMonthDisplay(selectedMonth)}. Click{" "}
+                        <strong>"+ Add New Expense"</strong> to submit a claim.
+                      </td>
+                    </tr>
+                  ) : (
+                    expenses.map((exp) => {
+                      const amount = parseFloat(exp.totalAmount || exp.baseAmount || 0);
+
+                      return (
+                        <tr key={exp.id} className="cc-exp-row">
+                          <td>
+                            <span className="cc-exp-id-pill cyan">{exp.expenseCode || `EXP-${exp.id}`}</span>
+                          </td>
+                          <td>
+                            <span style={{ fontWeight: 600, color: "#1e293b", fontSize: 13 }}>
+                              {exp.expenseDate}
+                            </span>
+                          </td>
+                          <td>
+                            <span className="cc-exp-cat-badge">{exp.category}</span>
+                          </td>
+                          <td style={{ textAlign: "right", fontWeight: 700, fontSize: 14, color: "#0f172a" }}>
+                            {currencyFormatter.format(amount)}
+                          </td>
+                          <td style={{ textAlign: "center" }}>
+                            <span className={`cc-exp-status-pill ${exp.status?.toLowerCase()}`}>
+                              {exp.status === "PAID" ? <CheckCircle2 size={12} /> : <Clock size={12} />}
+                              {exp.status}
+                            </span>
+                          </td>
+                          <td>
+                            <span className="cc-exp-mode-tag">{exp.paymentMode || "UPI"}</span>
+                          </td>
+                          <td>
+                            <div className="cc-exp-remarks-cell">
+                              {exp.remarks || exp.description || "--"}
+                            </div>
+                          </td>
+                          <td style={{ textAlign: "center" }}>
+                            <div className="cc-exp-row-actions">
+                              <button
+                                type="button"
+                                className="cc-exp-act-btn edit"
+                                title="Edit Expense"
+                                onClick={() => openEditModal(exp)}
+                              >
+                                <Edit2 size={13} />
+                              </button>
+                              <button
+                                type="button"
+                                className="cc-exp-act-btn delete"
+                                title="Delete Expense"
+                                onClick={() => setDeleteExpense(exp)}
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+
+                {/* Table Footer with Summary Totals */}
+                {expenses.length > 0 && (
+                  <tfoot>
+                    <tr className="cc-exp-sheet-total-row">
+                      <td colSpan={3} style={{ textAlign: "right", fontWeight: 700, paddingRight: 16 }}>
+                        MY TOTAL CLAIMS ({totals.totalCount} Records):
+                      </td>
+                      <td style={{ textAlign: "right", fontWeight: 800, color: "#047857", fontSize: 14 }}>
+                        {currencyFormatter.format(totals.totalAmount)}
+                      </td>
+                      <td colSpan={4} style={{ textAlign: "left", paddingLeft: 16, fontSize: 12, color: "#475569" }}>
+                        Paid: <strong>{currencyFormatter.format(totals.totalPaid)}</strong> | Pending:{" "}
+                        <strong style={{ color: "#ea580c" }}>{currencyFormatter.format(totals.totalPending)}</strong>
+                      </td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: STAFF SALARIES & INCENTIVES (FOR ADMIN) */}
+      {canViewFullExpenses && activeTab === "STAFF" && (
         <div className="cc-exp-table-section">
           <div className="cc-exp-tab-head-banner">
             <div>
@@ -796,8 +1462,8 @@ export default function ExpenseTrackerScreen() {
         </div>
       )}
 
-      {/* TAB 3: DEAL-WISE INCENTIVES & PARTNER COMMISSIONS */}
-      {activeTab === "PARTNER" && (
+      {/* TAB 4: DEAL-WISE INCENTIVES & PARTNER COMMISSIONS */}
+      {canViewFullExpenses && activeTab === "PARTNER" && (
         <div className="cc-exp-table-section">
           <div className="cc-exp-tab-head-banner">
             <div>
@@ -877,8 +1543,8 @@ export default function ExpenseTrackerScreen() {
         </div>
       )}
 
-      {/* TAB 4: MONTHLY P&L & EXPENSE CATEGORY ANALYTICS */}
-      {activeTab === "ANALYTICS" && (
+      {/* TAB 5: MONTHLY P&L & EXPENSE CATEGORY ANALYTICS */}
+      {canViewFullExpenses && activeTab === "ANALYTICS" && (
         <div className="cc-exp-analytics-section">
           <div className="cc-exp-analytics-grid">
             {/* Category Breakdown Box */}
@@ -931,6 +1597,10 @@ export default function ExpenseTrackerScreen() {
                   <span style={{ color: "#dc2626" }}>-{currencyFormatter.format(summary.officeRunningCosts || 0)}</span>
                 </div>
                 <div className="cc-exp-pnl-row">
+                  <span>Less: Expenses by Employees (Claims):</span>
+                  <span style={{ color: "#ea580c" }}>-{currencyFormatter.format(summary.employeeExpensesTotal || 0)}</span>
+                </div>
+                <div className="cc-exp-pnl-row">
                   <span>Less: Staff Salaries (Fixed):</span>
                   <span style={{ color: "#dc2626" }}>-{currencyFormatter.format(summary.staffSalaries || 0)}</span>
                 </div>
@@ -976,9 +1646,19 @@ export default function ExpenseTrackerScreen() {
             <div className="cc-exp-modal-head">
               <div>
                 <p>{editExpense ? "Edit Record" : "New Entry"}</p>
-                <h3>{editExpense ? "Update Office Expense" : "Add Office Running Expense"}</h3>
+                <h3>
+                  {editExpense
+                    ? modalExpenseType === "EMPLOYEE"
+                      ? "Update Employee Expense Claim"
+                      : "Update Office Expense"
+                    : modalExpenseType === "EMPLOYEE"
+                    ? "Add Employee Expense Claim"
+                    : "Add Office Running Expense"}
+                </h3>
                 <small style={{ color: "#64748b", fontSize: 12 }}>
-                  Month, GST Amount and Total Amount calculate on their own.
+                  {modalExpenseType === "EMPLOYEE"
+                    ? "Record daily expense, travel, pantry, mobile recharge or operational claim."
+                    : "Month, GST Amount and Total Amount calculate on their own."}
                 </small>
               </div>
               <button
@@ -992,6 +1672,25 @@ export default function ExpenseTrackerScreen() {
 
             <form onSubmit={handleSaveExpense} className="cc-exp-modal-form">
               <div className="cc-exp-form-grid">
+                {/* For Admin adding an employee expense: allow selecting employee */}
+                {modalExpenseType === "EMPLOYEE" && canViewFullExpenses && (
+                  <label className="cc-exp-field span-2">
+                    <span>Select Employee *</span>
+                    <select
+                      value={formData.employeeId || ""}
+                      onChange={(e) => handleInputChange("employeeId", e.target.value)}
+                      required
+                    >
+                      <option value="">-- Choose Employee --</option>
+                      {staffList.map((emp) => (
+                        <option key={emp.id} value={emp.id}>
+                          {emp.name} ({emp.role === "OPS" ? "Operations" : emp.role === "MANAGER" ? "Sales Manager" : emp.role})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+
                 {/* Date */}
                 <label className="cc-exp-field">
                   <span>Date *</span>
@@ -1003,23 +1702,13 @@ export default function ExpenseTrackerScreen() {
                   />
                 </label>
 
-                {/* Month (Auto Calculated Preview) */}
-                <label className="cc-exp-field">
-                  <span>Month (Auto-calculated)</span>
-                  <input
-                    type="text"
-                    disabled
-                    value={formData.expenseDate ? formData.expenseDate.slice(0, 7) : ""}
-                    style={{ background: "#f1f5f9", color: "#475569", cursor: "not-allowed" }}
-                  />
-                </label>
-
                 {/* Category */}
                 <label className="cc-exp-field">
                   <span>Category *</span>
                   <select
                     value={formData.category}
                     onChange={(e) => handleInputChange("category", e.target.value)}
+                    required
                   >
                     {categories.map((c) => (
                       <option key={c} value={c}>
@@ -1029,71 +1718,33 @@ export default function ExpenseTrackerScreen() {
                   </select>
                 </label>
 
-                {/* Vendor / Payee */}
+                {/* Amount (₹) */}
                 <label className="cc-exp-field">
-                  <span>Vendor / Payee</span>
-                  <input
-                    type="text"
-                    placeholder="e.g. DLF Properties, Airtel, Tata Power"
-                    value={formData.vendorName}
-                    onChange={(e) => handleInputChange("vendorName", e.target.value)}
-                  />
-                </label>
-
-                {/* Description */}
-                <label className="cc-exp-field span-2">
-                  <span>Description</span>
-                  <input
-                    type="text"
-                    placeholder="e.g. Office electricity bill for Sep 2026"
-                    value={formData.description}
-                    onChange={(e) => handleInputChange("description", e.target.value)}
-                  />
-                </label>
-
-                {/* Base Amount */}
-                <label className="cc-exp-field">
-                  <span>Base Amount (₹) *</span>
+                  <span>Amount (₹) *</span>
                   <input
                     type="number"
                     step="any"
                     min="0"
                     required
-                    placeholder="e.g. 15000"
-                    value={formData.baseAmount}
-                    onChange={(e) => handleInputChange("baseAmount", e.target.value)}
+                    placeholder="e.g. 500"
+                    value={formData.baseAmount || formData.amount}
+                    onChange={(e) => {
+                      handleInputChange("baseAmount", e.target.value);
+                      handleInputChange("amount", e.target.value);
+                    }}
                   />
                 </label>
 
-                {/* GST % */}
+                {/* Status: Paid or Pending */}
                 <label className="cc-exp-field">
-                  <span>GST %</span>
+                  <span>Payment Status (Paid ya Pending) *</span>
                   <select
-                    value={formData.gstPercent}
-                    onChange={(e) => handleInputChange("gstPercent", e.target.value)}
+                    value={formData.status}
+                    onChange={(e) => handleInputChange("status", e.target.value)}
                   >
-                    <option value={0}>0% (Exempt / Nil)</option>
-                    <option value={5}>5%</option>
-                    <option value={12}>12%</option>
-                    <option value={18}>18% (Standard Services)</option>
-                    <option value={28}>28%</option>
+                    <option value="PAID">PAID</option>
+                    <option value="PENDING">PENDING</option>
                   </select>
-                </label>
-
-                {/* GST Amount (Auto Calculated) */}
-                <label className="cc-exp-field">
-                  <span>GST Amount (₹) [Auto]</span>
-                  <div className="cc-exp-computed-val">
-                    {currencyFormatter.format(computedGstAmount)}
-                  </div>
-                </label>
-
-                {/* Total Amount (Auto Calculated) */}
-                <label className="cc-exp-field">
-                  <span>Total Amount (₹) [Auto]</span>
-                  <div className="cc-exp-computed-val highlight">
-                    {currencyFormatter.format(computedTotalAmount)}
-                  </div>
                 </label>
 
                 {/* Payment Mode */}
@@ -1111,24 +1762,58 @@ export default function ExpenseTrackerScreen() {
                   </select>
                 </label>
 
-                {/* Status */}
-                <label className="cc-exp-field">
-                  <span>Payment Status</span>
-                  <select
-                    value={formData.status}
-                    onChange={(e) => handleInputChange("status", e.target.value)}
-                  >
-                    <option value="PAID">PAID</option>
-                    <option value="PENDING">PENDING</option>
-                  </select>
-                </label>
+                {/* If OFFICE expense: show Vendor, GST %, Total */}
+                {modalExpenseType === "OFFICE" && (
+                  <>
+                    <label className="cc-exp-field">
+                      <span>Vendor / Payee</span>
+                      <input
+                        type="text"
+                        placeholder="e.g. DLF Properties, Airtel, Tata Power"
+                        value={formData.vendorName}
+                        onChange={(e) => handleInputChange("vendorName", e.target.value)}
+                      />
+                    </label>
+
+                    <label className="cc-exp-field">
+                      <span>GST %</span>
+                      <select
+                        value={formData.gstPercent}
+                        onChange={(e) => handleInputChange("gstPercent", e.target.value)}
+                      >
+                        <option value={0}>0% (Exempt / Nil)</option>
+                        <option value={5}>5%</option>
+                        <option value={12}>12%</option>
+                        <option value={18}>18% (Standard Services)</option>
+                        <option value={28}>28%</option>
+                      </select>
+                    </label>
+
+                    <label className="cc-exp-field">
+                      <span>Total Amount (Auto Calculated)</span>
+                      <div className="cc-exp-computed-val highlight">
+                        {currencyFormatter.format(computedTotalAmount)}
+                      </div>
+                    </label>
+
+                    <label className="cc-exp-field span-2">
+                      <span>Description</span>
+                      <input
+                        type="text"
+                        placeholder="e.g. Office electricity bill for Sep 2026"
+                        value={formData.description}
+                        onChange={(e) => handleInputChange("description", e.target.value)}
+                      />
+                    </label>
+                  </>
+                )}
 
                 {/* Remarks */}
                 <label className="cc-exp-field span-2">
-                  <span>Remarks</span>
+                  <span>Remarks / Notes *</span>
                   <textarea
                     rows={2}
-                    placeholder="Transaction ref, invoice #, or note..."
+                    placeholder="Details about this expense, purpose, bill ref..."
                     value={formData.remarks}
                     onChange={(e) => handleInputChange("remarks", e.target.value)}
                   />
@@ -1145,7 +1830,13 @@ export default function ExpenseTrackerScreen() {
                   Cancel
                 </button>
                 <button type="submit" className="cc-exp-btn primary" disabled={submitting}>
-                  {submitting ? "Saving..." : editExpense ? "Update Expense" : "Save Expense"}
+                  {submitting
+                    ? "Saving..."
+                    : editExpense
+                    ? "Update Expense"
+                    : modalExpenseType === "EMPLOYEE"
+                    ? "Submit Employee Expense"
+                    : "Save Office Expense"}
                 </button>
               </div>
             </form>
@@ -1159,29 +1850,36 @@ export default function ExpenseTrackerScreen() {
           <div className="cc-exp-modal-card" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
             <div className="cc-exp-modal-head">
               <div>
-                <p style={{ color: "#dc2626" }}>Delete Confirmation</p>
-                <h3>Delete Expense?</h3>
+                <p>Confirm Action</p>
+                <h3>Delete Expense Record?</h3>
               </div>
-              <button type="button" className="cc-exp-modal-close" onClick={() => setDeleteExpense(null)}>
+              <button
+                type="button"
+                className="cc-exp-modal-close"
+                onClick={() => setDeleteExpense(null)}
+              >
                 <X size={18} />
               </button>
             </div>
-            <p style={{ fontSize: 13.5, color: "#475569", lineHeight: 1.5, margin: "8px 0 16px" }}>
-              Are you sure you want to delete expense{" "}
-              <strong>{deleteExpense.expenseCode || `#${deleteExpense.id}`}</strong> ({deleteExpense.category} -{" "}
-              {currencyFormatter.format(deleteExpense.totalAmount)})? This action cannot be undone.
-            </p>
+            <div style={{ padding: "18px 24px", color: "#475569", fontSize: 14 }}>
+              Are you sure you want to permanently delete expense{" "}
+              <strong>{deleteExpense.expenseCode || `#${deleteExpense.id}`}</strong> (
+              {currencyFormatter.format(deleteExpense.totalAmount || deleteExpense.baseAmount || 0)})?
+            </div>
             <div className="cc-exp-modal-actions">
-              <button type="button" className="cc-exp-btn secondary" onClick={() => setDeleteExpense(null)}>
+              <button
+                type="button"
+                className="cc-exp-btn secondary"
+                onClick={() => setDeleteExpense(null)}
+              >
                 Cancel
               </button>
               <button
                 type="button"
                 className="cc-exp-btn danger"
                 onClick={handleDeleteExpense}
-                style={{ background: "#dc2626", color: "#fff", borderColor: "transparent" }}
               >
-                Yes, Delete
+                Delete Expense
               </button>
             </div>
           </div>
@@ -1302,7 +2000,7 @@ const styles = `
   background: #047857;
   color: #ffffff;
 }
-.cc-exp-btn.primary:hover:not(:disabled) {
+.cc-exp-btn.primary:hover {
   background: #065f46;
 }
 .cc-exp-btn.secondary {
@@ -1311,28 +2009,63 @@ const styles = `
   border-color: #cbd5e1;
 }
 .cc-exp-btn.secondary:hover {
-  background: #f1f5f9;
+  background: #f8fafc;
+  color: #0f172a;
+}
+.cc-exp-btn.secondary-btn-green {
+  background: #ecfdf5;
+  color: #047857;
+  border-color: #a7f3d0;
+}
+.cc-exp-btn.secondary-btn-green:hover {
+  background: #d1fae5;
+  color: #065f46;
+}
+.cc-exp-btn.danger {
+  background: #dc2626;
+  color: #ffffff;
+}
+.cc-exp-btn.danger:hover {
+  background: #b91c1c;
 }
 
-/* Summary cards */
+/* Metric Summary Cards Grid */
 .cc-exp-cards-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 14px;
 }
+.cc-exp-cards-grid.employee-portal-grid {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
 .cc-exp-stat-card {
   background: #ffffff;
-  border-radius: 12px;
   border: 1px solid #e2e8f0;
+  border-radius: 12px;
   padding: 16px 18px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.02);
   display: flex;
   flex-direction: column;
   gap: 6px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+  transition: all 0.15s ease;
 }
+.cc-exp-stat-card.clickable {
+  cursor: pointer;
+}
+.cc-exp-stat-card.clickable:hover {
+  border-color: #94a3b8;
+  transform: translateY(-1px);
+}
+.cc-exp-stat-card.active-card {
+  border-color: #047857;
+  background: #fbfdfc;
+  box-shadow: 0 0 0 1px #047857;
+}
+
 .cc-exp-stat-card.grand-total {
-  border-left: 4px solid #b91c1c;
-  background: linear-gradient(135deg, #fff5f5 0%, #ffffff 100%);
+  background: linear-gradient(135deg, #fef2f2 0%, #ffffff 100%);
+  border-color: #fecaca;
 }
 .cc-exp-stat-head {
   display: flex;
@@ -1353,40 +2086,42 @@ const styles = `
 }
 .cc-exp-stat-icon.red { background: #fee2e2; color: #dc2626; }
 .cc-exp-stat-icon.blue { background: #e0f2fe; color: #0284c7; }
+.cc-exp-stat-icon.cyan { background: #e0f2fe; color: #0369a1; }
 .cc-exp-stat-icon.green { background: #dcfce7; color: #16a34a; }
 .cc-exp-stat-icon.amber { background: #fef3c7; color: #d97706; }
 .cc-exp-stat-icon.purple { background: #f3e8ff; color: #9333ea; }
 
 .cc-exp-stat-val {
-  font-size: 21px;
+  font-size: 22px;
   font-weight: 800;
   color: #0f172a;
 }
 .cc-exp-stat-sub {
   font-size: 11.5px;
   color: #64748b;
+  line-height: 1.4;
 }
 
-/* Tabs */
+/* Tabs Container */
 .cc-exp-tabs-container {
   display: flex;
-  align-items: center;
   gap: 8px;
   border-bottom: 2px solid #e2e8f0;
-  padding-bottom: 2px;
+  padding-bottom: 0px;
   overflow-x: auto;
 }
 .cc-exp-tab-btn {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 16px;
+  padding: 10px 18px;
   font-size: 13.5px;
   font-weight: 600;
-  background: transparent;
   color: #64748b;
+  background: transparent;
   border: none;
-  border-radius: 8px 8px 0 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
   cursor: pointer;
   transition: all 0.15s;
   white-space: nowrap;
@@ -1394,25 +2129,79 @@ const styles = `
 .cc-exp-tab-btn:hover {
   color: #0f172a;
   background: #f1f5f9;
+  border-radius: 8px 8px 0 0;
 }
 .cc-exp-tab-btn.active {
   color: #047857;
-  background: #ffffff;
-  border-bottom: 3px solid #047857;
+  border-bottom-color: #047857;
   font-weight: 700;
 }
+.cc-exp-tab-btn.highlight-tab.active {
+  color: #0284c7;
+  border-bottom-color: #0284c7;
+}
+
 .cc-exp-badge {
+  display: inline-block;
   padding: 2px 7px;
-  border-radius: 999px;
   font-size: 11px;
   font-weight: 700;
+  border-radius: 999px;
   background: #e2e8f0;
-  color: #334155;
+  color: #475569;
 }
 .cc-exp-tab-btn.active .cc-exp-badge {
-  background: #dcfce7;
+  background: #d1fae5;
   color: #047857;
 }
+.cc-exp-badge.cyan-badge {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+/* Tab Head Banner */
+.cc-exp-tab-head-banner {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+.cc-exp-tab-head-banner.cyan-banner {
+  background: linear-gradient(135deg, #f0f9ff 0%, #ffffff 100%);
+  border-color: #bae6fd;
+}
+.cc-exp-tab-head-banner h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+}
+.cc-exp-tab-head-banner p {
+  margin: 3px 0 0;
+  font-size: 12.5px;
+  color: #64748b;
+}
+.cc-exp-tab-head-pills {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.cc-exp-tab-head-pills .pill {
+  padding: 5px 12px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.cc-exp-tab-head-pills .pill.green { background: #dcfce7; color: #15803d; }
+.cc-exp-tab-head-pills .pill.blue { background: #e0f2fe; color: #0284c7; }
+.cc-exp-tab-head-pills .pill.amber { background: #fef3c7; color: #b45309; }
+.cc-exp-tab-head-pills .pill.purple { background: #f3e8ff; color: #7e22ce; }
+.cc-exp-tab-head-pills .pill.total { background: #047857; color: #ffffff; }
 
 /* Table Section */
 .cc-exp-table-section {
@@ -1421,6 +2210,7 @@ const styles = `
   gap: 12px;
 }
 
+/* Filters bar */
 .cc-exp-filter-bar {
   display: flex;
   align-items: center;
@@ -1429,7 +2219,7 @@ const styles = `
   gap: 12px;
   background: #ffffff;
   padding: 12px 16px;
-  border-radius: 10px;
+  border-radius: 12px;
   border: 1px solid #e2e8f0;
 }
 .cc-exp-search-box {
@@ -1439,8 +2229,10 @@ const styles = `
   background: #f8fafc;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
-  padding: 7px 12px;
-  flex: 1 1 260px;
+  padding: 6px 12px;
+  flex: 1;
+  min-width: 240px;
+  max-width: 440px;
 }
 .cc-exp-search-box input {
   border: none;
@@ -1453,67 +2245,67 @@ const styles = `
 .cc-exp-select-filters {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 .cc-exp-filter-group {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
-  color: #64748b;
-  font-weight: 600;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #475569;
 }
 .cc-exp-filter-group select {
   padding: 6px 10px;
-  border: 1px solid #cbd5e1;
-  border-radius: 7px;
   font-size: 12.5px;
-  background: #fff;
-  color: #0f172a;
-}
-.cc-exp-reset-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
   border: 1px solid #cbd5e1;
-  background: #f8fafc;
-  color: #64748b;
-  padding: 6px 10px;
   border-radius: 7px;
-  font-size: 12px;
-  font-weight: 600;
+  background: #ffffff;
+  color: #0f172a;
+  outline: none;
   cursor: pointer;
 }
+.cc-exp-reset-btn {
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  color: #475569;
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.cc-exp-reset-btn:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
 
-/* User's Exact Sheet Wrapper and Header Banner */
+/* Spreadsheet Wrapper */
 .cc-exp-sheet-wrapper {
   background: #ffffff;
+  border: 1px solid #cbd5e1;
   border-radius: 12px;
-  border: 1px solid #1e3a8a;
   overflow: hidden;
-  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.03);
 }
 .cc-exp-sheet-header-banner {
-  background: #173d6d;
-  color: #ffffff;
-  padding: 12px 18px;
+  background: #f1f5f9;
+  border-bottom: 1px solid #cbd5e1;
+  padding: 10px 16px;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  text-align: center;
-}
-.cc-exp-sheet-header-banner span {
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
 }
 .cc-exp-sheet-header-banner small {
-  font-size: 12px;
-  color: #cbd5e1;
-  font-style: italic;
-  margin-top: 2px;
+  font-weight: 400;
+  color: #64748b;
+  font-size: 11.5px;
 }
 
 .cc-exp-table-scroll {
@@ -1524,79 +2316,105 @@ const styles = `
   width: 100%;
   border-collapse: collapse;
   font-size: 12.5px;
+  text-align: left;
 }
 .cc-exp-sheet-table th {
-  background: #1b4980;
-  color: #ffffff;
-  font-weight: 600;
-  font-size: 12px;
+  background: #f8fafc;
+  color: #475569;
+  font-weight: 700;
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
   padding: 10px 12px;
-  border: 1px solid #143763;
+  border-bottom: 1px solid #cbd5e1;
   white-space: nowrap;
-  letter-spacing: 0.02em;
 }
 .cc-exp-sheet-table td {
-  padding: 9px 12px;
-  border: 1px solid #e2e8f0;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  color: #334155;
   vertical-align: middle;
-  background: #ffffff;
 }
-.cc-exp-sheet-table tbody tr:hover td {
+.cc-exp-sheet-table tr.cc-exp-row:hover {
   background: #f8fafc;
 }
+.cc-exp-empty-cell {
+  text-align: center;
+  padding: 40px !important;
+  color: #64748b;
+  font-size: 13px;
+}
 
+.cc-exp-sheet-total-row td {
+  background: #f8fafc;
+  font-weight: 700;
+  border-top: 2px solid #cbd5e1;
+  border-bottom: none;
+  padding: 12px;
+}
+
+/* Pills and Badges */
 .cc-exp-id-pill {
-  font-size: 11.5px;
-  font-weight: 700;
-  color: #1e3a8a;
-  background: #eff6ff;
-  border: 1px solid #bfdbfe;
-  padding: 2px 7px;
-  border-radius: 6px;
-}
-.cc-exp-month-tag {
-  font-size: 11.5px;
-  color: #475569;
-  background: #f1f5f9;
-  padding: 2px 6px;
-  border-radius: 5px;
-  font-weight: 600;
-}
-.cc-exp-cat-badge {
   display: inline-block;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: #0369a1;
-  background: #e0f2fe;
-  padding: 2px 8px;
-  border-radius: 999px;
-  white-space: nowrap;
-}
-.cc-exp-gst-pct {
+  font-family: monospace;
   font-size: 11.5px;
   font-weight: 700;
-  color: #475569;
   background: #f1f5f9;
+  color: #334155;
+  padding: 2px 7px;
+  border-radius: 5px;
+  border: 1px solid #e2e8f0;
+}
+.cc-exp-id-pill.cyan {
+  background: #e0f2fe;
+  color: #0369a1;
+  border-color: #bae6fd;
+}
+
+.cc-exp-month-tag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  background: #f1f5f9;
+  color: #475569;
   padding: 2px 6px;
   border-radius: 4px;
 }
-.cc-exp-mode-tag {
-  font-size: 11px;
+
+.cc-exp-cat-badge {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
   font-weight: 600;
+  background: #f1f5f9;
   color: #334155;
-  background: #f8fafc;
-  border: 1px solid #cbd5e1;
-  padding: 2px 6px;
+}
+
+.cc-exp-gst-pct {
+  font-weight: 700;
+  color: #475569;
+  font-size: 11.5px;
+}
+
+.cc-exp-mode-tag {
+  display: inline-block;
+  font-size: 11.5px;
+  font-weight: 600;
+  background: #f1f5f9;
+  color: #475569;
+  padding: 2px 7px;
   border-radius: 5px;
 }
+
 .cc-exp-status-pill {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
   font-size: 11px;
   font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 999px;
   text-transform: uppercase;
 }
 .cc-exp-status-pill.paid {
@@ -1608,29 +2426,94 @@ const styles = `
   color: #b45309;
 }
 
-.cc-exp-desc-cell, .cc-exp-remarks-cell {
-  font-size: 12px;
-  color: #475569;
+.cc-exp-desc-cell,
+.cc-exp-remarks-cell {
   max-width: 260px;
-  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
+/* User avatar */
+.cc-exp-user-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: #dcfce7;
+  color: #15803d;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 700;
+}
+.cc-exp-user-avatar.cyan {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.cc-exp-role-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  background: #f1f5f9;
+  color: #475569;
+}
+.cc-exp-role-badge.manager {
+  background: #fef3c7;
+  color: #b45309;
+}
+.cc-exp-role-badge.ops {
+  background: #f3e8ff;
+  color: #7e22ce;
+}
+.cc-exp-role-badge.employee {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.cc-exp-count-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  background: #f1f5f9;
+  color: #64748b;
+}
+.cc-exp-count-badge.active {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.cc-exp-emp-tag {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+  background: #f1f5f9;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+/* Row Actions */
 .cc-exp-row-actions {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 .cc-exp-act-btn {
-  border: none;
   background: transparent;
-  padding: 4px;
+  border: 1px solid transparent;
+  padding: 5px;
   border-radius: 6px;
   cursor: pointer;
-  color: #64748b;
   display: grid;
   place-items: center;
+  color: #64748b;
+  transition: all 0.15s;
 }
 .cc-exp-act-btn.edit:hover {
   background: #e0f2fe;
@@ -1641,99 +2524,48 @@ const styles = `
   color: #dc2626;
 }
 
-.cc-exp-sheet-total-row td {
-  background: #f1f5f9 !important;
-  border-top: 2px solid #cbd5e1 !important;
-}
-
-.cc-exp-empty-cell {
-  text-align: center;
-  padding: 36px !important;
-  color: #64748b;
-  font-size: 14px;
-}
-
-/* Staff tab banner */
-.cc-exp-tab-head-banner {
-  background: #ffffff;
-  border-radius: 12px;
-  border: 1px solid #e2e8f0;
-  padding: 16px 20px;
-  display: flex;
+/* Quick Pay Button */
+.cc-exp-quick-pay-btn {
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 14px;
-}
-.cc-exp-tab-head-banner h3 {
-  margin: 0;
-  font-size: 16px;
-  color: #0f172a;
-}
-.cc-exp-tab-head-banner p {
-  margin: 3px 0 0;
-  font-size: 12.5px;
-  color: #64748b;
-}
-.cc-exp-tab-head-pills {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.cc-exp-tab-head-pills .pill {
-  padding: 5px 12px;
-  border-radius: 8px;
-  font-size: 12px;
-  font-weight: 700;
-}
-.cc-exp-tab-head-pills .pill.green { background: #dcfce7; color: #15803d; }
-.cc-exp-tab-head-pills .pill.amber { background: #fef3c7; color: #b45309; }
-.cc-exp-tab-head-pills .pill.purple { background: #f3e8ff; color: #7e22ce; }
-.cc-exp-tab-head-pills .pill.total { background: #0f172a; color: #ffffff; }
-
-.cc-exp-user-avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: 999px;
-  background: #e2e8f0;
-  color: #334155;
-  display: grid;
-  place-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+  border-radius: 6px;
   font-size: 11px;
   font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
 }
-.cc-exp-role-badge {
-  font-size: 11.5px;
-  font-weight: 600;
-  color: #475569;
-  background: #f1f5f9;
-  padding: 2px 7px;
-  border-radius: 5px;
-}
-.cc-exp-count-badge {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 11.5px;
-  font-weight: 700;
-  background: #f1f5f9;
-  color: #64748b;
-}
-.cc-exp-count-badge.active {
-  background: #fef3c7;
-  color: #b45309;
-}
-.cc-exp-emp-tag {
-  font-size: 12px;
-  font-weight: 600;
-  color: #1e3a8a;
-  background: #eff6ff;
-  padding: 2px 8px;
-  border-radius: 6px;
+.cc-exp-quick-pay-btn:hover {
+  background: #047857;
+  color: #ffffff;
+  border-color: #047857;
 }
 
-/* Analytics section */
+.cc-exp-quick-pending-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: #fffbeb;
+  color: #b45309;
+  border: 1px solid #fde68a;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.cc-exp-quick-pending-btn:hover {
+  background: #d97706;
+  color: #ffffff;
+  border-color: #d97706;
+}
+
+/* Analytics Panels */
 .cc-exp-analytics-section {
   display: flex;
   flex-direction: column;
@@ -1741,27 +2573,28 @@ const styles = `
 }
 .cc-exp-analytics-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
   gap: 16px;
 }
 .cc-exp-panel-card {
   background: #ffffff;
-  border-radius: 12px;
   border: 1px solid #e2e8f0;
-  padding: 20px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+  border-radius: 12px;
+  padding: 20px 22px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.03);
 }
 .cc-exp-panel-card h4 {
   margin: 0;
-  font-size: 16px;
-  color: #0f172a;
+  font-size: 15px;
   font-weight: 700;
+  color: #0f172a;
 }
 .cc-exp-panel-sub {
-  margin: 3px 0 16px;
-  font-size: 12.5px;
+  margin: 2px 0 14px;
+  font-size: 12px;
   color: #64748b;
 }
+
 .cc-exp-cat-list {
   display: flex;
   flex-direction: column;
@@ -1777,102 +2610,103 @@ const styles = `
   align-items: center;
   justify-content: space-between;
   font-size: 12.5px;
-  color: #334155;
 }
+.cc-exp-cat-info span { color: #334155; }
+.cc-exp-cat-info strong { color: #0f172a; }
+.cc-exp-cat-info small { color: #64748b; font-weight: 400; }
 .cc-exp-progress-bar {
-  width: 100%;
-  height: 7px;
+  height: 6px;
   background: #f1f5f9;
   border-radius: 999px;
   overflow: hidden;
 }
 .cc-exp-progress-fill {
   height: 100%;
-  background: #0284c7;
+  background: #047857;
   border-radius: 999px;
 }
 
+/* PnL Card */
 .cc-exp-pnl-table {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 .cc-exp-pnl-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 13.5px;
+  font-size: 13px;
   color: #334155;
-}
-.cc-exp-pnl-row.total {
-  font-weight: 700;
-  padding: 6px 0;
-}
-.cc-exp-pnl-row.net {
-  background: #f8fafc;
-  padding: 10px 14px;
-  border-radius: 8px;
-  border: 1px solid #e2e8f0;
-  margin-top: 4px;
 }
 .cc-exp-pnl-divider {
   height: 1px;
   background: #e2e8f0;
-  margin: 2px 0;
+  margin: 4px 0;
+}
+.cc-exp-pnl-row.total {
+  font-weight: 700;
+  color: #0f172a;
+}
+.cc-exp-pnl-row.net {
+  background: #f8fafc;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  margin-top: 4px;
 }
 
-/* Modal styles */
+/* Modals */
 .cc-exp-modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.6);
-  z-index: 150;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(3px);
   display: grid;
   place-items: center;
+  z-index: 999;
   padding: 16px;
 }
 .cc-exp-modal-card {
-  width: 100%;
-  max-width: 660px;
   background: #ffffff;
-  border-radius: 16px;
-  padding: 24px;
+  border-radius: 14px;
+  box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1);
+  width: 100%;
+  max-width: 620px;
+  overflow: hidden;
+  max-height: 90vh;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.3);
-  max-height: 92vh;
-  overflow-y: auto;
 }
 .cc-exp-modal-head {
+  padding: 18px 22px;
+  border-bottom: 1px solid #e2e8f0;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  background: #f8fafc;
 }
 .cc-exp-modal-head p {
   margin: 0;
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 700;
-  color: #047857;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  color: #047857;
+  letter-spacing: 0.04em;
 }
 .cc-exp-modal-head h3 {
   margin: 2px 0 0;
-  font-size: 19px;
+  font-size: 18px;
+  font-weight: 700;
   color: #0f172a;
 }
 .cc-exp-modal-close {
+  background: transparent;
   border: none;
-  background: #f1f5f9;
-  color: #64748b;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
   cursor: pointer;
-  display: grid;
-  place-items: center;
+  color: #64748b;
+  padding: 4px;
+  border-radius: 6px;
 }
 .cc-exp-modal-close:hover {
   background: #e2e8f0;
@@ -1880,6 +2714,8 @@ const styles = `
 }
 
 .cc-exp-modal-form {
+  padding: 20px 22px;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -1887,66 +2723,76 @@ const styles = `
 .cc-exp-form-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
+  gap: 12px 14px;
 }
 .cc-exp-field {
   display: flex;
   flex-direction: column;
   gap: 5px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #475569;
 }
 .cc-exp-field.span-2 {
   grid-column: span 2;
 }
+.cc-exp-field span {
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+}
 .cc-exp-field input,
 .cc-exp-field select,
 .cc-exp-field textarea {
-  padding: 9px 12px;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
-  font-size: 13.5px;
+  padding: 8px 11px;
+  font-size: 13px;
   color: #0f172a;
-  background: #ffffff;
+  outline: none;
   font-family: inherit;
 }
 .cc-exp-field input:focus,
 .cc-exp-field select:focus,
 .cc-exp-field textarea:focus {
-  outline: none;
   border-color: #047857;
-  box-shadow: 0 0 0 3px rgba(4, 120, 87, 0.15);
+  box-shadow: 0 0 0 2px rgba(4, 120, 87, 0.1);
 }
+
 .cc-exp-computed-val {
-  padding: 9px 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
   border-radius: 8px;
-  background: #f1f5f9;
-  border: 1px solid #cbd5e1;
-  font-size: 13.5px;
+  padding: 8px 11px;
+  font-size: 13px;
   font-weight: 700;
-  color: #334155;
+  color: #475569;
 }
 .cc-exp-computed-val.highlight {
   background: #ecfdf5;
   border-color: #a7f3d0;
   color: #047857;
-  font-size: 15px;
 }
 
 .cc-exp-modal-actions {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
-  padding-top: 6px;
-  border-top: 1px solid #f1f5f9;
+  padding-top: 10px;
+  border-top: 1px solid #e2e8f0;
 }
 
-@keyframes spin {
+/* Spin animation */
+.cc-spin {
+  animation: ccSpin 1s linear infinite;
+}
+@keyframes ccSpin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
-.cc-spin {
-  animation: spin 1s linear infinite;
+
+@media (max-width: 768px) {
+  .cc-exp-container { padding: 14px 14px 40px; }
+  .cc-exp-header-bar { padding: 14px; }
+  .cc-exp-cards-grid { grid-template-columns: 1fr; }
+  .cc-exp-form-grid { grid-template-columns: 1fr; }
+  .cc-exp-field.span-2 { grid-column: span 1; }
 }
 `;

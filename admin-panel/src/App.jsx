@@ -241,7 +241,7 @@ function App() {
         <Route
           path="/expenses"
           element={
-            <PageShell allowedRoles={["manager", "operations"]} requiredPermission="viewExpenses">
+            <PageShell allowedRoles={["manager", "operations", "calling", "employee"]}>
               <ExpenseTrackerScreen />
             </PageShell>
           }
@@ -249,7 +249,7 @@ function App() {
         <Route
           path="/expense-tracker"
           element={
-            <PageShell allowedRoles={["manager", "operations"]} requiredPermission="viewExpenses">
+            <PageShell allowedRoles={["manager", "operations", "calling", "employee"]}>
               <ExpenseTrackerScreen />
             </PageShell>
           }

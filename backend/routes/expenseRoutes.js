@@ -13,10 +13,10 @@ const {
 router.use(isAuthenticated);
 
 router.get("/summary", requirePermission("viewExpenses"), getExpenseSummary);
-router.get("/categories", requirePermission("viewExpenses"), getCategories);
-router.get("/", requirePermission("viewExpenses"), getExpenses);
-router.post("/", requirePermission("manageExpenses"), createExpense);
-router.put("/:id", requirePermission("manageExpenses"), updateExpense);
-router.delete("/:id", requirePermission("manageExpenses"), deleteExpense);
+router.get("/categories", getCategories);
+router.get("/", getExpenses);
+router.post("/", createExpense);
+router.put("/:id", updateExpense);
+router.delete("/:id", deleteExpense);
 
 module.exports = router;

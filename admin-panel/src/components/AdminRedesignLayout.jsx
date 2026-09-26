@@ -55,7 +55,7 @@ const managerNavItems = [
   { path: "/operations", label: "Operations", icon: BriefcaseBusiness },
   { path: "/party-payouts", label: "Party / Connector Details", icon: Receipt, permission: "viewConnectors" },
   { path: "/case-payouts", label: "Disbursement & Payouts", icon: IndianRupee, permission: "viewPayouts" },
-  { path: "/expenses", label: "Expense Tracker", icon: Wallet, permission: "viewExpenses" },
+  { path: "/expenses", label: "Expense Tracker", icon: Wallet },
   { path: "/banker/queries", label: "Banker Queries", icon: ClipboardList },
   { path: "/performance", label: "Performance Report", icon: BarChart3, permission: "viewReports" },
   { path: "/lead_report", label: "Lead Report", icon: FileBarChart, permission: "viewReports" },
@@ -73,6 +73,7 @@ const operationsNavItems = [
   { path: "/lenders", label: "Lenders & NBFC", icon: Building2 },
   { path: "/operations", label: "Operations", icon: BriefcaseBusiness },
   { path: "/case-payouts", label: "Disbursement & Payouts", icon: IndianRupee },
+  { path: "/expenses", label: "Expenses", icon: Wallet },
   { path: "/banker/queries", label: "Banker Queries", icon: ClipboardList },
 ];
 

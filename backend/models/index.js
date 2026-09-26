@@ -170,6 +170,8 @@ Company.hasMany(Expense, { foreignKey: "company_id", as: "expenses", onDelete: "
 Expense.belongsTo(Company, { foreignKey: "company_id", as: "company" });
 Expense.belongsTo(User, { foreignKey: "created_by_id", as: "createdBy" });
 User.hasMany(Expense, { foreignKey: "created_by_id", as: "createdExpenses" });
+Expense.belongsTo(User, { foreignKey: "employee_id", as: "employee" });
+User.hasMany(Expense, { foreignKey: "employee_id", as: "employeeExpenses" });
 
 const db = {
   sequelize,
