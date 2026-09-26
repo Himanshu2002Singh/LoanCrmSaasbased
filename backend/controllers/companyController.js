@@ -12,7 +12,7 @@ const { ROLES, USER_STATUSES } = require("../constants/roles");
  */
 const SEARCHABLE = ["name", "slug", "email", "phone"];
 const SORTABLE = ["name", "status", "createdAt", "subscriptionExpiresAt"];
-const EDITABLE = ["name", "email", "phone", "logoUrl", "planId", "maxUsers", "subscriptionExpiresAt"];
+const EDITABLE = ["name", "email", "phone", "logoUrl", "planId", "maxUsers", "subscriptionExpiresAt", "status"];
 const STATUSES = ["active", "trial", "suspended"];
 
 const pick = (body, fields) => {
@@ -164,6 +164,7 @@ exports.createCompany = async (req, res) => {
       email: req.body.email,
       phone: req.body.phone,
       slug: req.body.slug,
+      logoUrl: req.body.logoUrl || null,
       planId: req.body.planId,
       status: req.body.status || "trial",
       maxUsers: req.body.maxUsers,
@@ -212,6 +213,13 @@ exports.updateCompany = async (req, res) => {
     if (!company) return res.status(404).json({ message: "Company not found" });
 
     const data = pick(req.body, EDITABLE);
+
+    if (data.status !== undefined) {
+      data.status = String(data.status).toLowerCase();
+      if (!STATUSES.includes(data.status)) {
+        return res.status(400).json({ message: `status must be one of: ${STATUSES.join(", ")}` });
+      }
+    }
 
     let plan = company.plan;
     if (data.planId !== undefined && data.planId !== company.planId) {
@@ -609,3 +617,25 @@ exports.updateMyCompanyProfile = async (req, res) => {
     return res.status(500).json({ message: "Internal Server Error", error: error.message });
   }
 };
+
+/**
+ * POST /api/platform/upload-logo or POST /api/company/upload-logo
+ * Uploads a company logo image file and returns relative URL path.
+ */
+exports.uploadLogo = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "No logo file uploaded" });
+    }
+    const logoUrl = `/uploads/logos/${req.file.filename}`;
+    return res.status(200).json({
+      message: "Logo uploaded successfully",
+      logoUrl,
+      fileName: req.file.originalname,
+    });
+  } catch (error) {
+    console.error("[companies] uploadLogo error:", error);
+    return res.status(500).json({ message: "Failed to upload logo", error: error.message });
+  }
+};
+

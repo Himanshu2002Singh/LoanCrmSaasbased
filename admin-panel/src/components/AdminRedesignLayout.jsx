@@ -37,6 +37,7 @@ import "../styles/adminRedesign.css";
 import API_URL from "../config";
 import CrmLogo from "./CrmLogo";
 import SubscriptionExpiredModal from "./SubscriptionExpiredModal";
+import { resolveLogoUrl } from "../utils/logo";
 
 const managerNavItems = [
   { path: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -145,6 +146,9 @@ function AdminRedesignLayout({ children }) {
   const userRole = localStorage.getItem("userRole") || "";
   const name = localStorage.getItem("name") || "Guest";
   const email = localStorage.getItem("email") || "";
+  const [companyLogo, setCompanyLogo] = useState(() => localStorage.getItem("companyLogo") || "");
+  const [companyName, setCompanyName] = useState(() => localStorage.getItem("companyName") || "");
+  const [logoFailed, setLogoFailed] = useState(false);
 
   const isCompanyAdmin =
     ["COMPANY_ADMIN", "SUPERADMIN"].includes(userRole.toUpperCase()) ||
@@ -257,6 +261,41 @@ function AdminRedesignLayout({ children }) {
     fetchFilterOptions();
   }, []);
 
+  useEffect(() => {
+    const fetchCompanyData = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        if (!token) return;
+        const res = await axios.get(`${API_URL}/company/profile`);
+        const profile = res.data?.data;
+        if (profile) {
+          if (profile.logoUrl !== undefined) {
+            setCompanyLogo(profile.logoUrl || "");
+            localStorage.setItem("companyLogo", profile.logoUrl || "");
+          }
+          if (profile.name) {
+            setCompanyName(profile.name);
+            localStorage.setItem("companyName", profile.name);
+          }
+          setLogoFailed(false);
+        }
+      } catch {
+        // Silently skip if tenant profile is unavailable
+      }
+    };
+
+    fetchCompanyData();
+
+    const handleProfileUpdate = () => {
+      fetchCompanyData();
+    };
+
+    window.addEventListener("company_profile_updated", handleProfileUpdate);
+    return () => {
+      window.removeEventListener("company_profile_updated", handleProfileUpdate);
+    };
+  }, []);
+
   const enhancedChildren = isValidElement(children)
     ? cloneElement(children, {
         dashboardFilters: filters,
@@ -292,10 +331,38 @@ function AdminRedesignLayout({ children }) {
             className="cc-brand-link"
           >
             <div className="cc-logo-full">
-              <CrmLogo />
+              {companyLogo && !logoFailed ? (
+                <div className="cc-tenant-brand">
+                  <img
+                    src={resolveLogoUrl(companyLogo)}
+                    alt={companyName || "Company Logo"}
+                    className="cc-tenant-logo"
+                    onError={() => setLogoFailed(true)}
+                  />
+                  {companyName && (
+                    <div className="cc-tenant-meta">
+                      <span className="cc-tenant-title">{companyName}</span>
+                      <span className="cc-tenant-sub">CRM PORTAL</span>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <CrmLogo />
+              )}
             </div>
             <div className="cc-logo-mark">
-              <CrmLogo markOnly height={36} />
+              {companyLogo && !logoFailed ? (
+                <div className="cc-tenant-logo-mark-wrap">
+                  <img
+                    src={resolveLogoUrl(companyLogo)}
+                    alt={companyName || "Logo"}
+                    className="cc-tenant-logo-mark"
+                    onError={() => setLogoFailed(true)}
+                  />
+                </div>
+              ) : (
+                <CrmLogo markOnly height={36} />
+              )}
             </div>
           </Link>
         </div>
@@ -346,7 +413,16 @@ function AdminRedesignLayout({ children }) {
           </button>
 
           <Link to={homePath} className="cc-mobile-brand">
-            <CrmLogo height={32} />
+            {companyLogo && !logoFailed ? (
+              <img
+                src={resolveLogoUrl(companyLogo)}
+                alt={companyName || "Logo"}
+                className="cc-tenant-logo-mobile"
+                onError={() => setLogoFailed(true)}
+              />
+            ) : (
+              <CrmLogo height={32} />
+            )}
           </Link>
         </header>
 

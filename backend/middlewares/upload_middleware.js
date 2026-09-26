@@ -41,10 +41,45 @@ const upload = multer({
   limits: { fileSize: 15 * 1024 * 1024 }, // 15MB
 });
 
+// Dedicated storage and filter for company logos
+const logoUploadDir = path.join(__dirname, "..", "uploads", "logos");
+fs.mkdirSync(logoUploadDir, { recursive: true });
+
+const logoDiskStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, logoUploadDir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const safeName = path
+      .basename(file.originalname, ext)
+      .replace(/[^a-zA-Z0-9_-]/g, "_");
+    cb(null, `logo-${Date.now()}-${safeName}${ext}`);
+  },
+});
+
+const logoFileFilter = (req, file, cb) => {
+  const allowed = ["image/jpeg", "image/png", "image/webp", "image/svg+xml", "image/gif"];
+  if (allowed.includes(file.mimetype) || file.originalname.match(/\.(jpg|jpeg|png|webp|svg|gif)$/i)) {
+    cb(null, true);
+  } else {
+    cb(new Error("File format not supported. Only images (PNG, JPG, WEBP, SVG, GIF) are allowed for company logo."));
+  }
+};
+
+const uploadLogo = multer({
+  storage: logoDiskStorage,
+  fileFilter: logoFileFilter,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+});
+
 upload.uploadDisk = upload;
 upload.uploadMemory = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 15 * 1024 * 1024 },
 });
+upload.uploadLogo = uploadLogo;
 
 module.exports = upload;
+module.exports.uploadLogo = uploadLogo;
+

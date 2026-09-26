@@ -35,6 +35,7 @@ const publicUser = (user) => {
           id: user.company.id,
           name: user.company.name,
           slug: user.company.slug,
+          logoUrl: user.company.logoUrl || null,
           status: user.company.status,
           subscriptionExpiresAt: user.company.subscriptionExpiresAt,
           isExpired: user.company.subscriptionExpiresAt ? new Date(user.company.subscriptionExpiresAt) < new Date() : false,

@@ -46,7 +46,7 @@ function LoginRedesign() {
         password,
       });
 
-      const { id, name, email, role, canAccessAdminPanel } = response.data.user;
+      const { id, name, email, role, canAccessAdminPanel, company } = response.data.user;
       const panelRole = PANEL_ROLE[role] || "calling";
 
       if (!canAccessAdminPanel) {
@@ -66,6 +66,11 @@ function LoginRedesign() {
       localStorage.setItem("employeeRole", panelRole);
       localStorage.setItem("userRole", role);
       localStorage.setItem("token", response.data.token);
+      localStorage.setItem("companyLogo", company?.logoUrl || "");
+      localStorage.setItem("companyName", company?.name || "");
+      if (company) {
+        localStorage.setItem("company", JSON.stringify(company));
+      }
       localStorage.setItem(
         "userPermissions",
         JSON.stringify(response.data.user?.resolvedPermissions || response.data.user?.permissions || response.data.data?.resolvedPermissions || {})

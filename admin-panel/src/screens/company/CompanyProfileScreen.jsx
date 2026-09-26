@@ -30,11 +30,13 @@ import {
   UserCheck,
   UserPlus,
   Users,
+  UploadCloud,
   X,
   Zap,
 } from "lucide-react";
 
 import API_URL from "../../config";
+import { resolveLogoUrl } from "../../utils/logo";
 
 export default function CompanyProfileScreen() {
   const [data, setData] = useState(null);
@@ -55,6 +57,10 @@ export default function CompanyProfileScreen() {
           email: profile.email || "",
           phone: profile.phone || "",
         });
+        if (profile.logoUrl) {
+          localStorage.setItem("companyLogo", profile.logoUrl);
+          window.dispatchEvent(new Event("company_profile_updated"));
+        }
       }
     } catch (error) {
       console.error("Error fetching company profile:", error);
@@ -88,6 +94,33 @@ export default function CompanyProfileScreen() {
     } catch (error) {
       console.error("Error updating company profile:", error);
       toast.error(error.response?.data?.message || "Failed to update company details");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCompanyLogoUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Logo file must be less than 5MB");
+      return;
+    }
+    try {
+      setSaving(true);
+      const formData = new FormData();
+      formData.append("logo", file);
+      const res = await axios.post(`${API_URL}/company/upload-logo`, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      const logoUrl = res.data?.logoUrl;
+      await axios.put(`${API_URL}/company/profile`, { logoUrl });
+      toast.success("Company logo updated!");
+      localStorage.setItem("companyLogo", logoUrl);
+      window.dispatchEvent(new Event("company_profile_updated"));
+      fetchProfile();
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to upload logo");
     } finally {
       setSaving(false);
     }
@@ -204,7 +237,44 @@ export default function CompanyProfileScreen() {
       {/* Hero Overview Card */}
       <div className="cc-comp-hero-card">
         <div className="cc-hero-left">
-          <div className="cc-comp-avatar">{companyInitials}</div>
+          <div style={{ position: "relative", flexShrink: 0 }}>
+            {data?.logoUrl ? (
+              <img
+                src={resolveLogoUrl(data.logoUrl)}
+                alt={data.name}
+                className="cc-comp-avatar"
+                style={{ objectFit: "contain", background: "#fff", padding: 4 }}
+              />
+            ) : (
+              <div className="cc-comp-avatar">{companyInitials}</div>
+            )}
+            <label
+              title="Upload / Change Logo"
+              style={{
+                position: "absolute",
+                bottom: -4,
+                right: -4,
+                width: 28,
+                height: 28,
+                borderRadius: "50%",
+                background: "#047857",
+                color: "#fff",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
+              }}
+            >
+              <UploadCloud size={14} />
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/svg+xml,image/gif"
+                style={{ display: "none" }}
+                onChange={handleCompanyLogoUpload}
+              />
+            </label>
+          </div>
           <div className="cc-hero-info">
             <div className="cc-hero-title-row">
               <h2>{data?.name}</h2>

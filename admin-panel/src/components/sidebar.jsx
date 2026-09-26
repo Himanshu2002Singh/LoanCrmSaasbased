@@ -1,10 +1,14 @@
-import React from "react";
+import React, { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import CrmLogo from "./CrmLogo";
+import { resolveLogoUrl } from "../utils/logo";
 
 const Sidebar = ({ isOpen, setIsOpen }) => {
   const location = useLocation();
   const navigate = useNavigate();
+  const [logoFailed, setLogoFailed] = useState(false);
+  const companyLogo = localStorage.getItem("companyLogo");
+  const companyName = localStorage.getItem("companyName");
 
   const isActive = (path) => location.pathname === path;
   const employeeRole = localStorage.getItem("employeeRole");
@@ -135,7 +139,16 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
         <div className="w-full flex items-center justify-center py-6 px-4 shrink-0">
           <Link to={employeeRole === "operations" ? "/operations" : "/"} onClick={() => setIsOpen && setIsOpen(false)}>
             <div className="flex items-center justify-center p-2 rounded-lg">
-              <CrmLogo height={38} />
+              {companyLogo && !logoFailed ? (
+                <img
+                  src={resolveLogoUrl(companyLogo)}
+                  alt={companyName || "Logo"}
+                  style={{ maxHeight: "38px", maxWidth: "160px", objectFit: "contain" }}
+                  onError={() => setLogoFailed(true)}
+                />
+              ) : (
+                <CrmLogo height={38} />
+              )}
             </div>
           </Link>
         </div>

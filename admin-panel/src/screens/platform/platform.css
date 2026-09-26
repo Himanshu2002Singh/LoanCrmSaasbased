@@ -654,3 +654,81 @@
   gap: 8px;
   justify-content: flex-end;
 }
+
+/* ---------- logo upload in platform console ---------- */
+.cc-pl-logo-dropzone {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 2px dashed var(--pl-border);
+  border-radius: 12px;
+  background: #f8fafc;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.cc-pl-logo-dropzone:hover {
+  border-color: var(--pl-accent);
+  background: var(--pl-accent-soft);
+}
+
+.cc-pl-logo-drop-icon {
+  color: var(--pl-accent);
+  flex-shrink: 0;
+}
+
+.cc-pl-logo-dropzone strong {
+  display: block;
+  font-size: 13px;
+  color: var(--pl-ink);
+}
+
+.cc-pl-logo-dropzone span {
+  display: block;
+  font-size: 11px;
+  color: var(--pl-muted);
+  margin-top: 2px;
+}
+
+.cc-pl-logo-preview-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--pl-border);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.cc-pl-logo-img-preview {
+  width: 52px;
+  height: 52px;
+  object-fit: contain;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  padding: 4px;
+}
+
+.cc-pl-logo-preview-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.cc-pl-logo-preview-info strong {
+  display: block;
+  font-size: 13px;
+  color: var(--pl-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cc-pl-logo-preview-info span {
+  display: block;
+  font-size: 11px;
+  color: var(--pl-muted);
+  margin-top: 2px;
+}
+
