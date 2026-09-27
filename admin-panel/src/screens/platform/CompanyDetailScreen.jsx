@@ -19,6 +19,7 @@ function CompanyDetailScreen() {
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ planId: "", maxUsers: "", subscriptionExpiresAt: "" });
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
