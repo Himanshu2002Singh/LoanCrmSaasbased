@@ -150,6 +150,13 @@ class AppDrawer extends ConsumerWidget {
                   path: '/applications',
                   isSelected: currentRoute == '/applications',
                 ),
+                _buildMenuItem(
+                  context,
+                  icon: Icons.receipt_long_rounded,
+                  title: 'My Expenses / Claims',
+                  path: '/expenses',
+                  isSelected: currentRoute == '/expenses' || currentRoute == '/expenses/add',
+                ),
                 const Divider(height: 16),
                 _buildMenuItem(
                   context,

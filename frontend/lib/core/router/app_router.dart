@@ -19,6 +19,9 @@ import 'package:capital_care/features/telecalling/views/dialer_screen.dart';
 import 'package:capital_care/features/tasks_and_followups/views/tasks_and_followups_screen.dart';
 import 'package:capital_care/features/attendance/views/attendance_screen.dart';
 import 'package:capital_care/features/applications/views/applications_screen.dart';
+import 'package:capital_care/features/expenses/models/expense_model.dart';
+import 'package:capital_care/features/expenses/views/expenses_screen.dart';
+import 'package:capital_care/features/expenses/views/add_edit_expense_screen.dart';
 
 final GlobalKey<NavigatorState> _rootNavigatorKey = GlobalKey<NavigatorState>();
 final GlobalKey<NavigatorState> _shellNavigatorKey = GlobalKey<NavigatorState>();
@@ -209,6 +212,17 @@ final GoRouter appRouter = GoRouter(
         GoRoute(
           path: '/applications',
           builder: (context, state) => const ApplicationsScreen(),
+        ),
+        GoRoute(
+          path: '/expenses',
+          builder: (context, state) => const ExpensesScreen(),
+        ),
+        GoRoute(
+          path: '/expenses/add',
+          builder: (context, state) {
+            final exp = state.extra as ExpenseModel?;
+            return AddEditExpenseScreen(initialExpense: exp);
+          },
         ),
         GoRoute(
           path: '/profile',

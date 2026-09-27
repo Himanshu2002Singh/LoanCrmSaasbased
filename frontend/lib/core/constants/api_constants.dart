@@ -43,6 +43,11 @@ class ApiConstants {
   static String get applications => '$baseUrl/applications';
   static String get lenders => '$baseUrl/lenders';
 
+  // Expenses & Claims
+  static String get expenses => '$baseUrl/expenses';
+  static String get expenseCategories => '$baseUrl/expenses/categories';
+  static String get expenseSummary => '$baseUrl/expenses/summary';
+
   // Master Configurations & Notifications
   static String get masterConfigs => '$baseUrl/master-configs';
   static String get notifications => '$baseUrl/notifications';

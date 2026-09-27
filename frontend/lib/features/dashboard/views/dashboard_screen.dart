@@ -178,35 +178,47 @@ class DashboardScreen extends ConsumerWidget {
             ],
           ),
           const SizedBox(height: 14),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _buildActionItem(
-                icon: Icons.dialpad_rounded,
-                label: 'Dialer',
-                onTap: () => context.push('/dialer'),
-              ),
-              _buildActionItem(
-                icon: Icons.person_add_alt_1,
-                label: 'Add Lead',
-                onTap: () => context.push('/leads/add'),
-              ),
-              _buildActionItem(
-                icon: Icons.phone_in_talk,
-                label: 'Calls',
-                onTap: () => context.push('/calls'),
-              ),
-              _buildActionItem(
-                icon: Icons.alarm_rounded,
-                label: 'Followups',
-                onTap: () => context.push('/followups'),
-              ),
-              _buildActionItem(
-                icon: Icons.fingerprint,
-                label: 'Punch In',
-                onTap: () => context.push('/attendance'),
-              ),
-            ],
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _buildActionItem(
+                  icon: Icons.dialpad_rounded,
+                  label: 'Dialer',
+                  onTap: () => context.push('/dialer'),
+                ),
+                const SizedBox(width: 12),
+                _buildActionItem(
+                  icon: Icons.person_add_alt_1,
+                  label: 'Add Lead',
+                  onTap: () => context.push('/leads/add'),
+                ),
+                const SizedBox(width: 12),
+                _buildActionItem(
+                  icon: Icons.receipt_long_rounded,
+                  label: 'Expenses',
+                  onTap: () => context.push('/expenses'),
+                ),
+                const SizedBox(width: 12),
+                _buildActionItem(
+                  icon: Icons.phone_in_talk,
+                  label: 'Calls',
+                  onTap: () => context.push('/calls'),
+                ),
+                const SizedBox(width: 12),
+                _buildActionItem(
+                  icon: Icons.alarm_rounded,
+                  label: 'Followups',
+                  onTap: () => context.push('/followups'),
+                ),
+                const SizedBox(width: 12),
+                _buildActionItem(
+                  icon: Icons.fingerprint,
+                  label: 'Punch In',
+                  onTap: () => context.push('/attendance'),
+                ),
+              ],
+            ),
           ),
         ],
       ),
