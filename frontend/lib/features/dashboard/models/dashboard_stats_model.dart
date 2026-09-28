@@ -3,6 +3,7 @@ class DashboardCounts {
   final int totalCalls;
   final int todayFollowups;
   final int pendingFollowups;
+  final int upcomingFollowups;
   final int unassignedLeads;
 
   DashboardCounts({
@@ -10,6 +11,7 @@ class DashboardCounts {
     this.totalCalls = 0,
     this.todayFollowups = 0,
     this.pendingFollowups = 0,
+    this.upcomingFollowups = 0,
     this.unassignedLeads = 0,
   });
 
@@ -20,6 +22,7 @@ class DashboardCounts {
       totalCalls: json['totalCalls'] ?? 0,
       todayFollowups: json['todayFollowups'] ?? 0,
       pendingFollowups: json['pendingFollowups'] ?? 0,
+      upcomingFollowups: json['upcomingFollowups'] ?? 0,
       unassignedLeads: json['unassignedLeads'] ?? 0,
     );
   }

@@ -44,14 +44,14 @@ class DashboardScreen extends ConsumerWidget {
           ],
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.notifications_outlined),
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('No new notifications')),
-              );
-            },
-          ),
+          // IconButton(
+          //   icon: const Icon(Icons.notifications_outlined),
+          //   onPressed: () {
+          //     ScaffoldMessenger.of(context).showSnackBar(
+          //       const SnackBar(content: Text('No new notifications')),
+          //     );
+          //   },
+          // ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: () => ref.refresh(dashboardDataProvider),
@@ -288,14 +288,28 @@ class DashboardScreen extends ConsumerWidget {
           value: '${counts.todayFollowups}',
           iconWidget: const FaIcon(FontAwesomeIcons.calendarDay, color: AppColors.warning, size: 16),
           color: AppColors.warning,
-          onTap: () => context.push('/followups'),
+          onTap: () => context.push('/followups?window=today'),
         ),
         _buildStatCard(
-          title: 'Pending Follow-ups',
+          title: 'Upcoming Follow-ups',
+          value: '${counts.upcomingFollowups}',
+          iconWidget: const FaIcon(FontAwesomeIcons.calendarPlus, color: Color(0xFF0284C7), size: 16),
+          color: const Color(0xFF0284C7),
+          onTap: () => context.push('/followups?window=upcoming'),
+        ),
+        _buildStatCard(
+          title: 'Overdue Follow-ups',
           value: '${counts.pendingFollowups}',
           iconWidget: const FaIcon(FontAwesomeIcons.clockRotateLeft, color: AppColors.error, size: 16),
           color: AppColors.error,
-          onTap: () => context.push('/followups'),
+          onTap: () => context.push('/followups?window=overdue'),
+        ),
+        _buildStatCard(
+          title: 'Unassigned Leads',
+          value: '${counts.unassignedLeads}',
+          iconWidget: const FaIcon(FontAwesomeIcons.userClock, color: Color(0xFF8B5CF6), size: 16),
+          color: const Color(0xFF8B5CF6),
+          onTap: () => context.push('/leads'),
         ),
       ],
     );

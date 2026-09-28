@@ -199,6 +199,32 @@ class LeadsNotifier extends StateNotifier<LeadsState> {
     loadLeads(refresh: true);
   }
 
+  void applyFilters({
+    String? loanType,
+    String? priority,
+    bool? unassignedOnly,
+    String? status,
+  }) {
+    state = state.copyWith(
+      selectedLoanType: loanType,
+      selectedPriority: priority,
+      unassignedOnly: unassignedOnly ?? state.unassignedOnly,
+      selectedStatus: status ?? state.selectedStatus,
+    );
+    loadLeads(refresh: true);
+  }
+
+  void resetAllFilters() {
+    state = state.copyWith(
+      selectedStatus: 'ALL',
+      selectedLoanType: null,
+      selectedPriority: null,
+      unassignedOnly: false,
+      searchQuery: '',
+    );
+    loadLeads(refresh: true);
+  }
+
   Future<LeadModel?> createLead(Map<String, dynamic> data) async {
     try {
       final newLead = await _leadService.createLead(data);

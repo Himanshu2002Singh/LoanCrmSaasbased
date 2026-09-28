@@ -161,9 +161,30 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
               });
             },
           ),
-          IconButton(
-            icon: const Icon(Icons.filter_list),
-            onPressed: () => _showFilterBottomSheet(context),
+          Stack(
+            alignment: Alignment.center,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.filter_list_rounded),
+                tooltip: 'Filter Leads',
+                onPressed: () => _showFilterBottomSheet(context),
+              ),
+              if (leadsState.selectedLoanType != null ||
+                  leadsState.selectedPriority != null ||
+                  leadsState.unassignedOnly)
+                Positioned(
+                  top: 10,
+                  right: 10,
+                  child: Container(
+                    width: 8,
+                    height: 8,
+                    decoration: const BoxDecoration(
+                      color: AppColors.primary,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+            ],
           ),
         ],
       ),
@@ -192,13 +213,14 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                   'Showing ${leadsState.leads.length} of ${leadsState.totalItems} leads',
                   style: const TextStyle(fontSize: 12, color: AppColors.textSecondary, fontWeight: FontWeight.w500),
                 ),
-                if (leadsState.selectedStatus != 'ALL' || leadsState.selectedLoanType != null)
+                if (leadsState.selectedStatus != 'ALL' ||
+                    leadsState.selectedLoanType != null ||
+                    leadsState.selectedPriority != null ||
+                    leadsState.unassignedOnly)
                   TextButton(
                     style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(50, 20)),
                     onPressed: () {
-                      ref.read(leadsNotifierProvider.notifier).setStatusFilter('ALL');
-                      ref.read(leadsNotifierProvider.notifier).setLoanTypeFilter(null);
-                      ref.read(leadsNotifierProvider.notifier).setPriorityFilter(null);
+                      ref.read(leadsNotifierProvider.notifier).resetAllFilters();
                     },
                     child: const Text('Reset filters', style: TextStyle(fontSize: 12, color: AppColors.primary)),
                   ),
@@ -473,15 +495,20 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
   }
 
   void _showFilterBottomSheet(BuildContext context) {
+    final currentState = ref.read(leadsNotifierProvider);
+    String? tempLoanType = currentState.selectedLoanType;
+    String? tempPriority = currentState.selectedPriority;
+    bool tempUnassignedOnly = currentState.unassignedOnly;
+
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) {
-        final state = ref.watch(leadsNotifierProvider);
         final loanProductsAsync = ref.watch(loanProductsProvider);
-
         final defaultProducts = [
           'Personal Loan',
           'Home Loan',
@@ -497,54 +524,233 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
           orElse: () => defaultProducts,
         );
 
-        return Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Filter by Loan Product', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: loanProducts.map((p) {
-                  final isSelected = state.selectedLoanType == p;
-                  return ChoiceChip(
-                    label: Text(p),
-                    selected: isSelected,
-                    selectedColor: AppColors.primary,
-                    labelStyle: TextStyle(
-                      color: isSelected ? Colors.white : AppColors.textPrimary,
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+        final priorities = ['ALL', 'LOW', 'MEDIUM', 'HIGH', 'URGENT'];
+
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return Container(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 12,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+              ),
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.85,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Handle Bar
+                    Center(
+                      child: Container(
+                        width: 44,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: AppColors.textMuted.withValues(alpha: 0.3),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
                     ),
-                    onSelected: (selected) {
-                      ref.read(leadsNotifierProvider.notifier).setLoanTypeFilter(selected ? p : null);
-                      Navigator.pop(ctx);
-                    },
-                  );
-                }).toList(),
+                    const SizedBox(height: 14),
+
+                    // Header Row
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Row(
+                          children: [
+                            Icon(Icons.tune_rounded, color: AppColors.primary, size: 20),
+                            SizedBox(width: 8),
+                            Text(
+                              'Filter Leads Pipeline',
+                              style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                            ),
+                          ],
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: AppColors.textMuted),
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () => Navigator.pop(ctx),
+                        ),
+                      ],
+                    ),
+                    const Divider(height: 18),
+
+                    // 1. Loan Product Section
+                    const Text(
+                      'Loan Product',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        ChoiceChip(
+                          label: const Text('All Products'),
+                          selected: tempLoanType == null,
+                          selectedColor: AppColors.primary,
+                          labelStyle: TextStyle(
+                            color: tempLoanType == null ? Colors.white : AppColors.textPrimary,
+                            fontWeight: tempLoanType == null ? FontWeight.bold : FontWeight.w500,
+                            fontSize: 12,
+                          ),
+                          backgroundColor: AppColors.background,
+                          side: BorderSide(
+                            color: tempLoanType == null ? AppColors.primary : AppColors.cardBorder,
+                          ),
+                          onSelected: (selected) {
+                            if (selected) {
+                              setSheetState(() => tempLoanType = null);
+                            }
+                          },
+                        ),
+                        ...loanProducts.map((p) {
+                          final isSelected = tempLoanType == p;
+                          return ChoiceChip(
+                            label: Text(p),
+                            selected: isSelected,
+                            selectedColor: AppColors.primary,
+                            labelStyle: TextStyle(
+                              color: isSelected ? Colors.white : AppColors.textPrimary,
+                              fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                              fontSize: 12,
+                            ),
+                            backgroundColor: AppColors.background,
+                            side: BorderSide(
+                              color: isSelected ? AppColors.primary : AppColors.cardBorder,
+                            ),
+                            onSelected: (selected) {
+                              setSheetState(() => tempLoanType = selected ? p : null);
+                            },
+                          );
+                        }),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+
+                    // 2. Priority Section
+                    const Text(
+                      'Priority',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: priorities.map((p) {
+                        final isSelected = (p == 'ALL' && tempPriority == null) || (tempPriority == p);
+                        return ChoiceChip(
+                          label: Text(p),
+                          selected: isSelected,
+                          selectedColor: AppColors.primary,
+                          labelStyle: TextStyle(
+                            color: isSelected ? Colors.white : AppColors.textPrimary,
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                            fontSize: 12,
+                          ),
+                          backgroundColor: AppColors.background,
+                          side: BorderSide(
+                            color: isSelected ? AppColors.primary : AppColors.cardBorder,
+                          ),
+                          onSelected: (selected) {
+                            if (selected) {
+                              setSheetState(() => tempPriority = p == 'ALL' ? null : p);
+                            }
+                          },
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 18),
+
+                    // 3. Unassigned Leads Switch
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: AppColors.background,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppColors.cardBorder),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.person_off_outlined, color: AppColors.textSecondary, size: 20),
+                          const SizedBox(width: 10),
+                          const Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Unassigned Leads Only',
+                                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+                                ),
+                                Text(
+                                  'Show leads currently not assigned to any staff',
+                                  style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Switch.adaptive(
+                            value: tempUnassignedOnly,
+                            activeColor: AppColors.primary,
+                            onChanged: (val) {
+                              setSheetState(() => tempUnassignedOnly = val);
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+
+                    // Action Buttons Row
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              side: const BorderSide(color: AppColors.cardBorder),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            onPressed: () {
+                              ref.read(leadsNotifierProvider.notifier).resetAllFilters();
+                              Navigator.pop(ctx);
+                            },
+                            child: const Text('Reset All', style: TextStyle(color: AppColors.error, fontWeight: FontWeight.w600)),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          flex: 2,
+                          child: ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.primary,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              elevation: 0,
+                            ),
+                            icon: const Icon(Icons.check, color: Colors.white, size: 18),
+                            label: const Text('Apply Filters', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                            onPressed: () {
+                              ref.read(leadsNotifierProvider.notifier).applyFilters(
+                                loanType: tempLoanType,
+                                priority: tempPriority,
+                                unassignedOnly: tempUnassignedOnly,
+                              );
+                              Navigator.pop(ctx);
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 20),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  TextButton(
-                    onPressed: () {
-                      ref.read(leadsNotifierProvider.notifier).setLoanTypeFilter(null);
-                      Navigator.pop(ctx);
-                    },
-                    child: const Text('Clear Filter', style: TextStyle(color: AppColors.error)),
-                  ),
-                  ElevatedButton(
-                    onPressed: () => Navigator.pop(ctx),
-                    style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
-                    child: const Text('Done', style: TextStyle(color: Colors.white)),
-                  ),
-                ],
-              ),
-            ],
-          ),
+            );
+          },
         );
       },
     );

@@ -1,5 +1,5 @@
 const { Op, fn, col } = require("sequelize");
-const { CallLog, Lead, Customer, User } = require("../models");
+const { CallLog, Lead, Customer, User, FollowUp } = require("../models");
 const { buildQuery, paginated } = require("../utils/query");
 const { logActivity } = require("../utils/activity");
 const { companyScope, belongsToScope } = require("../middlewares/auth");
@@ -105,9 +105,35 @@ exports.createCall = async (req, res) => {
     });
 
     // A call almost always moves the follow-up date; write it through in the
-    // same request so the lead list stays truthful.
-    if (lead && (body.next_meeting || body.nextFollowupDate)) {
-      await lead.update({ nextFollowupDate: body.next_meeting || body.nextFollowupDate });
+    // same request so the lead list and follow-up queue stay truthful.
+    const followupInput = body.next_meeting || body.nextFollowupDate || body.nextMeeting;
+    if (lead && followupInput) {
+      const when = new Date(followupInput);
+      if (!Number.isNaN(when.valueOf())) {
+        await lead.update({ nextFollowupDate: when });
+
+        const existing = await FollowUp.findOne({
+          where: { leadId: lead.id, companyId: lead.companyId, status: "PENDING" },
+          order: [["scheduledAt", "ASC"]],
+        });
+        if (existing) {
+          await existing.update({
+            scheduledAt: when,
+            userId: body.emp_id || body.userId || lead.assignedEmployeeId || req.user.id,
+            remarks: body.remarks || body.remark || existing.remarks,
+          });
+        } else {
+          await FollowUp.create({
+            companyId: lead.companyId,
+            leadId: lead.id,
+            userId: body.emp_id || body.userId || lead.assignedEmployeeId || req.user.id,
+            scheduledAt: when,
+            reminderType: "same_day",
+            status: "PENDING",
+            remarks: body.remarks || body.remark || "Follow-up scheduled after call",
+          });
+        }
+      }
     }
 
     if (lead) {

@@ -169,14 +169,16 @@ final GoRouter appRouter = GoRouter(
           path: '/leads/add',
           builder: (context, state) {
             final mobile = state.uri.queryParameters['mobile'] ?? state.uri.queryParameters['number'];
-            return AddLeadScreen(initialMobile: mobile);
+            final fromDialer = state.uri.queryParameters['fromDialer'] == 'true' || state.uri.queryParameters['dialer'] == 'true';
+            return AddLeadScreen(initialMobile: mobile, fromDialer: fromDialer);
           },
         ),
         GoRoute(
           path: '/add-lead',
           builder: (context, state) {
             final mobile = state.uri.queryParameters['mobile'] ?? state.uri.queryParameters['number'];
-            return AddLeadScreen(initialMobile: mobile);
+            final fromDialer = state.uri.queryParameters['fromDialer'] == 'true' || state.uri.queryParameters['dialer'] == 'true';
+            return AddLeadScreen(initialMobile: mobile, fromDialer: fromDialer);
           },
         ),
         GoRoute(
@@ -199,7 +201,11 @@ final GoRouter appRouter = GoRouter(
         ),
         GoRoute(
           path: '/followups',
-          builder: (context, state) => const TasksAndFollowupsScreen(initialTabIndex: 0),
+          builder: (context, state) {
+            final tabIndex = int.tryParse(state.uri.queryParameters['tab'] ?? '0') ?? 0;
+            final window = state.uri.queryParameters['window'];
+            return TasksAndFollowupsScreen(initialTabIndex: tabIndex, initialWindow: window);
+          },
         ),
         GoRoute(
           path: '/tasks',

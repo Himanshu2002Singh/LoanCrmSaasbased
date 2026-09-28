@@ -504,6 +504,49 @@ exports.createLead = async (req, res) => {
       { transaction }
     );
 
+    // If call was placed from dialer or requested to log call upon lead creation
+    if (body.log_call || body.logCall || body.call_status || body.callStatus || body.from_dialer || body.fromDialer) {
+      const callStatusRaw = String(body.call_status || body.callStatus || "CONNECTED").toUpperCase();
+      const validCallStatuses = [
+        "CONNECTED", "INTERESTED", "CALL_BACK_LATER", "NOT_CONNECTED",
+        "BUSY", "SWITCHED_OFF", "NOT_INTERESTED", "INVALID_NUMBER"
+      ];
+      const callStatus = validCallStatuses.includes(callStatusRaw) ? callStatusRaw : "CONNECTED";
+      const duration = parseInt(body.duration ?? body.call_duration ?? body.callDuration ?? 60, 10);
+
+      await CallLog.create(
+        {
+          companyId,
+          leadId: lead.id,
+          userId: req.user.id,
+          callStatus,
+          durationSec: Number.isNaN(duration) || duration < 0 ? 60 : duration,
+          remarks: body.call_remarks || body.callRemarks || remark || "Initial call from Smart Dialer",
+        },
+        { transaction }
+      );
+    }
+
+    // If follow-up date was set upon lead creation
+    const followupInput = body.next_meeting || body.nextFollowupDate || body.nextMeeting;
+    if (followupInput) {
+      const when = new Date(followupInput);
+      if (!Number.isNaN(when.valueOf())) {
+        await FollowUp.create(
+          {
+            companyId,
+            leadId: lead.id,
+            userId: assignedEmployeeId || req.user.id,
+            scheduledAt: when,
+            reminderType: body.reminder_type || "same_day",
+            status: "PENDING",
+            remarks: remark || body.remarks || "Initial follow-up scheduled",
+          },
+          { transaction }
+        );
+      }
+    }
+
     await transaction.commit();
 
     await logActivity(req, {
@@ -644,6 +687,35 @@ exports.updateLead = async (req, res) => {
       await lead.customer.update(customerPatch);
     }
 
+    // Sync follow-up if next follow-up date was supplied
+    const followupInput = body.next_meeting || body.nextFollowupDate || body.nextMeeting;
+    if (followupInput) {
+      const when = new Date(followupInput);
+      if (!Number.isNaN(when.valueOf())) {
+        const existing = await FollowUp.findOne({
+          where: { leadId: lead.id, companyId: lead.companyId, status: "PENDING" },
+          order: [["scheduledAt", "ASC"]],
+        });
+        if (existing) {
+          await existing.update({
+            scheduledAt: when,
+            userId: lead.assignedEmployeeId || existing.userId || req.user.id,
+            remarks: remark || body.remarks || existing.remarks,
+          });
+        } else {
+          await FollowUp.create({
+            companyId: lead.companyId,
+            leadId: lead.id,
+            userId: lead.assignedEmployeeId || req.user.id,
+            scheduledAt: when,
+            reminderType: body.reminder_type || "same_day",
+            status: "PENDING",
+            remarks: remark || body.remarks || "Follow-up scheduled",
+          });
+        }
+      }
+    }
+
     return res.status(200).json({ message: "Lead updated", data: serializeLead(lead, statuses.byValue, req.user) });
   } catch (error) {
     console.error("[leads] updateLead error:", error);
@@ -676,6 +748,34 @@ exports.updateLeadStatus = async (req, res) => {
     if (req.body.next_meeting !== undefined) patch.nextFollowupDate = req.body.next_meeting || null;
 
     await lead.update(patch);
+
+    const statusFollowupInput = req.body.next_meeting || req.body.nextFollowupDate || req.body.nextMeeting;
+    if (statusFollowupInput) {
+      const when = new Date(statusFollowupInput);
+      if (!Number.isNaN(when.valueOf())) {
+        const existing = await FollowUp.findOne({
+          where: { leadId: lead.id, companyId: lead.companyId, status: "PENDING" },
+          order: [["scheduledAt", "ASC"]],
+        });
+        if (existing) {
+          await existing.update({
+            scheduledAt: when,
+            userId: lead.assignedEmployeeId || existing.userId || req.user.id,
+            remarks: remarkOf(req.body) || existing.remarks,
+          });
+        } else {
+          await FollowUp.create({
+            companyId: lead.companyId,
+            leadId: lead.id,
+            userId: lead.assignedEmployeeId || req.user.id,
+            scheduledAt: when,
+            reminderType: "same_day",
+            status: "PENDING",
+            remarks: remarkOf(req.body) || "Follow-up scheduled after status change",
+          });
+        }
+      }
+    }
 
     await logActivity(req, {
       recordType: "Lead",
