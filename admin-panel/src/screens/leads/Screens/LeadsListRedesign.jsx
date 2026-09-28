@@ -72,6 +72,13 @@ export default function LeadsListRedesign() {
   const canExport = !isEmployee && userPermissions.exportData !== false;
   const canDelete = !isEmployee && Boolean(userPermissions.deleteRecords);
   const canViewCommission = !isEmployee && Boolean(userPermissions.viewPayouts || userPermissions.viewConnectors || userRole === "COMPANY_ADMIN" || userRole === "SUPERADMIN");
+  const isCompanyAdmin = userRole === "COMPANY_ADMIN" || userRole === "SUPERADMIN";
+  const canAddLead = isCompanyAdmin || (userPermissions.createLead !== undefined ? Boolean(userPermissions.createLead) : Boolean(userPermissions.manageLeads !== false));
+  const canEditLead =
+    isCompanyAdmin ||
+    ["MANAGER", "OPS", "EMPLOYEE"].includes(userRole.toUpperCase()) ||
+    ["manager", "operations", "calling", "employee", "sales"].includes(employeeRole?.toLowerCase()) ||
+    userPermissions.editLead !== false;
 
   const fetchEmployees = () => {
     axios
@@ -366,9 +373,11 @@ export default function LeadsListRedesign() {
                 <Download size={16} /> Excel
               </button>
             )}
-            <button type="button" className="cc-leads-btn primary" onClick={() => setShowAddModal(true)}>
-              <Plus size={16} /> Add lead
-            </button>
+            {canAddLead && (
+              <button type="button" className="cc-leads-btn primary" onClick={() => setShowAddModal(true)}>
+                <Plus size={16} /> Add lead
+              </button>
+            )}
           </div>
         </div>
       </section>
@@ -517,14 +526,16 @@ export default function LeadsListRedesign() {
                         >
                           <Eye size={16} />
                         </button>
-                        <button
-                          type="button"
-                          className="cc-leads-icon-btn edit"
-                          title="Edit lead"
-                          onClick={() => navigate(`/lead-edit/${row.lead_id}`)}
-                        >
-                          <Pencil size={15} />
-                        </button>
+                        {canEditLead && (
+                          <button
+                            type="button"
+                            className="cc-leads-icon-btn edit"
+                            title="Edit lead"
+                            onClick={() => navigate(`/lead-edit/${row.lead_id}`)}
+                          >
+                            <Pencil size={15} />
+                          </button>
+                        )}
                         {canDelete && (
                           <button
                             type="button"

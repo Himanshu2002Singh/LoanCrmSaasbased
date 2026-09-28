@@ -48,13 +48,24 @@ const LeadEditScreen = () => {
     }
   })();
 
+  const isCompanyAdmin = userRole === "COMPANY_ADMIN" || userRole === "SUPERADMIN";
+  const isAllowedRole =
+    isCompanyAdmin ||
+    ["MANAGER", "OPS", "EMPLOYEE"].includes(userRole.toUpperCase()) ||
+    ["manager", "operations", "calling", "employee", "sales"].includes(employeeRole?.toLowerCase());
+  const canEditLead = isAllowedRole && userPermissions.editLead !== false;
   const canViewCommission = !isEmployee && Boolean(userPermissions.viewPayouts || userPermissions.viewConnectors || userRole === "COMPANY_ADMIN" || userRole === "SUPERADMIN");
 
   useEffect(() => {
+    if (!canEditLead) {
+      toast.error("You do not have permission to edit leads");
+      navigate("/leads", { replace: true });
+      return;
+    }
     fetchLeadDetails();
     fetchEmployees();
     fetchSources();
-  }, [id]);
+  }, [id, canEditLead]);
 
   const fetchLeadDetails = async () => {
     try {

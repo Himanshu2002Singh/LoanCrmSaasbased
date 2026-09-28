@@ -34,6 +34,7 @@ const PartyPayment = require("./PartyPayment");
 const CasePayout = require("./CasePayout");
 const BankReceipt = require("./BankReceipt");
 const Expense = require("./Expense");
+const Note = require("./Note");
 
 // ==========================================
 // Define Model Relationships & Foreign Keys
@@ -171,7 +172,18 @@ Expense.belongsTo(Company, { foreignKey: "company_id", as: "company" });
 Expense.belongsTo(User, { foreignKey: "created_by_id", as: "createdBy" });
 User.hasMany(Expense, { foreignKey: "created_by_id", as: "createdExpenses" });
 Expense.belongsTo(User, { foreignKey: "employee_id", as: "employee" });
-User.hasMany(Expense, { foreignKey: "employee_id", as: "employeeExpenses" });
+// Module 10: Notes — Personal & Team Scratchpad with Lead Integration
+Company.hasMany(Note, { foreignKey: "company_id", as: "notes", onDelete: "CASCADE" });
+Note.belongsTo(Company, { foreignKey: "company_id", as: "company" });
+
+User.hasMany(Note, { foreignKey: "user_id", as: "notes", onDelete: "CASCADE" });
+Note.belongsTo(User, { foreignKey: "user_id", as: "user" });
+
+Lead.hasMany(Note, { foreignKey: "lead_id", as: "notes", onDelete: "SET NULL" });
+Note.belongsTo(Lead, { foreignKey: "lead_id", as: "lead" });
+
+// Automatically ensure notes table exists
+Note.sync().catch((err) => console.error("Error auto-syncing Note model:", err.message));
 
 const db = {
   sequelize,
@@ -198,6 +210,8 @@ const db = {
   BankReceipt,
   Expense,
   EmailTemplate,
+  Note,
 };
 
 module.exports = db;
+

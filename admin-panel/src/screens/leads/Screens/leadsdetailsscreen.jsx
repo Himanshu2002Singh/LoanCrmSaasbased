@@ -106,6 +106,20 @@ export default function LeadDetailScreen() {
 
   const canExport = !isEmployee && userPermissions.exportData !== false;
   const canViewCommission = !isEmployee && Boolean(userPermissions.viewPayouts || userPermissions.viewConnectors || userRole === "COMPANY_ADMIN" || userRole === "SUPERADMIN");
+  const isCompanyAdmin = userRole === "COMPANY_ADMIN" || userRole === "SUPERADMIN";
+  const canEditLead =
+    isCompanyAdmin ||
+    ["MANAGER", "OPS", "EMPLOYEE"].includes(userRole.toUpperCase()) ||
+    ["manager", "operations", "calling", "employee", "sales"].includes(employeeRole?.toLowerCase()) ||
+    userPermissions.editLead !== false;
+  const canFollowupLead = isCompanyAdmin || (userPermissions.followupLead !== undefined ? Boolean(userPermissions.followupLead) : Boolean(userPermissions.manageLeads !== false));
+  const canCreateLoanApplication =
+    isCompanyAdmin ||
+    Boolean(
+      userPermissions.createLoanApplication ||
+      userPermissions.createApplication ||
+      userPermissions.manageOperations
+    );
 
   // Upload Doc Modal state
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
@@ -475,14 +489,16 @@ export default function LeadDetailScreen() {
         </div>
 
         <div className="cc-lead-header-right">
-          <button
-            type="button"
-            className="cc-header-action-btn edit"
-            onClick={() => navigate(`/lead-edit/${lead.lead_id || lead.id}`)}
-          >
-            <Pencil size={15} />
-            <span>Edit Lead</span>
-          </button>
+          {canEditLead && (
+            <button
+              type="button"
+              className="cc-header-action-btn edit"
+              onClick={() => navigate(`/lead-edit/${lead.lead_id || lead.id}`)}
+            >
+              <Pencil size={15} />
+              <span>Edit Lead</span>
+            </button>
+          )}
           {canExport && (
             <button
               type="button"
@@ -612,14 +628,16 @@ export default function LeadDetailScreen() {
               <h3>Loan Applications</h3>
               <p>Active loan cases submitted to Bank, NBFC or DSA partner with status &amp; underwriting info</p>
             </div>
-            <button
-              type="button"
-              className="cc-action-btn primary"
-              onClick={() => setCreateAppModalOpen(true)}
-            >
-              <Plus size={15} />
-              <span>Create Loan Application</span>
-            </button>
+            {canCreateLoanApplication && (
+              <button
+                type="button"
+                className="cc-action-btn primary"
+                onClick={() => setCreateAppModalOpen(true)}
+              >
+                <Plus size={15} />
+                <span>Create Loan Application</span>
+              </button>
+            )}
           </div>
 
           {applications.length === 0 ? (
@@ -629,14 +647,16 @@ export default function LeadDetailScreen() {
               <p>
                 You can create a loan application to assign a Bank / NBFC partner (or DSA channel) and start document verification.
               </p>
-              <button
-                type="button"
-                className="cc-action-btn primary"
-                onClick={() => setCreateAppModalOpen(true)}
-              >
-                <Plus size={15} />
-                <span>Create Loan Application</span>
-              </button>
+              {canCreateLoanApplication && (
+                <button
+                  type="button"
+                  className="cc-action-btn primary"
+                  onClick={() => setCreateAppModalOpen(true)}
+                >
+                  <Plus size={15} />
+                  <span>Create Loan Application</span>
+                </button>
+              )}
             </div>
           ) : (
             <div className="cc-applications-cards-list">
@@ -1069,7 +1089,7 @@ export default function LeadDetailScreen() {
       )}
 
       {/* MODAL: CREATE LOAN APPLICATION */}
-      {createAppModalOpen && (
+      {createAppModalOpen && canCreateLoanApplication && (
         <div className="cc-modal-backdrop" onClick={() => setCreateAppModalOpen(false)}>
           <div className="cc-modal-box" onClick={(e) => e.stopPropagation()}>
             <div className="cc-modal-header">

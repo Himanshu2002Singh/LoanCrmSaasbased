@@ -3,6 +3,7 @@ const XLSX = require("xlsx");
 const { Lead, Customer, User, MasterConfig, CallLog, FollowUp, ActivityLog, Application, Document, Lender, sequelize } = require("../models");
 const { buildQuery, paginated } = require("../utils/query");
 const { logActivity, diffFields } = require("../utils/activity");
+const { parseScheduledDate, syncLeadFollowUp } = require("../utils/followUpSync");
 const { companyScope, belongsToScope } = require("../middlewares/auth");
 const { findOrCreateCustomer, normaliseMobile } = require("./customerController");
 const { ROLES } = require("../constants/roles");
@@ -472,7 +473,15 @@ exports.createLead = async (req, res) => {
       : "Self";
     if (body.loan_type !== undefined) data.loanType = body.loan_type;
     if (body.est_budget !== undefined) data.requiredAmount = body.est_budget;
-    if (body.next_meeting !== undefined) data.nextFollowupDate = body.next_meeting || null;
+    const rawMeeting = body.next_meeting ?? body.meetingDate ?? body.meeting_date ?? body.nextMeetingDate ?? body.nextFollowupDate;
+    if (rawMeeting !== undefined) {
+      let combinedMeeting = rawMeeting;
+      const rawTime = body.meetingTime ?? body.meeting_time ?? body.nextMeetingTime;
+      if (rawTime && typeof rawMeeting === "string" && rawMeeting.length === 10) {
+        combinedMeeting = `${rawMeeting}T${rawTime.length === 5 ? rawTime + ":00" : rawTime}`;
+      }
+      data.nextFollowupDate = parseScheduledDate(combinedMeeting);
+    }
     if (data.priority) data.priority = String(data.priority).toUpperCase();
     const rawComm = body.commission_percent ?? body.commissionPercent ?? body.commission;
     if (rawComm !== undefined && rawComm !== null && String(rawComm).trim() !== "") {
@@ -515,6 +524,17 @@ exports.createLead = async (req, res) => {
       companyId,
     });
 
+    if (data.nextFollowupDate) {
+      await syncLeadFollowUp({
+        leadId: lead.id,
+        companyId,
+        nextDate: data.nextFollowupDate,
+        userId: lead.assignedEmployeeId || lead.assignedManagerId || req.user.id,
+        remarks: remark || "Initial follow-up scheduled",
+        reqUser: req.user,
+      });
+    }
+
     return res.status(201).json({ message: "Lead added successfully", id: lead.id, data: lead });
   } catch (error) {
     await transaction.rollback();
@@ -538,6 +558,7 @@ exports.updateLead = async (req, res) => {
 
     if (req.user.role === ROLES.EMPLOYEE) {
       if (
+        req.permissions?.editLead === false &&
         !req.permissions?.editAllLeads &&
         !req.permissions?.editLeads &&
         lead.assignedEmployeeId !== req.user.id &&
@@ -559,7 +580,15 @@ exports.updateLead = async (req, res) => {
     }
     if (body.loan_type !== undefined) data.loanType = body.loan_type;
     if (body.est_budget !== undefined) data.requiredAmount = body.est_budget;
-    if (body.next_meeting !== undefined) data.nextFollowupDate = body.next_meeting || null;
+    const rawMeeting = body.next_meeting ?? body.meetingDate ?? body.meeting_date ?? body.nextMeetingDate ?? body.nextFollowupDate;
+    if (rawMeeting !== undefined) {
+      let combinedMeeting = rawMeeting;
+      const rawTime = body.meetingTime ?? body.meeting_time ?? body.nextMeetingTime;
+      if (rawTime && typeof rawMeeting === "string" && rawMeeting.length === 10) {
+        combinedMeeting = `${rawMeeting}T${rawTime.length === 5 ? rawTime + ":00" : rawTime}`;
+      }
+      data.nextFollowupDate = parseScheduledDate(combinedMeeting);
+    }
     if (data.priority) data.priority = String(data.priority).toUpperCase();
     const rawUpdateComm = body.commission_percent ?? body.commissionPercent ?? body.commission;
     if (rawUpdateComm !== undefined) {
@@ -644,6 +673,18 @@ exports.updateLead = async (req, res) => {
       await lead.customer.update(customerPatch);
     }
 
+    const rawMeetingUpdated = body.next_meeting ?? body.meetingDate ?? body.meeting_date ?? body.nextMeetingDate ?? body.nextFollowupDate;
+    if (rawMeetingUpdated !== undefined || data.nextFollowupDate !== undefined) {
+      await syncLeadFollowUp({
+        leadId: lead.id,
+        companyId: lead.companyId,
+        nextDate: data.nextFollowupDate,
+        userId: data.assignedEmployeeId || lead.assignedEmployeeId || lead.assignedManagerId || req.user.id,
+        remarks: remark || "Meeting updated",
+        reqUser: req.user,
+      });
+    }
+
     return res.status(200).json({ message: "Lead updated", data: serializeLead(lead, statuses.byValue, req.user) });
   } catch (error) {
     console.error("[leads] updateLead error:", error);
@@ -673,9 +714,20 @@ exports.updateLeadStatus = async (req, res) => {
 
     const previous = lead.status;
     const patch = { status: status.value };
-    if (req.body.next_meeting !== undefined) patch.nextFollowupDate = req.body.next_meeting || null;
+    if (req.body.next_meeting !== undefined) patch.nextFollowupDate = parseScheduledDate(req.body.next_meeting);
 
     await lead.update(patch);
+
+    if (req.body.next_meeting !== undefined) {
+      await syncLeadFollowUp({
+        leadId: lead.id,
+        companyId: lead.companyId,
+        nextDate: patch.nextFollowupDate,
+        userId: lead.assignedEmployeeId || lead.assignedManagerId || req.user.id,
+        remarks: remarkOf(req.body) || `Status changed to ${status.label}`,
+        reqUser: req.user,
+      });
+    }
 
     await logActivity(req, {
       recordType: "Lead",
@@ -875,9 +927,12 @@ exports.getFollowups = async (req, res) => {
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const endOfToday = new Date(startOfToday.getTime() + 86399999);
+    const startOfTomorrow = new Date(startOfToday.getTime() + 86400000);
+    const endOfTomorrow = new Date(endOfToday.getTime() + 86400000);
 
     const windows = {
       today: { [Op.between]: [startOfToday, endOfToday] },
+      tomorrow: { [Op.between]: [startOfTomorrow, endOfTomorrow] },
       overdue: { [Op.lt]: startOfToday },
       upcoming: { [Op.gt]: endOfToday },
     };

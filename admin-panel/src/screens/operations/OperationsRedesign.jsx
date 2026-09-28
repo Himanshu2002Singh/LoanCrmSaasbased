@@ -100,6 +100,18 @@ export default function OperationsRedesign() {
   const navigate = useNavigate();
   const employeeId = localStorage.getItem("employeeId");
   const employeeRole = localStorage.getItem("employeeRole");
+  const userRole = localStorage.getItem("userRole") || "";
+  const isCompanyAdmin = userRole === "COMPANY_ADMIN" || userRole === "SUPERADMIN";
+
+  const userPermissions = useMemo(() => {
+    try {
+      return JSON.parse(localStorage.getItem("userPermissions") || "{}");
+    } catch {
+      return {};
+    }
+  }, []);
+
+  const canManageOperations = isCompanyAdmin || (userPermissions.manageOperations !== undefined ? Boolean(userPermissions.manageOperations) : true);
 
   // Navigation View: "pipeline" (Applications Kanban/Table) | "leads" (Operations Leads Queue)
   const [viewMode, setViewMode] = useState("pipeline");

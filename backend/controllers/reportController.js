@@ -13,6 +13,12 @@ const dayBounds = () => {
   return { start, end: new Date(start.getTime() + 86399999) };
 };
 
+const tomorrowBounds = () => {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  return { start, end: new Date(start.getTime() + 86399999) };
+};
+
 /**
  * Counts keyed by a column, as a plain object, so the dashboard can index it
  * directly instead of scanning an array.
@@ -51,11 +57,19 @@ exports.getDashboard = async (req, res) => {
     if (req.query.employeeId) callWhere.userId = parseInt(req.query.employeeId, 10);
 
     const { start, end } = dayBounds();
+    const { start: tmStart, end: tmEnd } = tomorrowBounds();
+
+    const followupBaseWhere = {
+      ...companyScope(req),
+      ...(await visibilityScope(req)),
+    };
+    if (req.query.employeeId) followupBaseWhere.assignedEmployeeId = parseInt(req.query.employeeId, 10);
 
     const [
       totalLeads,
       totalCalls,
       todayFollowups,
+      tomorrowFollowups,
       pendingFollowups,
       statusCounts,
       loanTypeCounts,
@@ -64,8 +78,9 @@ exports.getDashboard = async (req, res) => {
     ] = await Promise.all([
       Lead.count({ where: leadWhere }),
       CallLog.count({ where: callWhere }),
-      Lead.count({ where: { ...leadWhere, nextFollowupDate: { [Op.between]: [start, end] } } }),
-      Lead.count({ where: { ...leadWhere, nextFollowupDate: { [Op.lt]: start } } }),
+      Lead.count({ where: { ...followupBaseWhere, nextFollowupDate: { [Op.between]: [start, end] } } }),
+      Lead.count({ where: { ...followupBaseWhere, nextFollowupDate: { [Op.between]: [tmStart, tmEnd] } } }),
+      Lead.count({ where: { ...followupBaseWhere, nextFollowupDate: { [Op.lt]: start } } }),
       countBy(Lead, leadWhere, "status"),
       countBy(Lead, leadWhere, "loanType"),
       countBy(Lead, leadWhere, "leadSource"),
@@ -144,6 +159,7 @@ exports.getDashboard = async (req, res) => {
         totalLeads,
         totalCalls,
         todayFollowups,
+        tomorrowFollowups,
         pendingFollowups,
         unassignedLeads: await Lead.count({ where: { ...leadWhere, assignedEmployeeId: null } }),
       },

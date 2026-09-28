@@ -451,3 +451,31 @@
     gap: 12px;
   }
 }
+
+/* Follow-up Screen Active Green Card & Tab White Text Fix */
+.cc-section-followup-work .cc-followup-card-active,
+.cc-section-followup-work .cc-followup-card-active *,
+.cc-section-followup-work button.active,
+.cc-section-followup-work button.active *,
+.cc-section-followup-work .active,
+.cc-section-followup-work .active * {
+  color: #ffffff !important;
+}
+
+.cc-section-followup-work .cc-followup-card-active {
+  background: #047857 !important;
+  border-color: #065f46 !important;
+  box-shadow: 0 10px 25px -5px rgba(4, 120, 87, 0.4), 0 8px 10px -6px rgba(4, 120, 87, 0.2) !important;
+}
+
+.cc-section-followup-work .cc-followup-card-active.bg-rose-600 {
+  background: #dc2626 !important;
+  border-color: #b91c1c !important;
+  box-shadow: 0 10px 25px -5px rgba(220, 38, 38, 0.4), 0 8px 10px -6px rgba(220, 38, 38, 0.2) !important;
+}
+
+.cc-section-followup-work .cc-followup-card-active [class*="bg-"] {
+  background: rgba(255, 255, 255, 0.25) !important;
+  color: #ffffff !important;
+}
+

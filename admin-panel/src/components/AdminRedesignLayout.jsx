@@ -5,6 +5,7 @@ import {
   BriefcaseBusiness,
   Building2,
   CalendarDays,
+  CalendarClock,
   ChevronLeft,
   ChevronRight,
   ClipboardList,
@@ -25,6 +26,7 @@ import {
   Settings,
   Share2,
   ShieldCheck,
+  StickyNote,
   Tags,
   UserPlus,
   Users,
@@ -42,6 +44,8 @@ import { resolveLogoUrl } from "../utils/logo";
 const managerNavItems = [
   { path: "/", label: "Dashboard", icon: LayoutDashboard },
   { path: "/leads", label: "Leads", icon: FileText },
+  { path: "/followup-work", label: "Today Followup / Work", icon: CalendarClock, permission: "viewFollowupWork" },
+  { path: "/notes", label: "Quick Notes", icon: StickyNote },
   { path: "/add-users", label: "Add Employees", icon: UserPlus, permission: "manageUsers" },
   { path: "/branches", label: "Branches", icon: MapPin },
   { path: "/attendance", label: "Attendance", icon: CalendarDays },
@@ -53,10 +57,10 @@ const managerNavItems = [
   { path: "/lead-sources", label: "Lead Sources", icon: Share2 },
   { path: "/document-types", label: "Document Types", icon: Files },
   { path: "/lenders", label: "Lenders & NBFC", icon: Building2 },
-  { path: "/operations", label: "Operations", icon: BriefcaseBusiness },
+  { path: "/operations", label: "Operations", icon: BriefcaseBusiness, permission: "viewOperations" },
   { path: "/party-payouts", label: "Party / Connector Details", icon: Receipt, permission: "viewConnectors" },
   { path: "/case-payouts", label: "Disbursement & Payouts", icon: IndianRupee, permission: "viewPayouts" },
-  { path: "/expenses", label: "Expense Tracker", icon: Wallet },
+  { path: "/expenses", label: "Expense Tracker", icon: Wallet, permission: "viewExpenses" },
   { path: "/banker/queries", label: "Banker Queries", icon: ClipboardList },
   { path: "/performance", label: "Performance Report", icon: BarChart3, permission: "viewReports" },
   { path: "/lead_report", label: "Lead Report", icon: FileBarChart, permission: "viewReports" },
@@ -66,15 +70,18 @@ const managerNavItems = [
 ];
 
 const operationsNavItems = [
-  { path: "/leads", label: "Leads", icon: FileText },
+  { path: "/leads", label: "Leads", icon: FileText, permission: "viewLeads" },
+  { path: "/followup-work", label: "Today Followup / Work", icon: CalendarClock, permission: "viewFollowupWork" },
+  { path: "/notes", label: "Quick Notes", icon: StickyNote },
   { path: "/email-templates", label: "Email Templates", icon: Mail },
   { path: "/lead-statuses", label: "Lead Statuses", icon: Tags },
   { path: "/loan-products", label: "Loan Types", icon: Coins },
   { path: "/lead-sources", label: "Lead Sources", icon: Share2 },
   { path: "/lenders", label: "Lenders & NBFC", icon: Building2 },
-  { path: "/operations", label: "Operations", icon: BriefcaseBusiness },
-  { path: "/case-payouts", label: "Disbursement & Payouts", icon: IndianRupee },
-  { path: "/expenses", label: "Expenses", icon: Wallet },
+  { path: "/operations", label: "Operations", icon: BriefcaseBusiness, permission: "viewOperations" },
+  { path: "/party-payouts", label: "Party / Connector Details", icon: Receipt, permission: "viewConnectors" },
+  { path: "/case-payouts", label: "Disbursement & Payouts", icon: IndianRupee, permission: "viewPayouts" },
+  { path: "/expenses", label: "Expenses", icon: Wallet, permission: "viewExpenses" },
   { path: "/banker/queries", label: "Banker Queries", icon: ClipboardList },
 ];
 
@@ -86,6 +93,9 @@ const bankerNavItems = [
 
 const employeeNavItems = [
   { path: "/leads", label: "Leads", icon: FileText },
+  { path: "/followup-work", label: "Today Followup / Work", icon: CalendarClock, permission: "viewFollowupWork" },
+  { path: "/notes", label: "Quick Notes", icon: StickyNote },
+  { path: "/operations", label: "Operations", icon: BriefcaseBusiness, permission: "viewOperations" },
   { path: "/lead-statuses", label: "Lead Statuses", icon: Tags },
   { path: "/loan-products", label: "Loan Types", icon: Coins },
   { path: "/lead-sources", label: "Lead Sources", icon: Share2 },
@@ -187,14 +197,11 @@ function AdminRedesignLayout({ children }) {
 
   const navItems = useMemo(() => {
     if (isCompanyAdmin) return rawNavItems;
-    if (isEmployee) return employeeNavItems;
-    if (isOperations) return operationsNavItems;
-    if (isBanker) return bankerNavItems;
     return rawNavItems.filter((item) => {
       if (!item.permission) return true;
-      return Boolean(userPermissions[item.permission]);
+      return userPermissions[item.permission] !== false && Boolean(userPermissions[item.permission]);
     });
-  }, [rawNavItems, isCompanyAdmin, isEmployee, isOperations, isBanker, userPermissions]);
+  }, [rawNavItems, isCompanyAdmin, userPermissions]);
 
   const homePath =
     employeeRole === "banker"

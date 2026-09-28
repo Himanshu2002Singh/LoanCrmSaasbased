@@ -30,8 +30,8 @@ const logActivity = async (
         newValue,
         remarks,
         actorUserId: req.user?.id ?? null,
-        sourcePanel: req.headers["x-source-panel"] || "Admin Panel",
-        ipAddress: req.ip,
+        sourcePanel: req?.headers?.["x-source-panel"] || "Admin Panel",
+        ipAddress: req?.ip || null,
       },
       { transaction }
     );

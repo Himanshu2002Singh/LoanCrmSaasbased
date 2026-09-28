@@ -63,6 +63,13 @@ const emptyForm = () => ({
 
 export default function LeadSourcesRedesign() {
   const navigate = useNavigate();
+  const userRole = localStorage.getItem("userRole") || "";
+  const employeeRole = localStorage.getItem("employeeRole") || "";
+  const isAdmin =
+    userRole.toUpperCase() === "COMPANY_ADMIN" ||
+    userRole.toUpperCase() === "SUPERADMIN" ||
+    ["admin", "superadmin"].includes(employeeRole?.toLowerCase());
+
   const [sources, setSources] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -149,7 +156,7 @@ export default function LeadSourcesRedesign() {
         "Applied / Budget Amount (₹)":
           l.applied_amount || l.est_budget ? Number(l.applied_amount || l.est_budget) : "--",
         "Sanction Date": l.sanction_date ? new Date(l.sanction_date).toLocaleDateString("en-IN") : "--",
-        "Party Commission (%)": `${commPct}%`,
+        ...(isAdmin ? { "Party Commission (%)": `${commPct}%` } : {}),
         "Status": l.status || "--",
         "Assigned To": l.owner || "Unassigned",
       };
@@ -355,7 +362,7 @@ export default function LeadSourcesRedesign() {
                   />
                   <h2>{selectedParty.label}</h2>
                   <span className="cc-party-code-badge">{selectedParty.value}</span>
-                  {selectedParty.commissionPercent !== null && selectedParty.commissionPercent !== undefined && (
+                  {isAdmin && selectedParty.commissionPercent !== null && selectedParty.commissionPercent !== undefined && (
                     <span className="cc-party-comm-badge">
                       {selectedParty.commissionPercent}% Default Comm.
                     </span>
@@ -416,22 +423,24 @@ export default function LeadSourcesRedesign() {
               </div>
             </div>
 
-            <div className="cc-party-stat-card">
-              <div className="icon purple"><TrendingUp size={20} /></div>
-              <div className="info">
-                <span className="label">Party Commission Rate</span>
-                <span className="val">
-                  {selectedParty.commissionPercent !== null && selectedParty.commissionPercent !== undefined
-                    ? `${selectedParty.commissionPercent}%`
-                    : partyLeads.some((l) => l.commission_percent !== null)
-                    ? `${(
-                        partyLeads.reduce((acc, l) => acc + (Number(l.commission_percent) || 0), 0) /
-                        (partyLeads.filter((l) => l.commission_percent !== null).length || 1)
-                      ).toFixed(1)}%`
-                    : "0%"}
-                </span>
+            {isAdmin && (
+              <div className="cc-party-stat-card">
+                <div className="icon purple"><TrendingUp size={20} /></div>
+                <div className="info">
+                  <span className="label">Party Commission Rate</span>
+                  <span className="val">
+                    {selectedParty.commissionPercent !== null && selectedParty.commissionPercent !== undefined
+                      ? `${selectedParty.commissionPercent}%`
+                      : partyLeads.some((l) => l.commission_percent !== null)
+                      ? `${(
+                          partyLeads.reduce((acc, l) => acc + (Number(l.commission_percent) || 0), 0) /
+                          (partyLeads.filter((l) => l.commission_percent !== null).length || 1)
+                        ).toFixed(1)}%`
+                      : "0%"}
+                  </span>
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="cc-party-stat-card">
               <div className="icon amber"><Building2 size={20} /></div>
@@ -555,7 +564,7 @@ export default function LeadSourcesRedesign() {
                     <th>Bank / Lender</th>
                     <th>Sanction / Loan Amount</th>
                     <th>Sanction Date</th>
-                    <th>Party Commission</th>
+                    {isAdmin && <th>Party Commission</th>}
                     <th>Status</th>
                     <th>Assigned To</th>
                     <th style={{ textAlign: "right" }}>Action</th>
@@ -564,14 +573,14 @@ export default function LeadSourcesRedesign() {
                 <tbody>
                   {partyLeadsLoading ? (
                     <tr>
-                      <td colSpan={10} className="cc-party-loading-cell">
+                      <td colSpan={isAdmin ? 10 : 9} className="cc-party-loading-cell">
                         <RefreshCw size={22} className="spin" />
                         <span>Loading party leads...</span>
                       </td>
                     </tr>
                   ) : partyLeads.length === 0 ? (
                     <tr>
-                      <td colSpan={10} className="cc-party-empty-cell">
+                      <td colSpan={isAdmin ? 10 : 9} className="cc-party-empty-cell">
                         <Share2 size={32} />
                         <h4>No leads found for this party</h4>
                         <p>No leads match the selected filter criteria or this party has no leads assigned yet.</p>
@@ -664,15 +673,17 @@ export default function LeadSourcesRedesign() {
                               <span className="cc-party-session-pending">Pending</span>
                             )}
                           </td>
-                          <td>
-                            <div className="cc-party-comm-cell">
-                              {commPct !== null ? (
-                                <span className="comm-pill">{commPct}%</span>
-                              ) : (
-                                <span className="comm-pill none">0%</span>
-                              )}
-                            </div>
-                          </td>
+                          {isAdmin && (
+                            <td>
+                              <div className="cc-party-comm-cell">
+                                {commPct !== null ? (
+                                  <span className="comm-pill">{commPct}%</span>
+                                ) : (
+                                  <span className="comm-pill none">0%</span>
+                                )}
+                              </div>
+                            </td>
+                          )}
                           <td>
                             <span className="cc-party-status-pill">{lead.status || "NEW"}</span>
                           </td>
@@ -821,7 +832,7 @@ export default function LeadSourcesRedesign() {
                     <th style={{ width: "40px" }}>#</th>
                     <th>Source / Party Name</th>
                     <th>System Code</th>
-                    <th>Default Comm.</th>
+                    {isAdmin && <th>Default Comm.</th>}
                     <th>Color Badge</th>
                     <th>Order Index</th>
                     <th>Status</th>
@@ -831,14 +842,14 @@ export default function LeadSourcesRedesign() {
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan={8} className="cc-sources-loading-cell">
+                      <td colSpan={isAdmin ? 8 : 7} className="cc-sources-loading-cell">
                         <RefreshCw size={24} className="spin" />
                         <span>Loading lead sources...</span>
                       </td>
                     </tr>
                   ) : filtered.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="cc-sources-empty-cell">
+                      <td colSpan={isAdmin ? 8 : 7} className="cc-sources-empty-cell">
                         <Share2 size={36} />
                         <p>No lead sources found matching your criteria</p>
                         {searchTerm && (
@@ -890,25 +901,27 @@ export default function LeadSourcesRedesign() {
                           <td>
                             <span className="cc-sources-code">{source.value}</span>
                           </td>
-                          <td>
-                            {source.commissionPercent !== null && source.commissionPercent !== undefined ? (
-                              <span
-                                style={{
-                                  fontSize: "11.5px",
-                                  color: "#047857",
-                                  fontWeight: 700,
-                                  background: "#ecfdf5",
-                                  padding: "2px 7px",
-                                  borderRadius: "6px",
-                                  border: "1px solid #a7f3d0",
-                                }}
-                              >
-                                {source.commissionPercent}%
-                              </span>
-                            ) : (
-                              <span style={{ color: "#94a3b8", fontSize: "12px" }}>--</span>
-                            )}
-                          </td>
+                          {isAdmin && (
+                            <td>
+                              {source.commissionPercent !== null && source.commissionPercent !== undefined ? (
+                                <span
+                                  style={{
+                                    fontSize: "11.5px",
+                                    color: "#047857",
+                                    fontWeight: 700,
+                                    background: "#ecfdf5",
+                                    padding: "2px 7px",
+                                    borderRadius: "6px",
+                                    border: "1px solid #a7f3d0",
+                                  }}
+                                >
+                                  {source.commissionPercent}%
+                                </span>
+                              ) : (
+                                <span style={{ color: "#94a3b8", fontSize: "12px" }}>--</span>
+                              )}
+                            </td>
+                          )}
                           <td>
                             <span
                               className="cc-sources-badge-preview"
@@ -1070,25 +1083,27 @@ export default function LeadSourcesRedesign() {
                 </div>
               </div>
 
-              <div className="cc-sources-form-group">
-                <label>Default Commission (%) (Optional)</label>
-                <div style={{ position: "relative" }}>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    max="100"
-                    placeholder="e.g. 1.5"
-                    value={form.commissionPercent}
-                    onChange={(e) => setForm({ ...form, commissionPercent: e.target.value })}
-                    style={{ paddingRight: "30px", width: "100%", boxSizing: "border-box" }}
-                  />
-                  <span style={{ position: "absolute", right: "12px", top: "50%", transform: "translateY(-50%)", color: "#94a3b8", fontWeight: 700, fontSize: "13px", pointerEvents: "none" }}>%</span>
+              {isAdmin && (
+                <div className="cc-sources-form-group">
+                  <label>Default Commission (%) (Optional)</label>
+                  <div style={{ position: "relative" }}>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="100"
+                      placeholder="e.g. 1.5"
+                      value={form.commissionPercent}
+                      onChange={(e) => setForm({ ...form, commissionPercent: e.target.value })}
+                      style={{ paddingRight: "30px", width: "100%", boxSizing: "border-box" }}
+                    />
+                    <span style={{ position: "absolute", right: "12px", top: "50%", transform: "translateY(-50%)", color: "#94a3b8", fontWeight: 700, fontSize: "13px", pointerEvents: "none" }}>%</span>
+                  </div>
+                  <span className="help-text">
+                    Default commission percentage for leads created under this party / source.
+                  </span>
                 </div>
-                <span className="help-text">
-                  Default commission percentage for leads created under this party / source.
-                </span>
-              </div>
+              )}
 
               <div className="cc-sources-form-row">
                 <div className="cc-sources-form-group">

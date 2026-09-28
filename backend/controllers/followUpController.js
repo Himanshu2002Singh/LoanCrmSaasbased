@@ -2,6 +2,7 @@ const { Op } = require("sequelize");
 const { FollowUp, Lead, Customer, User } = require("../models");
 const { buildQuery, paginated } = require("../utils/query");
 const { logActivity } = require("../utils/activity");
+const { parseScheduledDate, autoSyncPendingLeadsToFollowUps } = require("../utils/followUpSync");
 const { companyScope, belongsToScope } = require("../middlewares/auth");
 const { ROLES } = require("../constants/roles");
 
@@ -10,12 +11,13 @@ const FOLLOWUP_STATUSES = ["PENDING", "COMPLETED", "OVERDUE"];
 const SORTABLE = ["scheduledAt", "status", "createdAt"];
 
 const FOLLOWUP_INCLUDES = [
-  { model: User, as: "user", attributes: ["id", "name", "role"], required: false },
+  { model: User, as: "user", attributes: ["id", "name", "role", "email"], required: false },
   {
     model: Lead,
     as: "lead",
     required: false,
-    include: [{ model: Customer, as: "customer", attributes: ["id", "name", "mobile"] }],
+    attributes: ["id", "loanType", "requiredAmount", "status", "leadSource", "assignedEmployeeId", "assignedManagerId"],
+    include: [{ model: Customer, as: "customer", attributes: ["id", "name", "mobile", "city"] }],
   },
 ];
 
@@ -23,62 +25,154 @@ const serialize = (row) => ({
   followup_id: row.id,
   id: row.id,
   lead_id: row.leadId,
+  leadId: row.leadId,
+  lead_number: `LD-${row.leadId}`,
+  leadNumber: `LD-${row.leadId}`,
+  lead: row.lead,
   emp_id: row.userId,
+  userId: row.userId,
   owner: row.user?.name || null,
+  owner_role: row.user?.role || null,
   customer_name: row.lead?.customer?.name || null,
   customer_number: row.lead?.customer?.mobile || null,
+  customer_city: row.lead?.customer?.city || null,
+  loan_type: row.lead?.loanType || null,
+  loan_amount: row.lead?.requiredAmount || null,
+  lead_status: row.lead?.status || null,
+  lead_source: row.lead?.leadSource || null,
   scheduled_at: row.scheduledAt,
+  scheduledAt: row.scheduledAt,
   reminder_type: row.reminderType,
+  reminderType: row.reminderType,
   status: row.status,
   remarks: row.remarks,
   createdAt: row.createdAt,
 });
 
 const followUpScope = async (req) => {
-  if (req.user.role === ROLES.EMPLOYEE) return { userId: req.user.id };
+  if (
+    req.user.role === ROLES.SUPERADMIN ||
+    req.user.role === ROLES.COMPANY_ADMIN ||
+    req.user.role === ROLES.OPS ||
+    req.permissions?.viewAllLeads === true
+  ) {
+    return {};
+  }
+
+  let leadCondition = {};
+  let teamIds = [req.user.id];
+
   if (req.user.role === ROLES.MANAGER) {
     const subordinates = await User.findAll({
       where: { companyId: req.user.companyId, managerId: req.user.id },
       attributes: ["id"],
       raw: true,
     });
-    const teamIds = [req.user.id, ...subordinates.map((u) => u.id)];
-    return { userId: { [Op.in]: teamIds } };
+    teamIds = [req.user.id, ...subordinates.map((u) => u.id)];
+    leadCondition = {
+      companyId: req.user.companyId,
+      [Op.or]: [
+        { assignedManagerId: req.user.id },
+        { assignedEmployeeId: { [Op.in]: teamIds } },
+      ],
+    };
+  } else if (req.user.role === ROLES.EMPLOYEE) {
+    leadCondition = {
+      companyId: req.user.companyId,
+      [Op.or]: [
+        { assignedEmployeeId: req.user.id },
+        { assignedManagerId: req.user.id },
+      ],
+    };
   }
-  return {};
+
+  const visibleLeads = await Lead.findAll({
+    where: leadCondition,
+    attributes: ["id"],
+    raw: true,
+  });
+
+  const visibleLeadIds = visibleLeads.map((l) => l.id);
+
+  return {
+    [Op.or]: [
+      { userId: { [Op.in]: teamIds } },
+      ...(visibleLeadIds.length > 0 ? [{ leadId: { [Op.in]: visibleLeadIds } }] : []),
+    ],
+  };
 };
 
 /**
  * GET /api/followups
- * ?window=today|overdue|upcoming plus the usual paging and sorting
+ * ?window=today|tomorrow|overdue|upcoming or ?date=YYYY-MM-DD or ?fromDate=...&toDate=...
  */
 exports.getFollowUps = async (req, res) => {
   try {
+    // Auto-sync any existing leads with nextFollowupDate that lack a FollowUp record
+    if (req.user?.companyId) {
+      await autoSyncPendingLeadsToFollowUps(req.user.companyId);
+    }
+
     const { limit, offset, order, page } = buildQuery(req.query, {
       sortable: SORTABLE,
       defaultSort: ["scheduledAt", "ASC"],
     });
 
     const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const endOfToday = new Date(startOfToday.getTime() + 86399999);
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    const startOfTomorrow = new Date(startOfToday.getTime() + 86400000);
+    const endOfTomorrow = new Date(endOfToday.getTime() + 86400000);
 
     const where = {
       ...companyScope(req),
       ...(await followUpScope(req)),
     };
 
-    if (req.query.window === "today") where.scheduledAt = { [Op.between]: [startOfToday, endOfToday] };
-    if (req.query.window === "overdue") {
+    // Date filtering options
+    if (req.query.date) {
+      const parts = req.query.date.split("-").map(Number);
+      if (parts.length === 3) {
+        const dayStart = new Date(parts[0], parts[1] - 1, parts[2], 0, 0, 0, 0);
+        const dayEnd = new Date(parts[0], parts[1] - 1, parts[2], 23, 59, 59, 999);
+        where.scheduledAt = { [Op.between]: [dayStart, dayEnd] };
+      }
+    } else if (req.query.fromDate && req.query.toDate) {
+      const fParts = req.query.fromDate.split("-").map(Number);
+      const tParts = req.query.toDate.split("-").map(Number);
+      const start = new Date(fParts[0], fParts[1] - 1, fParts[2], 0, 0, 0, 0);
+      const end = new Date(tParts[0], tParts[1] - 1, tParts[2], 23, 59, 59, 999);
+      where.scheduledAt = { [Op.between]: [start, end] };
+    } else if (req.query.window === "today") {
+      where.scheduledAt = { [Op.between]: [startOfToday, endOfToday] };
+    } else if (req.query.window === "tomorrow") {
+      where.scheduledAt = { [Op.between]: [startOfTomorrow, endOfTomorrow] };
+    } else if (req.query.window === "overdue") {
       where.scheduledAt = { [Op.lt]: startOfToday };
       where.status = { [Op.ne]: "COMPLETED" };
+    } else if (req.query.window === "upcoming") {
+      where.scheduledAt = { [Op.gt]: endOfToday };
     }
-    if (req.query.window === "upcoming") where.scheduledAt = { [Op.gt]: endOfToday };
 
-    if (req.query.status) where.status = String(req.query.status).toUpperCase();
-    if (req.query.leadId) where.leadId = parseInt(req.query.leadId, 10);
-    if (req.query.userId && req.user.role !== ROLES.EMPLOYEE) {
-      where.userId = parseInt(req.query.userId, 10);
+    if (req.query.status && req.query.status !== "All") {
+      where.status = String(req.query.status).toUpperCase();
+    }
+    if (req.query.leadId) {
+      where.leadId = parseInt(req.query.leadId, 10);
+    }
+
+    const targetUserId = req.query.employeeId || req.query.userId;
+    if (targetUserId && targetUserId !== "All" && req.user.role !== ROLES.EMPLOYEE) {
+      where.userId = parseInt(targetUserId, 10);
+    }
+
+    if (req.query.search && req.query.search.trim()) {
+      const q = `%${req.query.search.trim()}%`;
+      where[Op.or] = [
+        { remarks: { [Op.like]: q } },
+        { "$lead.customer.name$": { [Op.like]: q } },
+        { "$lead.customer.mobile$": { [Op.like]: q } },
+      ];
     }
 
     const { count, rows } = await FollowUp.findAndCountAll({
@@ -90,8 +184,56 @@ exports.getFollowUps = async (req, res) => {
       distinct: true,
     });
 
+    // Calculate quick stats for the user scope
+    const baseScope = {
+      ...companyScope(req),
+      ...(await followUpScope(req)),
+      ...(targetUserId && targetUserId !== "All" && req.user.role !== ROLES.EMPLOYEE
+        ? { userId: parseInt(targetUserId, 10) }
+        : {}),
+    };
+
+    const [todayCount, tomorrowCount, overdueCount, completedCount, totalCount] = await Promise.all([
+      FollowUp.count({
+        where: {
+          ...baseScope,
+          scheduledAt: { [Op.between]: [startOfToday, endOfToday] },
+        },
+      }),
+      FollowUp.count({
+        where: {
+          ...baseScope,
+          scheduledAt: { [Op.between]: [startOfTomorrow, endOfTomorrow] },
+        },
+      }),
+      FollowUp.count({
+        where: {
+          ...baseScope,
+          scheduledAt: { [Op.lt]: startOfToday },
+          status: { [Op.ne]: "COMPLETED" },
+        },
+      }),
+      FollowUp.count({
+        where: {
+          ...baseScope,
+          status: "COMPLETED",
+        },
+      }),
+      FollowUp.count({
+        where: baseScope,
+      }),
+    ]);
+
     const payload = paginated({ count, rows: rows.map(serialize), page, limit });
     payload.pagination.totalItems = count;
+    payload.stats = {
+      todayCount,
+      tomorrowCount,
+      overdueCount,
+      completedCount,
+      totalCount,
+    };
+
     return res.status(200).json(payload);
   } catch (error) {
     console.error("[followups] getFollowUps error:", error);
@@ -118,8 +260,8 @@ exports.createFollowUp = async (req, res) => {
     const scheduledAt = body.scheduled_at || body.scheduledAt;
     if (!scheduledAt) return res.status(400).json({ message: "scheduled_at is required" });
 
-    const when = new Date(scheduledAt);
-    if (Number.isNaN(when.valueOf())) {
+    const when = parseScheduledDate(scheduledAt);
+    if (!when) {
       return res.status(400).json({ message: "scheduled_at is not a valid date" });
     }
 
@@ -180,8 +322,8 @@ exports.updateFollowUp = async (req, res) => {
     }
     if (req.body.remarks !== undefined) data.remarks = req.body.remarks;
     if (req.body.scheduled_at || req.body.scheduledAt) {
-      const when = new Date(req.body.scheduled_at || req.body.scheduledAt);
-      if (Number.isNaN(when.valueOf())) {
+      const when = parseScheduledDate(req.body.scheduled_at || req.body.scheduledAt);
+      if (!when) {
         return res.status(400).json({ message: "scheduled_at is not a valid date" });
       }
       data.scheduledAt = when;

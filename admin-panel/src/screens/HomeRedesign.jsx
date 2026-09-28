@@ -216,6 +216,10 @@ function HomeRedesign({ dashboardFilters, dashboardFilterOptions }) {
           <strong>{numberFormatter.format(stats.counts?.todayFollowups || 0)}</strong>
           <span>Today's follow-ups</span>
         </button>
+        <button type="button" onClick={() => openMetric("Tomorrow Followups")}>
+          <strong>{numberFormatter.format(stats.counts?.tomorrowFollowups || 0)}</strong>
+          <span>Tomorrow's follow-ups</span>
+        </button>
         <button type="button" onClick={() => openMetric("Pending Followups")}>
           <strong className="cc-danger-text">{numberFormatter.format(overdueCount)}</strong>
           <span>Overdue</span>

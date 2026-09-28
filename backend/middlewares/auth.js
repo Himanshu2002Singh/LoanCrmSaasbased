@@ -166,6 +166,7 @@ const belongsToScope = (req, record) => {
 
 module.exports = {
   isAuthenticated,
+  authenticateToken: isAuthenticated,
   requireRole,
   requirePermission,
   requireSuperAdmin,

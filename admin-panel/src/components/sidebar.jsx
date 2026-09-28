@@ -16,6 +16,8 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
   const managerNavItems = [
     { path: "/", label: "Dashboard", icon: "home" },
     { path: "/leads", label: "Leads", icon: "document" },
+    { path: "/followup-work", label: "Today Followup / Work", icon: "calendar" },
+    { path: "/notes", label: "Quick Notes", icon: "document" },
     { path: "/add-users", label: "Add Employees", icon: "user-add" },
     { path: "/attendance", label: "Attendance", icon: "calendar" },
     { path: "/tasks", label: "Tasks", icon: "task" },
@@ -35,6 +37,9 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
     { path: "/logout", label: "Logout", icon: "logout" },
   ];
   const operationsNavItems = [
+    { path: "/leads", label: "Leads", icon: "document" },
+    { path: "/followup-work", label: "Today Followup / Work", icon: "calendar" },
+    { path: "/notes", label: "Quick Notes", icon: "document" },
     { path: "/operations", label: "Operations", icon: "operations" },
     { path: "/email-templates", label: "Email Templates", icon: "document" },
     { path: "/party-payouts", label: "Party / Connector Details", icon: "template" },

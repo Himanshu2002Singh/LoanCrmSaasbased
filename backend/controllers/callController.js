@@ -2,6 +2,7 @@ const { Op, fn, col } = require("sequelize");
 const { CallLog, Lead, Customer, User } = require("../models");
 const { buildQuery, paginated } = require("../utils/query");
 const { logActivity } = require("../utils/activity");
+const { parseScheduledDate, syncLeadFollowUp } = require("../utils/followUpSync");
 const { companyScope, belongsToScope } = require("../middlewares/auth");
 const { visibilityScope, dateRangeWhere } = require("./leadController");
 const { ROLES } = require("../constants/roles");
@@ -106,8 +107,23 @@ exports.createCall = async (req, res) => {
 
     // A call almost always moves the follow-up date; write it through in the
     // same request so the lead list stays truthful.
-    if (lead && (body.next_meeting || body.nextFollowupDate)) {
-      await lead.update({ nextFollowupDate: body.next_meeting || body.nextFollowupDate });
+    const rawMeeting = body.next_meeting ?? body.nextFollowupDate ?? body.nextMeetingDate ?? body.meetingDate ?? body.meeting_date;
+    if (lead && rawMeeting) {
+      let combinedMeeting = rawMeeting;
+      const rawTime = body.meetingTime ?? body.meeting_time ?? body.nextMeetingTime;
+      if (rawTime && typeof rawMeeting === "string" && rawMeeting.length === 10) {
+        combinedMeeting = `${rawMeeting}T${rawTime.length === 5 ? rawTime + ":00" : rawTime}`;
+      }
+      const nextDate = parseScheduledDate(combinedMeeting);
+      await lead.update({ nextFollowupDate: nextDate });
+      await syncLeadFollowUp({
+        leadId: lead.id,
+        companyId,
+        nextDate,
+        userId: body.emp_id ?? body.userId ?? req.user.id,
+        remarks: body.remarks ?? body.remark ?? "Follow-up scheduled after call",
+        reqUser: req.user,
+      });
     }
 
     if (lead) {

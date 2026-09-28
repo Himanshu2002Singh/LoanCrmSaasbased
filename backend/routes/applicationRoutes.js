@@ -6,9 +6,28 @@ const { ROLES } = require("../constants/roles");
 
 router.use(isAuthenticated);
 
+const canCreateApplication = (req, res, next) => {
+  if (!req.user) return res.status(401).json({ message: "Authentication required" });
+  if (req.user.role === ROLES.SUPERADMIN || req.user.role === ROLES.COMPANY_ADMIN) return next();
+  const permissions = req.permissions || {};
+  if (
+    permissions.createLoanApplication ||
+    permissions.createApplication ||
+    permissions.manageOperations
+  ) {
+    return next();
+  }
+  return res.status(403).json({
+    code: "PERMISSION_DENIED",
+    permission: "createLoanApplication",
+    message: "Access restricted: You do not have permission to create loan applications. Please contact your company administrator.",
+  });
+};
+
 router.post(
   "/",
   requireRole(ROLES.COMPANY_ADMIN, ROLES.MANAGER, ROLES.OPS),
+  canCreateApplication,
   controller.createApplication
 );
 

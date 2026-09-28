@@ -16,6 +16,8 @@ const APP_FIELDS = [
   "rejectionReason",
 ];
 
+const getCompanyId = (req) => req.companyId || req.user?.companyId;
+
 /**
  * Generates an incrementing application number like APP-2026-0001
  */
@@ -49,11 +51,12 @@ const createApplication = async (req, res, next) => {
     }
 
     const resolvedCustomerId = customerId ? parseInt(customerId, 10) : lead.customerId;
-    const applicationNumber = await generateAppNumber(req.companyId);
+    const resolvedCompId = getCompanyId(req);
+    const applicationNumber = await generateAppNumber(resolvedCompId);
 
     const application = await Application.create(
       {
-        companyId: req.companyId,
+        companyId: resolvedCompId,
         leadId: lead.id,
         customerId: resolvedCustomerId,
         applicationNumber,
@@ -263,7 +266,7 @@ const getBankerStats = async (req, res, next) => {
       }
     });
 
-    const queryWhere = { companyId: req.companyId, status: "OPEN" };
+    const queryWhere = { companyId: getCompanyId(req), status: "OPEN" };
     if (req.user.role === ROLES.BANKER) {
       queryWhere.bankerId = req.user.id;
     }
@@ -286,7 +289,7 @@ const listAllQueries = async (req, res, next) => {
     const limit = parseInt(req.query.limit, 10) || 20;
     const offset = (page - 1) * limit;
 
-    const where = { companyId: req.companyId };
+    const where = { companyId: getCompanyId(req) };
     if (req.user.role === ROLES.BANKER) {
       where.bankerId = req.user.id;
     }
@@ -374,7 +377,7 @@ const getApplicationById = async (req, res, next) => {
     if (docConditions.length > 0) {
       allDocs = await Document.findAll({
         where: {
-          companyId: req.companyId,
+          companyId: getCompanyId(req),
           [Op.or]: docConditions,
         },
         include: [{ model: User, as: "uploader", attributes: ["id", "name", "role"] }],
@@ -513,7 +516,7 @@ const createBankerQuery = async (req, res, next) => {
     }
 
     const query = await BankerQuery.create({
-      companyId: req.companyId,
+      companyId: getCompanyId(req),
       applicationId: application.id,
       bankerId: req.user.id,
       queryText: queryText.trim(),
@@ -557,7 +560,7 @@ const resolveBankerQuery = async (req, res, next) => {
       where: {
         id: req.params.queryId,
         applicationId: req.params.id,
-        companyId: req.companyId,
+        companyId: getCompanyId(req),
       },
     });
 
@@ -637,7 +640,7 @@ const sendApplicationToBank = async (req, res, next) => {
       attachedDocs = await Document.findAll({
         where: {
           id: { [Op.in]: documentIds },
-          companyId: req.companyId,
+          companyId: getCompanyId(req),
         },
       });
     }

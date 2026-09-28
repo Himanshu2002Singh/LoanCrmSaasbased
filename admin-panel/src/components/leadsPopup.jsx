@@ -30,7 +30,7 @@ const LeadsPopup = ({ isOpen, onClose, title, startDate, endDate }) => {
         // date, so each tile maps onto the window that matches it.
         const FOLLOWUP_WINDOW = {
           'Today Followups': 'today',
-          'Tomorrow Followups': 'upcoming',
+          'Tomorrow Followups': 'tomorrow',
           'Pending Followups': 'overdue',
         };
 

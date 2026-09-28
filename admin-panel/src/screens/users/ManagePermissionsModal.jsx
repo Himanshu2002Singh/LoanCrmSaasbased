@@ -21,6 +21,7 @@ import {
   Download,
   AlertTriangle,
   Info,
+  Briefcase,
 } from "lucide-react";
 import API_URL from "../../config";
 
@@ -70,15 +71,65 @@ const PERMISSION_CATEGORIES = [
     ],
   },
   {
-    category: "Leads & Reporting Visibility",
+    category: "Operations & Loan Processing",
+    categoryKey: "operations",
+    description: "Control access to loan file processing, pipeline stages, document uploads, and banker queries.",
+    icon: Briefcase,
+    permissions: [
+      {
+        key: "viewOperations",
+        label: "Access Operations Pipeline (/operations)",
+        description: "Inspect active loan applications pipeline, stage statuses, customer documents, and banker queries.",
+        confidential: false,
+      },
+      {
+        key: "manageOperations",
+        label: "Manage File Stages & Bank Submissions",
+        description: "Advance pipeline stages, upload customer documents, dispatch files to banks, and reply to banker queries.",
+        confidential: false,
+      },
+      {
+        key: "createLoanApplication",
+        label: "Create Loan Applications in Leads",
+        description: "Permission to open and submit 'Create Loan Application' modal inside lead details.",
+        confidential: false,
+      },
+    ],
+  },
+  {
+    category: "Leads Management & Visibility",
     categoryKey: "leads_reports",
-    description: "Control whether this employee can see all company leads or only their team/branch, and access reports.",
+    description: "Control whether this employee can add, edit, or follow up on leads, view all company leads, and access reports.",
     icon: FileBarChart,
     permissions: [
       {
         key: "viewAllLeads",
         label: "View All Company Leads",
         description: "See all leads across the entire company. If disabled, user only sees leads assigned to them or their branch/team.",
+        confidential: false,
+      },
+      {
+        key: "createLead",
+        label: "Add & Create Leads",
+        description: "Permission to manually create and enter new customer leads into the system.",
+        confidential: false,
+      },
+      {
+        key: "editLead",
+        label: "Edit Lead Profiles & Details (/lead-edit)",
+        description: "Permission to modify personal information, loan amount, and assigned staff for existing leads.",
+        confidential: false,
+      },
+      {
+        key: "followupLead",
+        label: "Lead Follow-up & Meeting Scheduling",
+        description: "Permission to schedule next meetings, log call notes, and update follow-up dates.",
+        confidential: false,
+      },
+      {
+        key: "viewFollowupWork",
+        label: "Today Followup / Work Tracker",
+        description: "Access Today Followup & Daily Work dashboard to monitor daily scheduled followups, remarks, overdue calls, and date-wise activity filters.",
         confidential: false,
       },
       {
@@ -197,6 +248,12 @@ export default function ManagePermissionsModal({ open, onClose, user, onUpdated 
         viewExpenses: false,
         manageExpenses: false,
         viewAllLeads: false,
+        createLead: user.role === "MANAGER" || user.role === "EMPLOYEE",
+        editLead: user.role === "MANAGER" || user.role === "EMPLOYEE" || user.role === "OPS",
+        followupLead: user.role === "MANAGER" || user.role === "EMPLOYEE" || user.role === "OPS",
+        viewOperations: user.role === "MANAGER" || user.role === "OPS",
+        manageOperations: user.role === "MANAGER" || user.role === "OPS",
+        createLoanApplication: user.role === "OPS",
         viewReports: true,
         exportData: false,
         manageUsers: false,
@@ -214,6 +271,12 @@ export default function ManagePermissionsModal({ open, onClose, user, onUpdated 
         viewExpenses: true,
         manageExpenses: true,
         viewAllLeads: true,
+        createLead: true,
+        editLead: true,
+        followupLead: true,
+        viewOperations: true,
+        manageOperations: true,
+        createLoanApplication: true,
         viewReports: true,
         exportData: true,
         manageUsers: true,

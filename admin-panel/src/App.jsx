@@ -40,6 +40,8 @@ import PartyPayoutsScreen from "./screens/partyPayouts/PartyPayoutsScreen";
 import CasePayoutsScreen from "./screens/payouts/CasePayoutsScreen";
 import ExpenseTrackerScreen from "./screens/expenses/ExpenseTrackerScreen";
 import RolePermissionsRedesign from "./screens/permissions/RolePermissionsRedesign";
+import FollowupWorkScreen from "./screens/followups/FollowupWorkScreen";
+import NotesScreen from "./screens/notes/NotesScreen";
 
 const PageShell = ({ children, allowedRoles = ["manager"], requiredPermission = null }) => (
   <ProtectedRoute allowedRoles={allowedRoles} requiredPermission={requiredPermission}>
@@ -107,6 +109,25 @@ function App() {
           }
         />
         <Route
+          path="/followup-work"
+          element={
+            <PageShell
+              allowedRoles={["manager", "operations", "calling", "employee"]}
+              requiredPermission="viewFollowupWork"
+            >
+              <FollowupWorkScreen />
+            </PageShell>
+          }
+        />
+        <Route
+          path="/notes"
+          element={
+            <PageShell allowedRoles={["manager", "operations", "calling", "employee"]}>
+              <NotesScreen />
+            </PageShell>
+          }
+        />
+        <Route
           path="/add-users"
           element={
             <PageShell requiredPermission="manageUsers">
@@ -135,7 +156,7 @@ function App() {
         <Route
           path="/lead-edit/:id"
           element={
-            <PageShell allowedRoles={["manager", "operations", "calling", "employee"]}>
+            <PageShell allowedRoles={["manager", "operations", "calling", "employee"]} requiredPermission="editLead">
               <RedesignPageFrame pageKey="lead-edit">
                 <LeadEditScreen />
               </RedesignPageFrame>
@@ -265,7 +286,7 @@ function App() {
         <Route
           path="/operations"
           element={
-            <PageShell allowedRoles={["manager", "operations"]}>
+            <PageShell allowedRoles={["manager", "operations"]} requiredPermission="viewOperations">
               <OperationsScreen />
             </PageShell>
           }
