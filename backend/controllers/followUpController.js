@@ -103,6 +103,63 @@ const followUpScope = async (req) => {
 };
 
 /**
+ * Synchronize a follow-up for a lead.
+ * Creates or updates a PENDING follow-up record whenever nextFollowupDate is set.
+ */
+const syncLeadFollowUp = async (lead, followupDate, options = {}) => {
+  if (!lead || !lead.id || !followupDate) return null;
+
+  const when = new Date(followupDate);
+  if (Number.isNaN(when.valueOf())) return null;
+
+  const { userId, remarks, reminderType = "same_day", transaction } = options;
+  const assignedUserId = userId || lead.assignedEmployeeId || lead.assignedManagerId || null;
+
+  // 1. Ensure lead has the date updated
+  if (!lead.nextFollowupDate || new Date(lead.nextFollowupDate).valueOf() !== when.valueOf()) {
+    await lead.update({ nextFollowupDate: when }, { transaction });
+  }
+
+  // 2. Check if a pending follow-up already exists for this lead
+  const existing = await FollowUp.findOne({
+    where: {
+      leadId: lead.id,
+      companyId: lead.companyId,
+      status: "PENDING",
+    },
+    order: [["scheduledAt", "ASC"]],
+    transaction,
+  });
+
+  if (existing) {
+    await existing.update(
+      {
+        scheduledAt: when,
+        userId: assignedUserId || existing.userId,
+        remarks: remarks !== undefined ? remarks : existing.remarks,
+        reminderType: reminderType || existing.reminderType || "same_day",
+      },
+      { transaction }
+    );
+    return existing;
+  } else {
+    const created = await FollowUp.create(
+      {
+        companyId: lead.companyId,
+        leadId: lead.id,
+        userId: assignedUserId || null,
+        scheduledAt: when,
+        reminderType: reminderType || "same_day",
+        status: "PENDING",
+        remarks: remarks || "Follow-up scheduled",
+      },
+      { transaction }
+    );
+    return created;
+  }
+};
+
+/**
  * GET /api/followups
  * ?window=today|tomorrow|overdue|upcoming or ?date=YYYY-MM-DD or ?fromDate=...&toDate=...
  */
@@ -152,6 +209,9 @@ exports.getFollowUps = async (req, res) => {
       where.status = { [Op.ne]: "COMPLETED" };
     } else if (req.query.window === "upcoming") {
       where.scheduledAt = { [Op.gt]: endOfToday };
+      if (!req.query.status) {
+        where.status = { [Op.ne]: "COMPLETED" };
+      }
     }
 
     if (req.query.status && req.query.status !== "All") {
@@ -270,17 +330,11 @@ exports.createFollowUp = async (req, res) => {
       return res.status(400).json({ message: `reminder_type must be one of: ${REMINDER_TYPES.join(", ")}` });
     }
 
-    const followUp = await FollowUp.create({
-      companyId: lead.companyId,
-      leadId: lead.id,
-      userId: body.emp_id ?? body.userId ?? req.user.id,
-      scheduledAt: when,
+    const followUp = await syncLeadFollowUp(lead, when, {
+      userId: body.emp_id ?? body.userId ?? lead.assignedEmployeeId ?? req.user.id,
       reminderType,
-      status: "PENDING",
       remarks: body.remarks || null,
     });
-
-    await lead.update({ nextFollowupDate: when });
 
     await logActivity(req, {
       recordType: "Lead",
@@ -362,3 +416,4 @@ exports.deleteFollowUp = async (req, res) => {
 };
 
 exports.REMINDER_TYPES = REMINDER_TYPES;
+exports.syncLeadFollowUp = syncLeadFollowUp;

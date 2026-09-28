@@ -1,5 +1,5 @@
 const { Op, fn, col } = require("sequelize");
-const { CallLog, Lead, Customer, User } = require("../models");
+const { CallLog, Lead, Customer, User, FollowUp } = require("../models");
 const { buildQuery, paginated } = require("../utils/query");
 const { logActivity } = require("../utils/activity");
 const { parseScheduledDate, syncLeadFollowUp } = require("../utils/followUpSync");
@@ -105,9 +105,8 @@ exports.createCall = async (req, res) => {
       recordingUrl: body.recording_url ?? body.recordingUrl ?? null,
     });
 
-    // A call almost always moves the follow-up date; write it through in the
-    // same request so the lead list stays truthful.
-    const rawMeeting = body.next_meeting ?? body.nextFollowupDate ?? body.nextMeetingDate ?? body.meetingDate ?? body.meeting_date;
+    // same request so the lead list and follow-up queue stay truthful.
+    const rawMeeting = body.next_meeting ?? body.nextFollowupDate ?? body.nextMeetingDate ?? body.meetingDate ?? body.meeting_date ?? body.nextMeeting;
     if (lead && rawMeeting) {
       let combinedMeeting = rawMeeting;
       const rawTime = body.meetingTime ?? body.meeting_time ?? body.nextMeetingTime;
@@ -120,7 +119,7 @@ exports.createCall = async (req, res) => {
         leadId: lead.id,
         companyId,
         nextDate,
-        userId: body.emp_id ?? body.userId ?? req.user.id,
+        userId: body.emp_id ?? body.userId ?? lead.assignedEmployeeId ?? req.user.id,
         remarks: body.remarks ?? body.remark ?? "Follow-up scheduled after call",
         reqUser: req.user,
       });

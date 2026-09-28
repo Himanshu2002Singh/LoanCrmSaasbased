@@ -14,6 +14,7 @@ import 'package:capital_care/features/leads/providers/leads_provider.dart';
 import 'package:capital_care/features/telecalling/views/log_call_dialog.dart';
 import 'package:capital_care/features/dashboard/providers/dashboard_provider.dart';
 import 'package:capital_care/features/auth/providers/auth_provider.dart';
+import 'package:capital_care/features/tasks_and_followups/providers/tasks_provider.dart';
 
 class LeadDetailsScreen extends ConsumerStatefulWidget {
   final int leadId;
@@ -72,6 +73,8 @@ class _LeadDetailsScreenState extends ConsumerState<LeadDetailsScreen> with Sing
     final statusesAsync = ref.read(leadStatusesProvider);
     String selectedStatus = lead.statusValue;
     final remarksController = TextEditingController();
+    DateTime? nextFollowupDate;
+    TimeOfDay? nextFollowupTime;
 
     showModalBottomSheet(
       context: context,
@@ -157,19 +160,119 @@ class _LeadDetailsScreenState extends ConsumerState<LeadDetailsScreen> with Sing
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                     ),
                   ),
+                  const SizedBox(height: 14),
+                  const Text(
+                    'Next Follow-up (Optional)',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary),
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: InkWell(
+                          onTap: () async {
+                            final now = DateTime.now();
+                            final picked = await showDatePicker(
+                              context: context,
+                              initialDate: nextFollowupDate ?? now.add(const Duration(days: 1)),
+                              firstDate: now,
+                              lastDate: now.add(const Duration(days: 365)),
+                            );
+                            if (picked != null) {
+                              setModalState(() => nextFollowupDate = picked);
+                            }
+                          },
+                          borderRadius: BorderRadius.circular(10),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                            decoration: BoxDecoration(
+                              color: AppColors.background,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: AppColors.inputBorder),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.calendar_today, size: 14, color: AppColors.primary),
+                                const SizedBox(width: 8),
+                                Text(
+                                  nextFollowupDate != null
+                                      ? DateFormat('dd MMM yyyy').format(nextFollowupDate!)
+                                      : 'Set Date',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: nextFollowupDate != null ? AppColors.textPrimary : AppColors.textMuted,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: InkWell(
+                          onTap: () async {
+                            final picked = await showTimePicker(
+                              context: context,
+                              initialTime: nextFollowupTime ?? const TimeOfDay(hour: 11, minute: 0),
+                            );
+                            if (picked != null) {
+                              setModalState(() => nextFollowupTime = picked);
+                            }
+                          },
+                          borderRadius: BorderRadius.circular(10),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                            decoration: BoxDecoration(
+                              color: AppColors.background,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: AppColors.inputBorder),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.access_time, size: 14, color: AppColors.primary),
+                                const SizedBox(width: 8),
+                                Text(
+                                  nextFollowupTime != null ? nextFollowupTime!.format(context) : 'Set Time',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: nextFollowupTime != null ? AppColors.textPrimary : AppColors.textMuted,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                   const SizedBox(height: 18),
                   CustomButton(
                     text: 'Confirm Status Change',
                     onPressed: () async {
                       try {
+                        String? nextMeeting;
+                        if (nextFollowupDate != null) {
+                          final time = nextFollowupTime ?? const TimeOfDay(hour: 11, minute: 0);
+                          final dt = DateTime(
+                            nextFollowupDate!.year,
+                            nextFollowupDate!.month,
+                            nextFollowupDate!.day,
+                            time.hour,
+                            time.minute,
+                          );
+                          nextMeeting = dt.toIso8601String();
+                        }
+
                         await ref.read(leadsNotifierProvider.notifier).updateLeadStatus(
                           lead.id,
                           selectedStatus,
                           remarks: remarksController.text.trim().isNotEmpty ? remarksController.text.trim() : null,
-                          nextMeeting: null,
+                          nextMeeting: nextMeeting,
                         );
                         ref.invalidate(singleLeadProvider(widget.leadId));
                         ref.invalidate(dashboardDataProvider);
+                        ref.invalidate(followUpsNotifierProvider);
 
                         if (ctx.mounted) Navigator.pop(ctx);
                         if (mounted) {

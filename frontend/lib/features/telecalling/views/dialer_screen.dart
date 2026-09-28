@@ -11,7 +11,9 @@ import 'package:capital_care/core/widgets/status_badge.dart';
 import 'package:capital_care/features/leads/models/lead_model.dart';
 import 'package:capital_care/features/leads/services/lead_service.dart';
 import 'package:capital_care/features/leads/views/add_lead_screen.dart';
+import 'package:capital_care/features/telecalling/providers/telecalling_provider.dart';
 import 'package:capital_care/features/telecalling/views/log_call_dialog.dart';
+import 'package:capital_care/features/dashboard/providers/dashboard_provider.dart';
 
 class DialerScreen extends ConsumerStatefulWidget {
   final String? initialNumber;
@@ -261,7 +263,7 @@ class _DialerScreenState extends ConsumerState<DialerScreen> {
                 ),
                 const SizedBox(height: 18),
                 const Text(
-                  'Would you like to register this contact as a new lead in CRM?',
+                  'Would you like to register this contact as a new lead and log this call in CRM?',
                   style: TextStyle(fontSize: 14, color: AppColors.textSecondary),
                 ),
                 const SizedBox(height: 20),
@@ -274,12 +276,17 @@ class _DialerScreenState extends ConsumerState<DialerScreen> {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => AddLeadScreen(initialMobile: number),
+                        builder: (_) => AddLeadScreen(
+                          initialMobile: number,
+                          fromDialer: true,
+                          initialCallStatus: 'CONNECTED',
+                          initialCallDuration: 60,
+                        ),
                       ),
                     );
                   },
-                  icon: const Icon(Icons.add_circle_outline, color: Colors.white),
-                  label: const Text('Create New Lead', style: TextStyle(fontWeight: FontWeight.bold)),
+                  icon: const Icon(Icons.person_add_alt_1_rounded, color: Colors.white),
+                  label: const Text('Create Lead & Record Call', style: TextStyle(fontWeight: FontWeight.bold)),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
                     foregroundColor: Colors.white,
@@ -288,13 +295,48 @@ class _DialerScreenState extends ConsumerState<DialerScreen> {
                   ),
                 ),
                 const SizedBox(height: 10),
-                OutlinedButton(
-                  onPressed: () => Navigator.pop(ctx),
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    Navigator.pop(ctx);
+                    try {
+                      await ref.read(callsNotifierProvider.notifier).logCall({
+                        'call_status': 'CONNECTED',
+                        'duration': 60,
+                        'remarks': 'Direct dialer call to $number',
+                      });
+                      ref.invalidate(dashboardDataProvider);
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Call to $number logged in CRM stats!'),
+                            backgroundColor: AppColors.success,
+                          ),
+                        );
+                      }
+                    } catch (e) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Failed to log call: $e'),
+                            backgroundColor: AppColors.error,
+                          ),
+                        );
+                      }
+                    }
+                  },
+                  icon: const Icon(Icons.phone_in_talk_rounded, size: 18, color: AppColors.secondary),
+                  label: const Text('Log Call Only (Without Lead)'),
                   style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.secondary,
+                    side: const BorderSide(color: AppColors.secondary),
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
-                  child: const Text('Dismiss'),
+                ),
+                const SizedBox(height: 10),
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Dismiss', style: TextStyle(color: AppColors.textSecondary)),
                 ),
               ],
             ),

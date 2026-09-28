@@ -13,8 +13,9 @@ import 'package:capital_care/features/tasks_and_followups/views/add_task_dialog.
 
 class TasksAndFollowupsScreen extends ConsumerStatefulWidget {
   final int initialTabIndex;
+  final String? initialWindow;
 
-  const TasksAndFollowupsScreen({super.key, this.initialTabIndex = 0});
+  const TasksAndFollowupsScreen({super.key, this.initialTabIndex = 0, this.initialWindow});
 
   @override
   ConsumerState<TasksAndFollowupsScreen> createState() => _TasksAndFollowupsScreenState();
@@ -27,6 +28,14 @@ class _TasksAndFollowupsScreenState extends ConsumerState<TasksAndFollowupsScree
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this, initialIndex: widget.initialTabIndex);
+    _tabController.addListener(() {
+      if (mounted) setState(() {});
+    });
+    if (widget.initialWindow != null && widget.initialWindow!.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        ref.read(followUpsNotifierProvider.notifier).setWindow(widget.initialWindow!);
+      });
+    }
   }
 
   @override

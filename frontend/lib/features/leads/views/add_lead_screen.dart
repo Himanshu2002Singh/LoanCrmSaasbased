@@ -6,12 +6,23 @@ import 'package:capital_care/core/widgets/custom_button.dart';
 import 'package:capital_care/core/widgets/custom_text_field.dart';
 import 'package:capital_care/features/leads/models/lead_status_model.dart';
 import 'package:capital_care/features/leads/providers/leads_provider.dart';
+import 'package:capital_care/features/telecalling/providers/telecalling_provider.dart';
 import 'package:capital_care/features/dashboard/providers/dashboard_provider.dart';
+import 'package:capital_care/features/tasks_and_followups/providers/tasks_provider.dart';
 
 class AddLeadScreen extends ConsumerStatefulWidget {
   final String? initialMobile;
+  final bool fromDialer;
+  final String? initialCallStatus;
+  final int? initialCallDuration;
 
-  const AddLeadScreen({super.key, this.initialMobile});
+  const AddLeadScreen({
+    super.key,
+    this.initialMobile,
+    this.fromDialer = false,
+    this.initialCallStatus,
+    this.initialCallDuration,
+  });
 
   @override
   ConsumerState<AddLeadScreen> createState() => _AddLeadScreenState();
@@ -33,6 +44,11 @@ class _AddLeadScreenState extends ConsumerState<AddLeadScreen> {
   final _amountController = TextEditingController();
   final _remarksController = TextEditingController();
 
+  // Call Logging Controllers (for dialer call tracking)
+  bool _logCall = false;
+  String _callStatus = 'CONNECTED';
+  late final TextEditingController _callDurationController;
+
   // Dropdown states
   String _selectedEmployment = 'Salaried';
   String _selectedLoanProduct = 'Personal Loan';
@@ -49,7 +65,21 @@ class _AddLeadScreenState extends ConsumerState<AddLeadScreen> {
     super.initState();
     if (widget.initialMobile != null && widget.initialMobile!.isNotEmpty) {
       _mobileController.text = widget.initialMobile!;
+      _logCall = true;
+      _selectedSource = 'Telecalling';
     }
+    if (widget.fromDialer) {
+      _logCall = true;
+      _selectedSource = 'Telecalling';
+    }
+    if (widget.initialCallStatus != null && widget.initialCallStatus!.isNotEmpty) {
+      _callStatus = widget.initialCallStatus!;
+    }
+    _callDurationController = TextEditingController(
+      text: (widget.initialCallDuration != null && widget.initialCallDuration! > 0)
+          ? widget.initialCallDuration.toString()
+          : '60',
+    );
   }
 
   final List<String> _employmentTypes = [
@@ -97,6 +127,7 @@ class _AddLeadScreenState extends ConsumerState<AddLeadScreen> {
     _incomeController.dispose();
     _amountController.dispose();
     _remarksController.dispose();
+    _callDurationController.dispose();
     super.dispose();
   }
 
@@ -162,15 +193,23 @@ class _AddLeadScreenState extends ConsumerState<AddLeadScreen> {
         'status': _selectedStatus,
         'next_meeting': nextMeeting,
         'remarks': _remarksController.text.trim().isNotEmpty ? _remarksController.text.trim() : null,
+        if (_logCall) ...{
+          'log_call': true,
+          'call_status': _callStatus,
+          'call_duration': int.tryParse(_callDurationController.text.trim()) ?? 60,
+          'call_remarks': _remarksController.text.trim().isNotEmpty ? _remarksController.text.trim() : 'Call made from Smart Dialer',
+        },
       };
 
       await ref.read(leadsNotifierProvider.notifier).createLead(payload);
+      ref.invalidate(callsNotifierProvider);
       ref.invalidate(dashboardDataProvider);
+      ref.invalidate(followUpsNotifierProvider);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Lead created successfully!'),
+          SnackBar(
+            content: Text(_logCall ? 'Lead created and call logged successfully!' : 'Lead created successfully!'),
             backgroundColor: AppColors.success,
           ),
         );
@@ -553,11 +592,181 @@ class _AddLeadScreenState extends ConsumerState<AddLeadScreen> {
                   ],
                 ),
               ),
+              const SizedBox(height: 20),
+
+              // Section 3: Call Logging & Dialer Outcome
+              _buildSectionHeader('Call Outcome & History', Icons.phone_in_talk_rounded),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: _logCall ? AppColors.success.withValues(alpha: 0.5) : AppColors.cardBorder,
+                    width: _logCall ? 1.5 : 1.0,
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: (_logCall ? AppColors.success : AppColors.textSecondary).withValues(alpha: 0.12),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            Icons.phone_callback_rounded,
+                            color: _logCall ? AppColors.success : AppColors.textSecondary,
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Record Call in Telecalling Log',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.textPrimary,
+                                ),
+                              ),
+                              Text(
+                                _logCall
+                                    ? 'This call will be counted in dashboard stats'
+                                    : 'Enable to count this call in telecalling report',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: _logCall ? AppColors.success : AppColors.textSecondary,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Switch.adaptive(
+                          value: _logCall,
+                          activeColor: AppColors.success,
+                          onChanged: (val) {
+                            setState(() {
+                              _logCall = val;
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                    if (_logCall) ...[
+                      const Divider(height: 24),
+                      const Text(
+                        'Call Outcome *',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      DropdownButtonFormField<String>(
+                        isExpanded: true,
+                        value: _callStatus,
+                        decoration: InputDecoration(
+                          filled: true,
+                          fillColor: AppColors.background,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: const BorderSide(color: AppColors.inputBorder),
+                          ),
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'CONNECTED',
+                            child: Text(
+                              'Connected (Spoke with customer)',
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                          ),
+                          DropdownMenuItem(
+                            value: 'INTERESTED',
+                            child: Text(
+                              'Interested (Customer needs loan)',
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                          ),
+                          DropdownMenuItem(
+                            value: 'CALL_BACK_LATER',
+                            child: Text(
+                              'Callback Later (Follow-up needed)',
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                          ),
+                          DropdownMenuItem(
+                            value: 'NOT_CONNECTED',
+                            child: Text(
+                              'Not Connected (Ringing / No answer)',
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                          ),
+                          DropdownMenuItem(
+                            value: 'BUSY',
+                            child: Text(
+                              'Busy (Call disconnected / busy tone)',
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                          ),
+                          DropdownMenuItem(
+                            value: 'SWITCHED_OFF',
+                            child: Text(
+                              'Switched Off / Out of network',
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                          ),
+                          DropdownMenuItem(
+                            value: 'NOT_INTERESTED',
+                            child: Text(
+                              'Not Interested / Declined',
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                          ),
+                        ],
+                        onChanged: (val) {
+                          if (val != null) {
+                            setState(() {
+                              _callStatus = val;
+                            });
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      CustomTextField(
+                        label: 'Call Duration (Seconds)',
+                        controller: _callDurationController,
+                        hint: 'e.g. 60',
+                        keyboardType: TextInputType.number,
+                        prefixIcon: Icons.timer_outlined,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
               const SizedBox(height: 24),
 
               // Save Button
               CustomButton(
-                text: 'Create Lead',
+                text: _logCall ? 'Create Lead & Save Call' : 'Create Lead',
                 isLoading: _isSaving,
                 icon: Icons.check,
                 onPressed: _saveLead,

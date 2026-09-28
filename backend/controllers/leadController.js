@@ -513,6 +513,49 @@ exports.createLead = async (req, res) => {
       { transaction }
     );
 
+    // If call was placed from dialer or requested to log call upon lead creation
+    if (body.log_call || body.logCall || body.call_status || body.callStatus || body.from_dialer || body.fromDialer) {
+      const callStatusRaw = String(body.call_status || body.callStatus || "CONNECTED").toUpperCase();
+      const validCallStatuses = [
+        "CONNECTED", "INTERESTED", "CALL_BACK_LATER", "NOT_CONNECTED",
+        "BUSY", "SWITCHED_OFF", "NOT_INTERESTED", "INVALID_NUMBER"
+      ];
+      const callStatus = validCallStatuses.includes(callStatusRaw) ? callStatusRaw : "CONNECTED";
+      const duration = parseInt(body.duration ?? body.call_duration ?? body.callDuration ?? 60, 10);
+
+      await CallLog.create(
+        {
+          companyId,
+          leadId: lead.id,
+          userId: req.user.id,
+          callStatus,
+          durationSec: Number.isNaN(duration) || duration < 0 ? 60 : duration,
+          remarks: body.call_remarks || body.callRemarks || remark || "Initial call from Smart Dialer",
+        },
+        { transaction }
+      );
+    }
+
+    // If follow-up date was set upon lead creation
+    const followupInput = body.next_meeting || body.nextFollowupDate || body.nextMeeting;
+    if (followupInput) {
+      const when = new Date(followupInput);
+      if (!Number.isNaN(when.valueOf())) {
+        await FollowUp.create(
+          {
+            companyId,
+            leadId: lead.id,
+            userId: assignedEmployeeId || req.user.id,
+            scheduledAt: when,
+            reminderType: body.reminder_type || "same_day",
+            status: "PENDING",
+            remarks: remark || body.remarks || "Initial follow-up scheduled",
+          },
+          { transaction }
+        );
+      }
+    }
+
     await transaction.commit();
 
     await logActivity(req, {
@@ -673,7 +716,7 @@ exports.updateLead = async (req, res) => {
       await lead.customer.update(customerPatch);
     }
 
-    const rawMeetingUpdated = body.next_meeting ?? body.meetingDate ?? body.meeting_date ?? body.nextMeetingDate ?? body.nextFollowupDate;
+    const rawMeetingUpdated = body.next_meeting ?? body.meetingDate ?? body.meeting_date ?? body.nextMeetingDate ?? body.nextFollowupDate ?? body.nextMeeting;
     if (rawMeetingUpdated !== undefined || data.nextFollowupDate !== undefined) {
       await syncLeadFollowUp({
         leadId: lead.id,
@@ -714,11 +757,12 @@ exports.updateLeadStatus = async (req, res) => {
 
     const previous = lead.status;
     const patch = { status: status.value };
-    if (req.body.next_meeting !== undefined) patch.nextFollowupDate = parseScheduledDate(req.body.next_meeting);
+    const statusFollowupInput = req.body.next_meeting ?? req.body.nextFollowupDate ?? req.body.meetingDate ?? req.body.meeting_date ?? req.body.nextMeeting;
+    if (statusFollowupInput !== undefined) patch.nextFollowupDate = parseScheduledDate(statusFollowupInput);
 
     await lead.update(patch);
 
-    if (req.body.next_meeting !== undefined) {
+    if (statusFollowupInput !== undefined) {
       await syncLeadFollowUp({
         leadId: lead.id,
         companyId: lead.companyId,

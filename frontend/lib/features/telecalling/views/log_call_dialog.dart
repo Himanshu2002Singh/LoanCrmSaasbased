@@ -8,6 +8,7 @@ import 'package:capital_care/features/leads/models/lead_model.dart';
 import 'package:capital_care/features/leads/providers/leads_provider.dart';
 import 'package:capital_care/features/telecalling/providers/telecalling_provider.dart';
 import 'package:capital_care/features/dashboard/providers/dashboard_provider.dart';
+import 'package:capital_care/features/tasks_and_followups/providers/tasks_provider.dart';
 
 class LogCallDialog extends ConsumerStatefulWidget {
   final LeadModel lead;
@@ -98,10 +99,11 @@ class _LogCallDialogState extends ConsumerState<LogCallDialog> {
         'next_meeting': formattedFollowup,
       });
 
-      // Also refresh dashboard and leads
+      // Also refresh dashboard, followups and leads
       ref.invalidate(singleLeadProvider(widget.lead.id));
       ref.read(leadsNotifierProvider.notifier).loadLeads(refresh: true);
       ref.invalidate(dashboardDataProvider);
+      ref.invalidate(followUpsNotifierProvider);
 
       if (mounted) {
         Navigator.of(context).pop();
