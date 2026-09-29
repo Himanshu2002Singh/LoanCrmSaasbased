@@ -14,6 +14,7 @@ import 'package:capital_care/features/telecalling/views/log_call_dialog.dart';
 import 'package:capital_care/features/leads/views/widgets/template_dialog.dart';
 import 'package:capital_care/features/dashboard/providers/dashboard_provider.dart';
 import 'package:capital_care/features/tasks_and_followups/providers/tasks_provider.dart';
+import 'package:capital_care/features/notes/views/widgets/add_edit_note_dialog.dart';
 
 class LeadDetailsScreen extends ConsumerStatefulWidget {
   final int leadId;
@@ -301,8 +302,23 @@ class _LeadDetailsScreenState extends ConsumerState<LeadDetailsScreen> with Sing
       appBar: AppBar(
         title: const Text('Lead Overview'),
         actions: [
+          leadAsync.maybeWhen(
+            data: (lead) => IconButton(
+              icon: const Icon(Icons.note_add_outlined),
+              tooltip: 'Add Private Note',
+              onPressed: () {
+                AddEditNoteDialog.show(
+                  context,
+                  preselectedLeadId: lead.id,
+                  preselectedLeadName: '${lead.name} (${lead.number})',
+                );
+              },
+            ),
+            orElse: () => const SizedBox.shrink(),
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
+            tooltip: 'Refresh',
             onPressed: () => ref.invalidate(singleLeadProvider(widget.leadId)),
           ),
         ],

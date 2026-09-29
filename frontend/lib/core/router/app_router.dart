@@ -22,6 +22,7 @@ import 'package:capital_care/features/applications/views/applications_screen.dar
 import 'package:capital_care/features/expenses/models/expense_model.dart';
 import 'package:capital_care/features/expenses/views/expenses_screen.dart';
 import 'package:capital_care/features/expenses/views/add_edit_expense_screen.dart';
+import 'package:capital_care/features/notes/views/notes_screen.dart';
 
 final GlobalKey<NavigatorState> _rootNavigatorKey = GlobalKey<NavigatorState>();
 final GlobalKey<NavigatorState> _shellNavigatorKey = GlobalKey<NavigatorState>();
@@ -229,6 +230,10 @@ final GoRouter appRouter = GoRouter(
             final exp = state.extra as ExpenseModel?;
             return AddEditExpenseScreen(initialExpense: exp);
           },
+        ),
+        GoRoute(
+          path: '/notes',
+          builder: (context, state) => const NotesScreen(),
         ),
         GoRoute(
           path: '/profile',

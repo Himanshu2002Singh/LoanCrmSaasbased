@@ -48,6 +48,10 @@ class ApiConstants {
   static String get expenseCategories => '$baseUrl/expenses/categories';
   static String get expenseSummary => '$baseUrl/expenses/summary';
 
+  // Quick Notes & Scratchpad
+  static String get notes => '$baseUrl/notes';
+  static String get noteAssignableLeads => '$baseUrl/notes/my-leads';
+
   // Master Configurations, Templates & Notifications
   static String get masterConfigs => '$baseUrl/master-configs';
   static String get templates => '$baseUrl/templates';

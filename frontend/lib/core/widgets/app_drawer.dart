@@ -157,6 +157,13 @@ class AppDrawer extends ConsumerWidget {
                   path: '/expenses',
                   isSelected: currentRoute == '/expenses' || currentRoute == '/expenses/add',
                 ),
+                _buildMenuItem(
+                  context,
+                  icon: Icons.sticky_note_2_rounded,
+                  title: 'Quick Notes',
+                  path: '/notes',
+                  isSelected: currentRoute == '/notes',
+                ),
                 const Divider(height: 16),
                 _buildMenuItem(
                   context,

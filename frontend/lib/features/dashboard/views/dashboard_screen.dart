@@ -201,6 +201,12 @@ class DashboardScreen extends ConsumerWidget {
                 ),
                 const SizedBox(width: 12),
                 _buildActionItem(
+                  icon: Icons.sticky_note_2_rounded,
+                  label: 'Notes',
+                  onTap: () => context.push('/notes'),
+                ),
+                const SizedBox(width: 12),
+                _buildActionItem(
                   icon: Icons.phone_in_talk,
                   label: 'Calls',
                   onTap: () => context.push('/calls'),
