@@ -45,8 +45,12 @@ const removeStoredFile = (fileUrl) => {
  * (the display name the caller typed need not carry an extension).
  */
 const fileTypeOf = (row) => {
+  if (!row.fileUrl) return "none";
   const ext = path.extname(row.fileUrl || "") || path.extname(row.fileName || "");
-  return ext ? ext.replace(".", "").toUpperCase() : null;
+  const clean = ext ? ext.replace(".", "").toLowerCase() : "";
+  if (["png", "jpg", "jpeg", "webp"].includes(clean)) return "image";
+  if (clean === "pdf" || clean === "doc" || clean === "docx") return "attachment";
+  return clean ? clean.toUpperCase() : "none";
 };
 
 const serialize = (req, row) => {
@@ -56,6 +60,10 @@ const serialize = (req, row) => {
     id: row.id,
     template_id: row.id,
     name: row.fileName,
+    title: row.fileName,
+    description: row.rejectionReason || "",
+    body: row.rejectionReason || "",
+    message: row.rejectionReason || "",
     fileType,
     file_type: fileType,
     fileUrl,
@@ -86,8 +94,11 @@ exports.getTemplates = async (req, res) => {
     Object.assign(where, companyScope(req), { docType: TEMPLATE_DOC_TYPE });
 
     if (req.query.fileType) {
-      // Match on the extension of the stored path, the only place the type lives.
-      where.fileUrl = { [Op.like]: `%.${String(req.query.fileType).trim()}` };
+      if (req.query.fileType === "none") {
+        where.fileUrl = null;
+      } else {
+        where.fileUrl = { [Op.like]: `%.${String(req.query.fileType).trim()}` };
+      }
     }
 
     const { count, rows } = await Document.findAndCountAll({
@@ -120,11 +131,14 @@ exports.createTemplate = async (req, res) => {
       if (req.file) removeStoredFile(`/uploads/templates/${req.file.filename}`);
       return res.status(400).json({ message: "name is required" });
     }
-    // file_url, file_name and uploaded_by are all NOT NULL, so a row cannot be
-    // written without an upload behind it.
-    if (!req.file) {
-      return res.status(400).json({ message: "A template file is required" });
+
+    const description = (req.body.description || req.body.body || req.body.templateBody || req.body.message || "").trim();
+
+    if (!req.file && !description) {
+      return res.status(400).json({ message: "Either a file or a message body is required to create a template" });
     }
+
+    const fileUrl = req.file ? `/uploads/templates/${req.file.filename}` : null;
 
     const template = await Document.create({
       companyId: req.user.companyId,
@@ -133,8 +147,9 @@ exports.createTemplate = async (req, res) => {
       applicationId: null,
       docType: TEMPLATE_DOC_TYPE,
       fileName: name,
-      fileUrl: `/uploads/templates/${req.file.filename}`,
+      fileUrl: fileUrl,
       uploadedBy: req.user.id,
+      rejectionReason: description || null,
     });
 
     await logActivity(req, {
@@ -166,12 +181,29 @@ exports.updateTemplate = async (req, res) => {
       return res.status(404).json({ message: "Template not found" });
     }
 
+    const updates = {};
     if (req.body.name !== undefined) {
       const name = String(req.body.name).trim();
       if (!name) {
         return res.status(400).json({ message: "name cannot be empty" });
       }
-      await template.update({ fileName: name });
+      updates.fileName = name;
+    }
+
+    if (
+      req.body.description !== undefined ||
+      req.body.body !== undefined ||
+      req.body.templateBody !== undefined ||
+      req.body.message !== undefined
+    ) {
+      const desc = String(
+        req.body.description ?? req.body.body ?? req.body.templateBody ?? req.body.message ?? ""
+      ).trim();
+      updates.rejectionReason = desc || null;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await template.update(updates);
     }
 
     return res.status(200).json({ message: "Template updated", data: serialize(req, template) });

@@ -73,13 +73,37 @@ const uploadLogo = multer({
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
 });
 
+const templateUploadDir = path.join(__dirname, "..", "uploads", "templates");
+fs.mkdirSync(templateUploadDir, { recursive: true });
+
+const templateDiskStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, templateUploadDir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const safeName = path
+      .basename(file.originalname, ext)
+      .replace(/[^a-zA-Z0-9_-]/g, "_");
+    cb(null, `${Date.now()}-${safeName}${ext}`);
+  },
+});
+
+const uploadTemplate = multer({
+  storage: templateDiskStorage,
+  fileFilter,
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB
+});
+
 upload.uploadDisk = upload;
 upload.uploadMemory = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 15 * 1024 * 1024 },
 });
 upload.uploadLogo = uploadLogo;
+upload.uploadTemplate = uploadTemplate;
 
 module.exports = upload;
 module.exports.uploadLogo = uploadLogo;
+module.exports.uploadTemplate = uploadTemplate;
 

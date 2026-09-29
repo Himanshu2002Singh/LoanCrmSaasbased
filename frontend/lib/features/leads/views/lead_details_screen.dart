@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_phone_direct_caller/flutter_phone_direct_caller.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:capital_care/core/constants/app_colors.dart';
@@ -12,8 +11,8 @@ import 'package:capital_care/features/leads/models/lead_model.dart';
 import 'package:capital_care/features/leads/models/lead_status_model.dart';
 import 'package:capital_care/features/leads/providers/leads_provider.dart';
 import 'package:capital_care/features/telecalling/views/log_call_dialog.dart';
+import 'package:capital_care/features/leads/views/widgets/template_dialog.dart';
 import 'package:capital_care/features/dashboard/providers/dashboard_provider.dart';
-import 'package:capital_care/features/auth/providers/auth_provider.dart';
 import 'package:capital_care/features/tasks_and_followups/providers/tasks_provider.dart';
 
 class LeadDetailsScreen extends ConsumerStatefulWidget {
@@ -58,15 +57,7 @@ class _LeadDetailsScreenState extends ConsumerState<LeadDetailsScreen> with Sing
 
   Future<void> _openWhatsApp(LeadModel lead) async {
     if (lead.number.isEmpty) return;
-    final clean = lead.number.replaceAll(RegExp(r'\D'), '');
-    final fullNumber = clean.length == 10 ? '91$clean' : clean;
-    final user = ref.read(currentUserProvider).value;
-    final companyName = user?.company?.name ?? 'our lending team';
-    final message = 'Hello ${lead.name}, from $companyName.';
-    final uri = Uri.parse('https://wa.me/$fullNumber?text=${Uri.encodeComponent(message)}');
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    }
+    await TemplateDialog.show(context, phone: lead.number, name: lead.name);
   }
 
   void _showStatusUpdateSheet(LeadModel lead) {

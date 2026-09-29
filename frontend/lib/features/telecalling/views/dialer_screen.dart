@@ -5,12 +5,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_phone_direct_caller/flutter_phone_direct_caller.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:capital_care/core/constants/app_colors.dart';
 import 'package:capital_care/core/widgets/app_drawer.dart';
 import 'package:capital_care/core/widgets/status_badge.dart';
 import 'package:capital_care/features/leads/models/lead_model.dart';
 import 'package:capital_care/features/leads/services/lead_service.dart';
 import 'package:capital_care/features/leads/views/add_lead_screen.dart';
+import 'package:capital_care/features/leads/views/widgets/template_dialog.dart';
 import 'package:capital_care/features/telecalling/providers/telecalling_provider.dart';
 import 'package:capital_care/features/telecalling/views/log_call_dialog.dart';
 import 'package:capital_care/features/dashboard/providers/dashboard_provider.dart';
@@ -487,6 +489,13 @@ class _DialerScreenState extends ConsumerState<DialerScreen> {
               ),
             ),
             IconButton(
+              icon: const FaIcon(FontAwesomeIcons.whatsapp, color: Color(0xFF25D366), size: 18),
+              tooltip: 'Send WhatsApp Template',
+              onPressed: () {
+                TemplateDialog.show(context, phone: lead.number, name: lead.name);
+              },
+            ),
+            IconButton(
               icon: const Icon(Icons.arrow_forward_ios_rounded, size: 16, color: AppColors.primary),
               tooltip: 'View Lead',
               onPressed: () {
@@ -681,13 +690,12 @@ class _DialerScreenState extends ConsumerState<DialerScreen> {
             height: 56,
             child: hasInput
                 ? IconButton(
-                    icon: const Icon(Icons.copy_rounded, color: AppColors.textSecondary),
-                    tooltip: 'Copy Number',
+                    icon: const FaIcon(FontAwesomeIcons.whatsapp, color: Color(0xFF25D366), size: 22),
+                    tooltip: 'Send WhatsApp Template',
                     onPressed: () {
-                      Clipboard.setData(ClipboardData(text: _numberController.text));
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Copied number to clipboard'), duration: Duration(seconds: 1)),
-                      );
+                      final name = _matchedLead?.name ?? 'Customer';
+                      final num = _numberController.text.trim();
+                      TemplateDialog.show(context, phone: num, name: name);
                     },
                   )
                 : const SizedBox.shrink(),

@@ -3,6 +3,7 @@ import 'package:capital_care/core/networking/api_client.dart';
 import 'package:capital_care/features/leads/models/lead_model.dart';
 import 'package:capital_care/features/leads/models/lead_status_model.dart';
 import 'package:capital_care/features/leads/models/master_config_model.dart';
+import 'package:capital_care/features/leads/models/template_model.dart';
 
 class LeadsResponse {
   final List<LeadModel> leads;
@@ -133,5 +134,18 @@ class LeadService {
     );
     final leadData = response['data'] ?? response['lead'] ?? response;
     return LeadModel.fromJson(leadData as Map<String, dynamic>);
+  }
+
+  Future<List<TemplateModel>> getTemplates() async {
+    final response = await ApiClient.get(
+      ApiConstants.templates,
+      queryParameters: {'limit': '200'},
+    );
+    final list = response['data'] as List<dynamic>? ??
+        response['templates'] as List<dynamic>? ??
+        (response is List ? response : []);
+    return list
+        .map((e) => TemplateModel.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 }

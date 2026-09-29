@@ -57,7 +57,7 @@ const Document = sequelize.define(
     },
     fileUrl: {
       type: DataTypes.STRING(255),
-      allowNull: false,
+      allowNull: true,
       field: "file_url",
     },
     fileName: {

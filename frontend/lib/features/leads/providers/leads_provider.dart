@@ -3,6 +3,7 @@ import 'package:capital_care/features/auth/providers/auth_provider.dart';
 import 'package:capital_care/features/leads/models/lead_model.dart';
 import 'package:capital_care/features/leads/models/lead_status_model.dart';
 import 'package:capital_care/features/leads/models/master_config_model.dart';
+import 'package:capital_care/features/leads/models/template_model.dart';
 import 'package:capital_care/features/leads/services/lead_service.dart';
 
 final leadServiceProvider = Provider<LeadService>((ref) {
@@ -39,6 +40,11 @@ final leadSourcesProvider = FutureProvider<List<MasterConfigModel>>((ref) async 
 final documentTypesProvider = FutureProvider<List<MasterConfigModel>>((ref) async {
   final service = ref.watch(leadServiceProvider);
   return await service.getMasterConfigs('DOC_TYPE');
+});
+
+final templatesProvider = FutureProvider.autoDispose<List<TemplateModel>>((ref) async {
+  final service = ref.watch(leadServiceProvider);
+  return await service.getTemplates();
 });
 
 final singleLeadProvider = FutureProvider.family.autoDispose<LeadModel, int>((ref, leadId) async {

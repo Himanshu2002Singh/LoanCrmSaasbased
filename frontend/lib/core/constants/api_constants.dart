@@ -48,9 +48,33 @@ class ApiConstants {
   static String get expenseCategories => '$baseUrl/expenses/categories';
   static String get expenseSummary => '$baseUrl/expenses/summary';
 
-  // Master Configurations & Notifications
+  // Master Configurations, Templates & Notifications
   static String get masterConfigs => '$baseUrl/master-configs';
+  static String get templates => '$baseUrl/templates';
   static String get notifications => '$baseUrl/notifications';
   static String get users => '$baseUrl/users';
   static String get branches => '$baseUrl/branches';
+
+  /// Resolves relative or localhost URL to the active baseUrl server address
+  static String getFullFileUrl(String? rawUrl) {
+    if (rawUrl == null || rawUrl.trim().isEmpty) return '';
+    final trimmed = rawUrl.trim();
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      try {
+        final uri = Uri.parse(trimmed);
+        if (uri.host == 'localhost' || uri.host == '127.0.0.1') {
+          final baseUri = Uri.parse(baseUrl);
+          final portStr = baseUri.hasPort ? ':${baseUri.port}' : '';
+          return '${baseUri.scheme}://${baseUri.host}$portStr${uri.path}';
+        }
+        return trimmed;
+      } catch (_) {
+        return trimmed;
+      }
+    }
+    final baseUri = Uri.parse(baseUrl);
+    final origin = '${baseUri.scheme}://${baseUri.host}${baseUri.hasPort ? ':${baseUri.port}' : ''}';
+    final path = trimmed.startsWith('/') ? trimmed : '/$trimmed';
+    return '$origin$path';
+  }
 }

@@ -4,6 +4,7 @@ import moment from "moment";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import {
+  Edit2,
   FileText,
   Image as ImageIcon,
   Paperclip,
@@ -24,7 +25,7 @@ const FILE_TYPE_OPTIONS = [
 const emptyForm = () => ({
   name: "",
   description: "",
-  fileType: "image",
+  fileType: "none",
   file: null,
 });
 
@@ -42,6 +43,7 @@ export default function TemplateScreenRedesign() {
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
   const [addOpen, setAddOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [descTemplate, setDescTemplate] = useState(null);
   const [form, setForm] = useState(emptyForm);
@@ -75,24 +77,52 @@ export default function TemplateScreenRedesign() {
       toast.error("Template name is required");
       return;
     }
-    // A template is a stored file, so there is nothing to save without one.
-    if (!form.file) {
-      toast.error("Attach a file for this template");
+    if (form.fileType !== "none" && !form.file) {
+      toast.error(form.fileType === "image" ? "Please select an image file" : "Please select a PDF file");
+      return;
+    }
+    if (form.fileType === "none" && !form.description.trim()) {
+      toast.error("Template message body is required for text templates");
       return;
     }
     setSubmitting(true);
     try {
       const payload = new FormData();
       payload.append("name", form.name);
-      payload.append("file", form.file);
+      payload.append("description", form.description || "");
+      if (form.file) {
+        payload.append("file", form.file);
+      }
       await axios.post(`${API_URL}/templates`, payload);
-      toast.success("Template created");
+      toast.success("Template created successfully");
       fetchTemplates();
       setAddOpen(false);
       setForm(emptyForm());
     } catch (error) {
       console.error(error);
       toast.error(error.response?.data?.message || "Failed to create template");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleUpdate = async () => {
+    if (!editTarget || !editTarget.name.trim()) {
+      toast.error("Template name is required");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await axios.put(`${API_URL}/templates/${editTarget.id}`, {
+        name: editTarget.name,
+        description: editTarget.description || "",
+      });
+      toast.success("Template updated");
+      fetchTemplates();
+      setEditTarget(null);
+    } catch (error) {
+      console.error(error);
+      toast.error(error.response?.data?.message || "Failed to update template");
     } finally {
       setSubmitting(false);
     }
@@ -227,12 +257,25 @@ export default function TemplateScreenRedesign() {
                             type="button"
                             className="cc-tpl-body-btn"
                             onClick={() => setDescTemplate(template)}
-                            title="Open full body"
+                            title="Click to view full message"
                           >
                             {preview}
                           </button>
                         ) : (
-                          "--"
+                          <button
+                            type="button"
+                            className="cc-tpl-add-body-link"
+                            onClick={() =>
+                              setEditTarget({
+                                id: template.id,
+                                name: template.name || "",
+                                description: "",
+                              })
+                            }
+                            title="Click to add message body"
+                          >
+                            + Add message
+                          </button>
                         )}
                       </td>
                       <td>
@@ -246,7 +289,15 @@ export default function TemplateScreenRedesign() {
                       <td className="cc-tpl-date">
                         {template.createdAt ? moment(template.createdAt).format("DD MMM YYYY, HH:mm") : "--"}
                       </td>
-                      <td>
+                      <td style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        <button
+                          type="button"
+                          className="cc-tpl-icon-btn"
+                          onClick={() => setEditTarget({ id: template.id, name: template.name || "", description: template.description || "" })}
+                          title="Edit template"
+                        >
+                          <Edit2 size={14} />
+                        </button>
                         <button
                           type="button"
                           className="cc-tpl-icon-btn danger"
@@ -328,6 +379,52 @@ export default function TemplateScreenRedesign() {
         </div>
       ) : null}
 
+      {editTarget ? (
+        <div className="cc-tpl-overlay" onClick={() => setEditTarget(null)}>
+          <div className="cc-tpl-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="cc-tpl-modal-head">
+              <h3>Edit template</h3>
+              <button type="button" onClick={() => setEditTarget(null)}><X size={16} /></button>
+            </div>
+            <form
+              className="cc-tpl-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                handleUpdate();
+              }}
+            >
+              <label className="cc-form-field">
+                <span>Template name *</span>
+                <input
+                  type="text"
+                  value={editTarget.name}
+                  onChange={(event) => setEditTarget({ ...editTarget, name: event.target.value })}
+                  placeholder="e.g. PL Salaried Documents"
+                />
+              </label>
+              <label className="cc-form-field">
+                <span>Template body / message</span>
+                <textarea
+                  rows={4}
+                  value={editTarget.description}
+                  onChange={(event) => setEditTarget({ ...editTarget, description: event.target.value })}
+                  placeholder="Default message text to accompany this template..."
+                  style={{ resize: "vertical", width: "100%", padding: "8px 12px", borderRadius: "8px", border: "1px solid #cbd5e1" }}
+                />
+              </label>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <button type="button" className="cc-tpl-btn ghost" onClick={() => setEditTarget(null)}>
+                  Cancel
+                </button>
+                <button type="submit" className="cc-tpl-btn primary" disabled={submitting}>
+                  {submitting ? "Saving..." : "Save changes"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
       {addOpen ? (
         <div className="cc-tpl-overlay" onClick={() => setAddOpen(false)}>
           <div className="cc-tpl-modal" onClick={(event) => event.stopPropagation()}>
@@ -352,21 +449,40 @@ export default function TemplateScreenRedesign() {
                 />
               </label>
               <label className="cc-form-field">
-                <span>Attachment type</span>
+                <span>Template type</span>
                 <select
                   value={form.fileType}
                   onChange={(event) => setForm({ ...form, fileType: event.target.value, file: null })}
                 >
-                  <option value="image">Image</option>
-                  <option value="attachment">Attachment (PDF)</option>
+                  <option value="none">Text Only (No File Attachment)</option>
+                  <option value="image">Image Attachment</option>
+                  <option value="attachment">PDF Document</option>
                 </select>
               </label>
+              {form.fileType !== "none" ? (
+                <label className="cc-form-field">
+                  <span>{form.fileType === "image" ? "Image file *" : "PDF file *"}</span>
+                  <input
+                    type="file"
+                    accept={form.fileType === "image" ? "image/*" : "application/pdf"}
+                    onChange={(event) => setForm({ ...form, file: event.target.files[0] || null })}
+                  />
+                </label>
+              ) : null}
               <label className="cc-form-field">
-                <span>{form.fileType === "image" ? "Image file" : "PDF file"}</span>
-                <input
-                  type="file"
-                  accept={form.fileType === "image" ? "image/*" : "application/pdf"}
-                  onChange={(event) => setForm({ ...form, file: event.target.files[0] || null })}
+                <span>
+                  Template body / message {form.fileType === "none" ? "*" : "(Optional)"}
+                </span>
+                <textarea
+                  rows={4}
+                  value={form.description}
+                  onChange={(event) => setForm({ ...form, description: event.target.value })}
+                  placeholder={
+                    form.fileType === "none"
+                      ? "Write your WhatsApp template message here..."
+                      : "Default message text to accompany this template on WhatsApp..."
+                  }
+                  style={{ resize: "vertical", width: "100%", padding: "8px 12px", borderRadius: "8px", border: "1px solid #cbd5e1" }}
                 />
               </label>
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
@@ -407,7 +523,9 @@ const styles = `
   .cc-tpl-empty-file { color:#cbd5e1; font-family:ui-monospace,monospace; }
 
   .cc-tpl-body-btn { border:0; background:transparent; text-align:left; color:#0f172a; cursor:pointer; font-size:13px; padding:0; max-width:360px; display:block; line-height:1.4; }
-  .cc-tpl-body-btn:hover { color:#047857; }
+  .cc-tpl-body-btn:hover { color:#047857; text-decoration:underline; }
+  .cc-tpl-add-body-link { border:0; background:transparent; color:#047857; cursor:pointer; font-size:12.5px; font-weight:600; padding:0; text-decoration:underline; display:inline-block; }
+  .cc-tpl-add-body-link:hover { color:#065f46; }
 
   .cc-tpl-type-pill { display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:999px; font-size:11.5px; font-weight:600; text-transform:capitalize; }
   .cc-tpl-type-pill.type-none { background:#f1f5f9; color:#475569; }

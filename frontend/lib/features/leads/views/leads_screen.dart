@@ -11,7 +11,7 @@ import 'package:capital_care/core/widgets/status_badge.dart';
 import 'package:capital_care/features/leads/models/lead_model.dart';
 import 'package:capital_care/features/leads/providers/leads_provider.dart';
 import 'package:capital_care/features/telecalling/views/log_call_dialog.dart';
-import 'package:capital_care/features/auth/providers/auth_provider.dart';
+import 'package:capital_care/features/leads/views/widgets/template_dialog.dart';
 
 class LeadsScreen extends ConsumerStatefulWidget {
   const LeadsScreen({super.key});
@@ -86,31 +86,7 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
       );
       return;
     }
-
-    final cleanNumber = lead.number.replaceAll(RegExp(r'\D'), '');
-    final fullNumber = cleanNumber.length == 10 ? '91$cleanNumber' : cleanNumber;
-    final user = ref.read(currentUserProvider).value;
-    final companyName = user?.company?.name ?? 'our lending team';
-    final message = 'Hello ${lead.name}, regarding your loan inquiry with $companyName.';
-    final uri = Uri.parse('https://wa.me/$fullNumber?text=${Uri.encodeComponent(message)}');
-
-    try {
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } else {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('WhatsApp is not installed or cannot open link')),
-          );
-        }
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not open WhatsApp: $e')),
-        );
-      }
-    }
+    await TemplateDialog.show(context, phone: lead.number, name: lead.name);
   }
 
   @override

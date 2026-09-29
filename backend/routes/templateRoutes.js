@@ -10,7 +10,7 @@ const canEdit = requireRole(ROLES.COMPANY_ADMIN, ROLES.OPS);
 router.use(isAuthenticated);
 
 router.get("/", templateController.getTemplates);
-router.post("/", canEdit, upload.single("file"), templateController.createTemplate);
+router.post("/", canEdit, (upload.uploadTemplate || upload).single("file"), templateController.createTemplate);
 router.put("/:id", canEdit, templateController.updateTemplate);
 router.delete("/:id", canEdit, templateController.deleteTemplate);
 
