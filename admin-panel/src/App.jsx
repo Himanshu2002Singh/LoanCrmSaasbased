@@ -42,6 +42,7 @@ import ExpenseTrackerScreen from "./screens/expenses/ExpenseTrackerScreen";
 import RolePermissionsRedesign from "./screens/permissions/RolePermissionsRedesign";
 import FollowupWorkScreen from "./screens/followups/FollowupWorkScreen";
 import NotesScreen from "./screens/notes/NotesScreen";
+import CustomerDocumentUploadPortal from "./screens/public/CustomerDocumentUploadPortal";
 
 const PageShell = ({ children, allowedRoles = ["manager"], requiredPermission = null }) => (
   <ProtectedRoute allowedRoles={allowedRoles} requiredPermission={requiredPermission}>
@@ -60,6 +61,8 @@ function App() {
     <Router>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/upload-docs/:token" element={<CustomerDocumentUploadPortal />} />
+        <Route path="/public/upload-docs/:token" element={<CustomerDocumentUploadPortal />} />
         <Route
           path="/platform"
           element={

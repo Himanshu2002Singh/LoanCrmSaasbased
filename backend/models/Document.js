@@ -67,12 +67,23 @@ const Document = sequelize.define(
     },
     uploadedBy: {
       type: DataTypes.INTEGER,
-      allowNull: false,
+      allowNull: true,
       field: "uploaded_by",
       references: {
         model: "users",
         key: "id",
       },
+    },
+    isCustomerUpload: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+      field: "is_customer_upload",
+    },
+    customerRequestId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      field: "customer_request_id",
     },
     verificationStatus: {
       type: DataTypes.ENUM(

@@ -17,6 +17,10 @@ import {
   Eye,
   FileCheck,
   FileSpreadsheet,
+  Check,
+  Copy,
+  Link,
+  MessageSquare,
   FileText,
   Files,
   Mail,
@@ -34,7 +38,8 @@ import {
   UserCheck,
   X,
 } from "lucide-react";
-import API_URL from "../../../config";
+import API_URL, { CLIENT_PORTAL_URL } from "../../../config";
+import LeadDocumentRequestModal from "../LeadDocumentRequestModal";
 
 const statusColorMap = {
   NEW: { bg: "#eff6ff", text: "#1d4ed8", border: "#bfdbfe" },
@@ -89,6 +94,8 @@ export default function LeadDetailScreen() {
   const [docTypesList, setDocTypesList] = useState([]);
   const [activeTab, setActiveTab] = useState("applications");
   const [loading, setLoading] = useState(true);
+  const [docRequests, setDocRequests] = useState([]);
+  const [docReqModalOpen, setDocReqModalOpen] = useState(false);
 
   const userRole = localStorage.getItem("userRole") || "";
   const employeeRole = localStorage.getItem("employeeRole") || "";
@@ -174,6 +181,7 @@ export default function LeadDetailScreen() {
         setLead(data);
         setApplications(data.applications || []);
         setDocuments(data.documents || []);
+        setDocRequests(data.documentRequests || []);
         if (data.loan_type) {
           setAppForm((prev) => ({
             ...prev,
@@ -227,6 +235,55 @@ export default function LeadDetailScreen() {
     if (id) {
       loadData();
     }
+  }, [id]);
+
+  const fetchDocRequests = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const res = await axios.get(`${API_URL}/document-requests/lead/${id}`, {
+        headers: { ...(token && { Authorization: `Bearer ${token}` }) },
+      });
+      if (res.data?.success) {
+        setDocRequests(res.data.data || []);
+      }
+    } catch (e) {
+      console.error("Error fetching doc requests:", e);
+    }
+  };
+
+  const handleCancelDocRequest = async (requestId) => {
+    if (!window.confirm("Are you sure you want to cancel and deactivate this upload link?")) return;
+    try {
+      const token = localStorage.getItem("token");
+      await axios.patch(
+        `${API_URL}/document-requests/${requestId}/cancel`,
+        {},
+        { headers: { ...(token && { Authorization: `Bearer ${token}` }) } }
+      );
+      toast.success("Document request link cancelled");
+      fetchDocRequests();
+    } catch (err) {
+      toast.error("Failed to cancel link");
+    }
+  };
+
+  const handleVerifyDocument = async (docId, status, reason = null) => {
+    try {
+      const token = localStorage.getItem("token");
+      await axios.patch(
+        `${API_URL}/documents/${docId}/verify`,
+        { status, rejectionReason: reason },
+        { headers: { ...(token && { Authorization: `Bearer ${token}` }) } }
+      );
+      toast.success(`Document marked as ${status}`);
+      fetchLeadDetails();
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to update verification status");
+    }
+  };
+
+  useEffect(() => {
+    fetchDocRequests();
   }, [id]);
 
   const handleUploadDocument = async (e) => {
@@ -489,6 +546,16 @@ export default function LeadDetailScreen() {
         </div>
 
         <div className="cc-lead-header-right">
+          <button
+            type="button"
+            className="cc-header-action-btn primary"
+            style={{ backgroundColor: "#2563eb", color: "#ffffff", borderColor: "#1d4ed8" }}
+            onClick={() => setDocReqModalOpen(true)}
+            title="Generate secure document upload link for customer"
+          >
+            <Link size={15} />
+            <span>Customer Doc Link</span>
+          </button>
           {canEditLead && (
             <button
               type="button"
@@ -799,15 +866,176 @@ export default function LeadDetailScreen() {
               <h3>All Documents for this Lead ({documents.length})</h3>
               <p>KYC documents (PAN, Aadhaar, Bank Statement, Salary Slips, ITR, etc.)</p>
             </div>
-            <button
-              type="button"
-              className="cc-action-btn secondary"
-              onClick={() => setUploadModalOpen(true)}
-            >
-              <Upload size={14} />
-              <span>Upload Document</span>
-            </button>
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="cc-action-btn primary"
+                style={{ backgroundColor: "#2563eb", color: "#ffffff" }}
+                onClick={() => setDocReqModalOpen(true)}
+              >
+                <Link size={14} />
+                <span>Customer Upload Link</span>
+              </button>
+              <button
+                type="button"
+                className="cc-action-btn secondary"
+                onClick={() => setUploadModalOpen(true)}
+              >
+                <Upload size={14} />
+                <span>Staff Upload</span>
+              </button>
+            </div>
           </div>
+
+          {/* Active Customer Upload Links Card */}
+          {docRequests.length > 0 && (
+            <div style={{ marginBottom: "20px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "16px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "between", marginBottom: "12px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <ShieldCheck size={18} color="#2563eb" />
+                  <strong style={{ fontSize: "14px", color: "#1e293b" }}>
+                    Active Customer Document Collection Links ({docRequests.length})
+                  </strong>
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: "12px" }}>
+                {docRequests.map((req) => {
+                  const baseUrl = CLIENT_PORTAL_URL || "https://loan-crm-saasbased.vercel.app";
+                  const uploadUrl = `${baseUrl.replace(/\/+$/, "")}/upload-docs/${req.token}`;
+                  const isCompleted = req.status === "COMPLETED";
+                  const isCancelled = req.status === "CANCELLED";
+                  const total = (req.requiredDocs || []).length;
+                  const uploaded = (req.requiredDocs || []).filter((d) => d.status === "UPLOADED").length;
+
+                  return (
+                    <div
+                      key={req.id}
+                      style={{
+                        background: "#ffffff",
+                        border: isCompleted ? "1px solid #86efac" : "1px solid #cbd5e1",
+                        borderRadius: "10px",
+                        padding: "12px 14px",
+                        boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
+                        <span style={{ fontSize: "12px", fontWeight: 700, color: "#334155" }}>
+                          {req.title || "Document Collection"}
+                        </span>
+                        <span
+                          style={{
+                            fontSize: "10px",
+                            fontWeight: 700,
+                            padding: "2px 8px",
+                            borderRadius: "9999px",
+                            background: isCompleted ? "#dcfce7" : isCancelled ? "#fee2e2" : "#e0e7ff",
+                            color: isCompleted ? "#15803d" : isCancelled ? "#b91c1c" : "#4338ca",
+                          }}
+                        >
+                          {req.status} ({uploaded}/{total})
+                        </span>
+                      </div>
+
+                      <div style={{ fontSize: "11px", color: "#64748b", marginBottom: "8px" }}>
+                        Created: {new Date(req.createdAt).toLocaleDateString("en-IN")}
+                        {req.expiresAt && ` • Expires: ${new Date(req.expiresAt).toLocaleDateString("en-IN")}`}
+                        {req.accessCount > 0 && ` • Opened: ${req.accessCount} times`}
+                      </div>
+
+                      <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(uploadUrl);
+                            toast.success("Customer link copied!");
+                          }}
+                          style={{
+                            padding: "4px 8px",
+                            fontSize: "11px",
+                            borderRadius: "6px",
+                            background: "#eff6ff",
+                            color: "#1d4ed8",
+                            border: "1px solid #bfdbfe",
+                            cursor: "pointer",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "4px",
+                            fontWeight: 600,
+                          }}
+                        >
+                          <Copy size={11} /> Copy Link
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            let phone = (lead?.number || "").replace(/[^0-9]/g, "");
+                            if (phone.length === 10) phone = `91${phone}`;
+                            const msg = `Dear ${lead?.customer?.name || "Customer"},\n\nPlease upload the required documents for your loan processing using our secure portal:\n🔗 ${uploadUrl}\n\nThank you!`;
+                            window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, "_blank");
+                          }}
+                          style={{
+                            padding: "4px 8px",
+                            fontSize: "11px",
+                            borderRadius: "6px",
+                            background: "#ecfdf5",
+                            color: "#047857",
+                            border: "1px solid #a7f3d0",
+                            cursor: "pointer",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "4px",
+                            fontWeight: 600,
+                          }}
+                        >
+                          <MessageSquare size={11} /> WhatsApp
+                        </button>
+
+                        <a
+                          href={uploadUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{
+                            padding: "4px 8px",
+                            fontSize: "11px",
+                            borderRadius: "6px",
+                            background: "#f8fafc",
+                            color: "#475569",
+                            border: "1px solid #cbd5e1",
+                            textDecoration: "none",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "4px",
+                          }}
+                        >
+                          <Eye size={11} /> Preview
+                        </a>
+
+                        {!isCancelled && !isCompleted && (
+                          <button
+                            type="button"
+                            onClick={() => handleCancelDocRequest(req.id)}
+                            style={{
+                              padding: "4px 8px",
+                              fontSize: "11px",
+                              borderRadius: "6px",
+                              background: "#fff1f2",
+                              color: "#be123c",
+                              border: "1px solid #fecdd3",
+                              cursor: "pointer",
+                              marginLeft: "auto",
+                            }}
+                          >
+                            Deactivate
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {documents.length === 0 ? (
             <div className="cc-empty-state-box small">
@@ -871,7 +1099,30 @@ export default function LeadDetailScreen() {
                             {status}
                           </span>
                         </td>
-                        <td>{doc.uploader?.name || "System / Ops"}</td>
+                        <td>
+                          {doc.isCustomerUpload || !doc.uploadedBy ? (
+                            <span
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "4px",
+                                padding: "2px 8px",
+                                borderRadius: "9999px",
+                                fontSize: "11px",
+                                fontWeight: 700,
+                                background: "#f3e8ff",
+                                color: "#6b21a8",
+                                border: "1px solid #d8b4fe",
+                              }}
+                            >
+                              <Share2 size={10} /> Customer (Via Link)
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: "12px", color: "#334155", fontWeight: 500 }}>
+                              {doc.uploader?.name || "Staff / Ops"}
+                            </span>
+                          )}
+                        </td>
                         <td>
                           {doc.createdAt
                             ? new Date(doc.createdAt).toLocaleDateString("en-IN", {
@@ -882,15 +1133,58 @@ export default function LeadDetailScreen() {
                             : "--"}
                         </td>
                         <td style={{ textAlign: "right" }}>
-                          <a
-                            href={fileLink}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="cc-view-doc-btn"
-                          >
-                            <Eye size={13} />
-                            <span>View / Download</span>
-                          </a>
+                          <div style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}>
+                            <a
+                              href={fileLink}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="cc-view-doc-btn"
+                            >
+                              <Eye size={13} />
+                              <span>View</span>
+                            </a>
+                            {!isVerified && (
+                              <button
+                                type="button"
+                                onClick={() => handleVerifyDocument(doc.id, "VERIFIED")}
+                                style={{
+                                  padding: "4px 8px",
+                                  fontSize: "11px",
+                                  fontWeight: 600,
+                                  borderRadius: "6px",
+                                  background: "#ecfdf5",
+                                  color: "#059669",
+                                  border: "1px solid #a7f3d0",
+                                  cursor: "pointer",
+                                }}
+                                title="Approve and mark document verified"
+                              >
+                                Approve
+                              </button>
+                            )}
+                            {!isRejected && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const reason = window.prompt("Enter rejection reason for this document:");
+                                  if (reason) handleVerifyDocument(doc.id, "REJECTED", reason);
+                                }}
+                                style={{
+                                  padding: "4px 8px",
+                                  fontSize: "11px",
+                                  fontWeight: 600,
+                                  borderRadius: "6px",
+                                  background: "#fef2f2",
+                                  color: "#dc2626",
+                                  border: "1px solid #fecaca",
+                                  cursor: "pointer",
+                                }}
+                                title="Reject document"
+                              >
+                                Reject
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -1168,6 +1462,17 @@ export default function LeadDetailScreen() {
           </div>
         </div>
       )}
+
+      {/* MODAL: LEAD DOCUMENT REQUEST */}
+      <LeadDocumentRequestModal
+        isOpen={docReqModalOpen}
+        onClose={() => setDocReqModalOpen(false)}
+        lead={lead}
+        onSuccess={() => {
+          fetchLeadDetails();
+          fetchDocRequests();
+        }}
+      />
     </div>
   );
 }

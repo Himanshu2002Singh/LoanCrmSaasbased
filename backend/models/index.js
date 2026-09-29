@@ -18,6 +18,7 @@ const Task = require("./Task");
 
 // Module 4: Operations & Document Management
 const Document = require("./Document");
+const LeadDocumentRequest = require("./LeadDocumentRequest");
 
 // Module 5: Loan Applications & Banker Workflow
 const Lender = require("./Lender");
@@ -98,6 +99,19 @@ Document.belongsTo(Lead, { foreignKey: "lead_id", as: "lead" });
 
 User.hasMany(Document, { foreignKey: "uploaded_by", as: "uploadedDocuments" });
 Document.belongsTo(User, { foreignKey: "uploaded_by", as: "uploader" });
+
+// Customer Document Collection Requests (Lead-wise secure upload links)
+Lead.hasMany(LeadDocumentRequest, { foreignKey: "lead_id", as: "documentRequests", onDelete: "CASCADE" });
+LeadDocumentRequest.belongsTo(Lead, { foreignKey: "lead_id", as: "lead" });
+
+Company.hasMany(LeadDocumentRequest, { foreignKey: "company_id", as: "documentRequests", onDelete: "CASCADE" });
+LeadDocumentRequest.belongsTo(Company, { foreignKey: "company_id", as: "company" });
+
+LeadDocumentRequest.belongsTo(User, { foreignKey: "created_by_id", as: "creator" });
+User.hasMany(LeadDocumentRequest, { foreignKey: "created_by_id", as: "createdDocumentRequests" });
+
+LeadDocumentRequest.hasMany(Document, { foreignKey: "customer_request_id", as: "uploadedDocuments" });
+Document.belongsTo(LeadDocumentRequest, { foreignKey: "customer_request_id", as: "documentRequest" });
 
 // Module 5: Applications, Lenders, Banker Queries
 Company.hasMany(Lender, { foreignKey: "company_id", as: "lenders", onDelete: "CASCADE" });
@@ -182,8 +196,10 @@ Note.belongsTo(User, { foreignKey: "user_id", as: "user" });
 Lead.hasMany(Note, { foreignKey: "lead_id", as: "notes", onDelete: "SET NULL" });
 Note.belongsTo(Lead, { foreignKey: "lead_id", as: "lead" });
 
-// Automatically ensure notes table exists
+// Automatically ensure notes and lead_document_requests tables exist
 Note.sync().catch((err) => console.error("Error auto-syncing Note model:", err.message));
+Document.sync().catch((err) => console.error("Error syncing Document model:", err.message));
+LeadDocumentRequest.sync().catch((err) => console.error("Error auto-syncing LeadDocumentRequest model:", err.message));
 
 const db = {
   sequelize,
@@ -211,6 +227,7 @@ const db = {
   Expense,
   EmailTemplate,
   Note,
+  LeadDocumentRequest,
 };
 
 module.exports = db;

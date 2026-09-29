@@ -16,9 +16,11 @@ import {
   Search,
   Trash2,
   UserCog,
+  Link,
 } from "lucide-react";
 import API_URL from "../../../config";
 import AddLeadModal from "../AddLeadModal";
+import LeadDocumentRequestModal from "../LeadDocumentRequestModal";
 import CcPagination from "../../../components/CcPagination";
 
 const PAGE_SIZE = 20;
@@ -43,6 +45,7 @@ export default function LeadsListRedesign() {
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
+  const [docReqLead, setDocReqLead] = useState(null);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
@@ -521,6 +524,20 @@ export default function LeadsListRedesign() {
                         <button
                           type="button"
                           className="cc-leads-icon-btn"
+                          title="Generate/Share Customer Document Upload Link"
+                          onClick={() => setDocReqLead({
+                            id: row.lead_id,
+                            customer: { name: row.name, mobile: row.number },
+                            loanType: row.loan_type,
+                            requiredAmount: row.est_budget,
+                          })}
+                          style={{ color: "#2563eb" }}
+                        >
+                          <Link size={16} />
+                        </button>
+                        <button
+                          type="button"
+                          className="cc-leads-icon-btn"
                           title="View lead details"
                           onClick={() => navigate(`/lead-details/${row.lead_id}`)}
                         >
@@ -621,6 +638,13 @@ export default function LeadsListRedesign() {
         open={showAddModal}
         onClose={() => setShowAddModal(false)}
         onCreated={() => fetchLeads(currentPage)}
+      />
+
+      <LeadDocumentRequestModal
+        isOpen={Boolean(docReqLead)}
+        onClose={() => setDocReqLead(null)}
+        lead={docReqLead}
+        onSuccess={() => fetchLeads(currentPage)}
       />
     </div>
   );

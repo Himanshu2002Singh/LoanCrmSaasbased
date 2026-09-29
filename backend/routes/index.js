@@ -35,6 +35,8 @@ router.use("/payouts", require("./casePayoutRoutes"));
 router.use("/expenses", require("./expenseRoutes"));
 router.use("/role-permissions", require("./rolePermissionRoutes"));
 router.use("/notes", require("./noteRoutes"));
+router.use("/document-requests", require("./documentRequestRoutes"));
+router.use("/public", require("./publicRoutes"));
 
 router.get("/health", (req, res) => {
   res.json({ status: "ok", uptime: process.uptime(), version: "2.0.0" });

@@ -42,8 +42,10 @@ import {
   Users,
   X,
   XCircle,
+  Link,
 } from "lucide-react";
 import API_URL from "../../config";
+import LeadDocumentRequestModal from "../leads/LeadDocumentRequestModal";
 import CcPagination from "../../components/CcPagination";
 
 const PAGE_SIZE = 20;
@@ -164,6 +166,7 @@ export default function OperationsRedesign() {
   const [uploadDocType, setUploadDocType] = useState("PAN Card");
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadingDoc, setUploadingDoc] = useState(false);
+  const [opsDocReqLead, setOpsDocReqLead] = useState(null);
 
   // 1-Click Lead -> Loan Application Modal
   const [convertLead, setConvertLead] = useState(null);
@@ -1598,9 +1601,39 @@ export default function OperationsRedesign() {
 
                   {/* KYC & Financial Documents Section */}
                   <div className="cc-ops-drawer-section">
-                    <div className="cc-drawer-sec-title">
-                      <FileCheck size={17} /> Applicant KYC &amp; Verification Documents (
-                      {(verificationApp.documents || []).length})
+                    <div className="cc-drawer-sec-title" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <FileCheck size={17} /> Applicant KYC &amp; Verification Documents (
+                        {(verificationApp.documents || []).length})
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setOpsDocReqLead({
+                            id: verificationApp.leadId || verificationApp.lead?.id,
+                            customer: verificationApp.customer || verificationApp.lead?.customer,
+                            loanType: verificationApp.loanProduct || verificationApp.loanType,
+                            requiredAmount: verificationApp.appliedAmount || verificationApp.sanctionedAmount,
+                          })
+                        }
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 5,
+                          fontSize: 12,
+                          fontWeight: 600,
+                          padding: "4px 10px",
+                          borderRadius: 8,
+                          background: "#eff6ff",
+                          color: "#1d4ed8",
+                          border: "1px solid #bfdbfe",
+                          cursor: "pointer",
+                        }}
+                        title="Generate / Share unique upload link for customer"
+                      >
+                        <Link size={13} />
+                        <span>Customer Doc Link</span>
+                      </button>
                     </div>
 
                     {(verificationApp.documents || []).length === 0 ? (
@@ -1623,11 +1656,26 @@ export default function OperationsRedesign() {
                                   <FileText size={20} />
                                 </div>
                                 <div className="cc-doc-meta">
-                                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                                     <strong>{doc.docType}</strong>
                                     <span className={`cc-doc-status-pill ${doc.verificationStatus?.toLowerCase()}`}>
                                       {doc.verificationStatus}
                                     </span>
+                                    {doc.isCustomerUpload && (
+                                      <span
+                                        style={{
+                                          fontSize: "10px",
+                                          fontWeight: 700,
+                                          padding: "1px 6px",
+                                          borderRadius: 4,
+                                          background: "#f3e8ff",
+                                          color: "#6b21a8",
+                                          border: "1px solid #d8b4fe",
+                                        }}
+                                      >
+                                        Customer Uploaded
+                                      </span>
+                                    )}
                                   </div>
                                   <small>{doc.fileName}</small>
                                   {doc.rejectionReason && (
@@ -2443,6 +2491,16 @@ export default function OperationsRedesign() {
           </div>
         </div>
       )}
+
+      {/* MODAL: CUSTOMER DOCUMENT REQUEST LINK (OPS) */}
+      <LeadDocumentRequestModal
+        isOpen={Boolean(opsDocReqLead)}
+        onClose={() => setOpsDocReqLead(null)}
+        lead={opsDocReqLead}
+        onSuccess={() => {
+          if (verificationApp?.id) openVerificationDrawer(verificationApp);
+        }}
+      />
     </div>
   );
 }

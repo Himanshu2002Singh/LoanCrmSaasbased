@@ -1,6 +1,6 @@
 const { Op, fn, col, literal } = require("sequelize");
 const XLSX = require("xlsx");
-const { Lead, Customer, User, MasterConfig, CallLog, FollowUp, ActivityLog, Application, Document, Lender, sequelize } = require("../models");
+const { Lead, Customer, User, MasterConfig, CallLog, FollowUp, ActivityLog, Application, Document, Lender, LeadDocumentRequest, sequelize } = require("../models");
 const { buildQuery, paginated } = require("../utils/query");
 const { logActivity, diffFields } = require("../utils/activity");
 const { parseScheduledDate, syncLeadFollowUp } = require("../utils/followUpSync");
@@ -373,6 +373,15 @@ exports.getLeadById = async (req, res) => {
             { model: User, as: "uploader", attributes: ["id", "name", "role"] },
           ],
         },
+        {
+          model: LeadDocumentRequest,
+          as: "documentRequests",
+          separate: true,
+          order: [["createdAt", "DESC"]],
+          include: [
+            { model: User, as: "creator", attributes: ["id", "name", "role"] },
+          ],
+        },
       ],
     });
 
@@ -419,6 +428,7 @@ exports.getLeadById = async (req, res) => {
         followUps: lead.followUps,
         applications: lead.applications || [],
         documents: lead.documents || [],
+        documentRequests: lead.documentRequests || [],
       },
     });
   } catch (error) {
