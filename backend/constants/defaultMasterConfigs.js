@@ -14,7 +14,9 @@ const DEFAULT_MASTER_CONFIGS = [
   { configType: "LEAD_STATUS", label: "Follow Up", value: "FOLLOW_UP", colorCode: "#EAB308", orderIndex: 20, team: "calling" },
   { configType: "LEAD_STATUS", label: "Interested", value: "INTERESTED", colorCode: "#10B981", orderIndex: 30, team: "calling" },
   { configType: "LEAD_STATUS", label: "Passed to Ops", value: "PASSED_TO_OPS", colorCode: "#8B5CF6", orderIndex: 40, team: "both" },
-  { configType: "LEAD_STATUS", label: "Rejected", value: "REJECTED", colorCode: "#EF4444", orderIndex: 50, team: "both" },
+  { configType: "LEAD_STATUS", label: "Sanctioned", value: "SANCTIONED", colorCode: "#10B981", orderIndex: 50, team: "operations" },
+  { configType: "LEAD_STATUS", label: "Disbursed", value: "DISBURSED", colorCode: "#047857", orderIndex: 60, team: "operations" },
+  { configType: "LEAD_STATUS", label: "Rejected", value: "REJECTED", colorCode: "#EF4444", orderIndex: 70, team: "both" },
 
   { configType: "LOAN_PRODUCT", label: "Home Loan", value: "HOME_LOAN", orderIndex: 10 },
   { configType: "LOAN_PRODUCT", label: "Personal Loan", value: "PERSONAL_LOAN", orderIndex: 20 },

@@ -61,9 +61,12 @@ const serializeLead = (lead, statusMap = {}, requestingUser = null) => {
   const status = statusMap[lead.status];
   const apps = lead.applications || [];
   const primaryApp =
-    apps.find((a) => a.sanctionedAmount || a.status === "SANCTIONED" || a.status === "DISBURSED") ||
+    apps.find((a) => a.disbursedAmount || a.sanctionedAmount || a.status === "SANCTIONED" || a.status === "DISBURSED") ||
     apps[0] ||
     null;
+  const disbursedAmount = primaryApp?.disbursedAmount
+    ? parseFloat(primaryApp.disbursedAmount)
+    : (primaryApp?.status === "DISBURSED" ? (parseFloat(primaryApp.sanctionedAmount) || parseFloat(primaryApp.appliedAmount) || (lead.requiredAmount ? parseFloat(lead.requiredAmount) : null)) : null);
   const sanctionedAmount = primaryApp?.sanctionedAmount ? parseFloat(primaryApp.sanctionedAmount) : null;
   const appliedAmount = primaryApp?.appliedAmount
     ? parseFloat(primaryApp.appliedAmount)
@@ -78,7 +81,7 @@ const serializeLead = (lead, statusMap = {}, requestingUser = null) => {
     !isEmployee && lead.commissionPercent !== null && lead.commissionPercent !== undefined
       ? parseFloat(lead.commissionPercent)
       : null;
-  const baseAmount = sanctionedAmount || appliedAmount || (lead.requiredAmount ? parseFloat(lead.requiredAmount) : null);
+  const baseAmount = disbursedAmount || sanctionedAmount || appliedAmount || (lead.requiredAmount ? parseFloat(lead.requiredAmount) : null);
   const commissionAmount =
     !isEmployee && baseAmount !== null && commPercent !== null ? Math.round((baseAmount * commPercent) / 100) : null;
 
@@ -99,8 +102,15 @@ const serializeLead = (lead, statusMap = {}, requestingUser = null) => {
     commissionPercent: commPercent,
     commission_amount: commissionAmount,
     bank_name: bankName,
+    application_number: primaryApp?.applicationNumber || null,
+    applicationNumber: primaryApp?.applicationNumber || null,
+    application_id: primaryApp?.id || null,
+    disbursed_amount: disbursedAmount,
+    disbursedAmount: disbursedAmount,
     sanctioned_amount: sanctionedAmount,
+    sanctionedAmount: sanctionedAmount,
     applied_amount: appliedAmount,
+    appliedAmount: appliedAmount,
     sanction_date: sanctionDate,
     loan_type: lead.loanType,
     est_budget: lead.requiredAmount,

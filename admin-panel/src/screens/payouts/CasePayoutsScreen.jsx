@@ -1092,8 +1092,25 @@ export default function CasePayoutsScreen() {
                       <tr key={c.id}>
                         {/* 1. Lead & Customer */}
                         <td>
-                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                             <span className="cc-lead-badge">#{c.leadId}</span>
+                            {(c.application?.applicationNumber || c.lead?.applications?.[0]?.applicationNumber) && (
+                              <span
+                                className="cc-app-badge"
+                                title="Loan Application Number"
+                                style={{
+                                  fontSize: 11,
+                                  background: "#f1f5f9",
+                                  border: "1px solid #cbd5e1",
+                                  padding: "1px 6px",
+                                  borderRadius: 4,
+                                  color: "#334155",
+                                  fontWeight: 600,
+                                }}
+                              >
+                                {c.application?.applicationNumber || c.lead?.applications?.[0]?.applicationNumber}
+                              </span>
+                            )}
                             <strong style={{ fontSize: 13, color: "#0f172a" }}>{c.customerName}</strong>
                           </div>
                           <small style={{ color: "#64748b", fontSize: 11, display: "block", marginTop: 2 }}>

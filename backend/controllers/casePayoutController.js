@@ -97,6 +97,10 @@ const autoSyncDisbursedCases = async (companyId) => {
       const isDisbursed =
         COMPLETED_STATUSES.includes(leadStatusUpper) ||
         COMPLETED_STATUSES.includes(appStatusUpper) ||
+        leadStatusUpper.includes("DISBURSE") ||
+        leadStatusUpper.includes("SANCTION") ||
+        appStatusUpper.includes("DISBURSE") ||
+        appStatusUpper.includes("SANCTION") ||
         parseFloat(primaryApp?.sanctionedAmount || 0) > 0 ||
         parseFloat(primaryApp?.disbursedAmount || 0) > 0;
 
@@ -228,6 +232,13 @@ const autoSyncDisbursedCases = async (companyId) => {
             netMargin,
             applicationId: primaryApp?.id || payout.applicationId,
           });
+        }
+
+        if (!payout.applicationId && primaryApp?.id) {
+          await payout.update({ applicationId: primaryApp.id });
+        }
+        if (!payout.lenderId && lender?.id) {
+          await payout.update({ lenderId: lender.id, bankName });
         }
 
         // Sync paid/received amounts from actual transactions

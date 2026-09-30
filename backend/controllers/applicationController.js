@@ -1,5 +1,5 @@
 const { Op } = require("sequelize");
-const { Application, Lead, Customer, Lender, User, Document, BankerQuery, sequelize } = require("../models");
+const { Application, Lead, Customer, Lender, User, Document, BankerQuery, MasterConfig, sequelize } = require("../models");
 const { buildQuery, paginated } = require("../utils/query");
 const { logActivity, diffFields } = require("../utils/activity");
 const { companyScope, belongsToScope } = require("../middlewares/auth");
@@ -202,6 +202,66 @@ const listApplications = async (req, res, next) => {
     const payload = paginated({ count, rows, page, limit });
     payload.pagination.totalItems = count;
     payload.applications = payload.data;
+
+    // Calculate live stage counts & financial volume totals across all filtered applications
+    const summaryWhere = { ...where };
+    delete summaryWhere.status;
+
+    const allApps = await Application.findAll({
+      where: summaryWhere,
+      attributes: ["id", "status", "appliedAmount", "sanctionedAmount", "disbursedAmount"],
+    });
+
+    const summary = {
+      totalApplications: allApps.length,
+      totalAppliedAmount: 0,
+      totalSanctionedAmount: 0,
+      totalDisbursedAmount: 0,
+      disbursedCount: 0,
+      sanctionedCount: 0,
+      pendingCount: 0,
+      rejectedCount: 0,
+      stageCounts: {
+        DOCS_PENDING: 0,
+        UNDER_VERIFICATION: 0,
+        SUBMITTED_TO_BANK: 0,
+        QUERY_RAISED: 0,
+        SANCTIONED: 0,
+        DISBURSED: 0,
+        REJECTED: 0,
+      },
+    };
+
+    allApps.forEach((app) => {
+      const s = (app.status || "DOCS_PENDING").toUpperCase();
+      const applied = parseFloat(app.appliedAmount || 0);
+      const sanctioned = parseFloat(app.sanctionedAmount || 0);
+      const disbursed = parseFloat(app.disbursedAmount || 0) || (s === "DISBURSED" ? (sanctioned || applied) : 0);
+
+      summary.totalAppliedAmount += applied;
+      summary.totalSanctionedAmount += (sanctioned || (s === "SANCTIONED" ? applied : 0));
+      summary.totalDisbursedAmount += disbursed;
+
+      if (summary.stageCounts[s] !== undefined) {
+        summary.stageCounts[s]++;
+      } else if (s === "APPROVED") {
+        summary.stageCounts.SANCTIONED++;
+      } else if (s === "UNDER_REVIEW") {
+        summary.stageCounts.SUBMITTED_TO_BANK++;
+      }
+
+      if (s === "DISBURSED" || s === "CLOSED") {
+        summary.disbursedCount++;
+      } else if (s === "SANCTIONED" || s === "APPROVED") {
+        summary.sanctionedCount++;
+      } else if (s === "REJECTED" || s === "CANCELLED") {
+        summary.rejectedCount++;
+      } else {
+        summary.pendingCount++;
+      }
+    });
+
+    payload.summary = summary;
     return res.json(payload);
   } catch (error) {
     next(error);
@@ -243,10 +303,10 @@ const getBankerStats = async (req, res, next) => {
       const s = (app.status || "").toUpperCase();
       const applied = parseFloat(app.appliedAmount) || 0;
       const sanctioned = parseFloat(app.sanctionedAmount) || 0;
-      const disbursed = parseFloat(app.disbursedAmount) || 0;
+      const disbursed = parseFloat(app.disbursedAmount) || (s.includes("DISBURSE") ? (sanctioned || applied) : 0);
 
       stats.totalAppliedAmount += applied;
-      stats.totalSanctionedAmount += sanctioned;
+      stats.totalSanctionedAmount += (sanctioned || (s.includes("SANCTION") ? applied : 0));
       stats.totalDisbursedAmount += disbursed;
 
       if (s.includes("DOCS_PENDING") || s.includes("DOCUMENT PENDING")) {
@@ -469,7 +529,15 @@ const updateStatus = async (req, res, next) => {
     }
     if (disbursedAmount !== undefined && disbursedAmount !== null && disbursedAmount !== "") {
       application.disbursedAmount = parseFloat(disbursedAmount);
+    } else if (status === "DISBURSED" && (!application.disbursedAmount || application.disbursedAmount === 0)) {
+      // Auto-fallback: if marking disbursed without explicit disbursedAmount, use sanctioned or applied amount
+      application.disbursedAmount = application.sanctionedAmount || application.appliedAmount || 0;
     }
+
+    if (status === "SANCTIONED" && (!application.sanctionedAmount || application.sanctionedAmount === 0)) {
+      application.sanctionedAmount = application.appliedAmount || 0;
+    }
+
     await application.save();
 
     await logActivity(req, {
@@ -486,15 +554,76 @@ const updateStatus = async (req, res, next) => {
       remarks: remarks || `Application status changed from ${beforeStatus} to ${status}`,
     });
 
+    // Sync with linked Lead
+    if (application.leadId) {
+      const lead = await Lead.findByPk(application.leadId);
+      if (lead) {
+        let targetLeadStatus = null;
+        if (status === "DISBURSED") {
+          targetLeadStatus = "DISBURSED";
+        } else if (status === "SANCTIONED") {
+          targetLeadStatus = "SANCTIONED";
+        } else if (status === "REJECTED") {
+          targetLeadStatus = "REJECTED";
+        }
+
+        if (targetLeadStatus) {
+          // Check if company has configured status matching this target
+          const leadStatusConfig = await MasterConfig.findOne({
+            where: {
+              companyId: lead.companyId,
+              configType: "LEAD_STATUS",
+              [Op.or]: [
+                { value: targetLeadStatus },
+                { value: { [Op.like]: `%${targetLeadStatus}%` } },
+                { label: { [Op.like]: `%${targetLeadStatus}%` } },
+              ],
+            },
+          });
+
+          // Ensure master config exists for DISBURSED / SANCTIONED so UI tags look great
+          if (!leadStatusConfig && (targetLeadStatus === "DISBURSED" || targetLeadStatus === "SANCTIONED")) {
+            await MasterConfig.create({
+              companyId: lead.companyId,
+              configType: "LEAD_STATUS",
+              value: targetLeadStatus,
+              label: targetLeadStatus === "DISBURSED" ? "Disbursed" : "Sanctioned",
+              colorCode: targetLeadStatus === "DISBURSED" ? "#047857" : "#10B981",
+              orderIndex: targetLeadStatus === "DISBURSED" ? 70 : 60,
+              team: "operations",
+            }).catch(() => {});
+          }
+
+          const resolvedValue = leadStatusConfig ? leadStatusConfig.value : targetLeadStatus;
+          const oldLeadStatus = lead.status;
+          lead.status = resolvedValue;
+
+          if (application.disbursedAmount && parseFloat(application.disbursedAmount) > 0) {
+            lead.requiredAmount = application.disbursedAmount;
+          }
+
+          await lead.save();
+
+          await logActivity(req, {
+            recordType: "Lead",
+            recordId: lead.id,
+            action: "STATUS_CHANGED",
+            oldValue: { status: oldLeadStatus },
+            newValue: { status: resolvedValue },
+            remarks: `Automatically updated to ${resolvedValue} as Application #${application.applicationNumber} moved to ${status}`,
+            companyId: lead.companyId,
+          });
+        }
+      }
+    }
+
     // If application is marked DISBURSED or has disbursed amount, sync with case payouts
-    if (status === "DISBURSED" || (disbursedAmount !== undefined && parseFloat(disbursedAmount) > 0)) {
+    if (status === "DISBURSED" || (application.disbursedAmount && parseFloat(application.disbursedAmount) > 0)) {
       try {
         const { autoSyncDisbursedCases } = require("./casePayoutController");
-        autoSyncDisbursedCases(application.companyId).catch((e) =>
-          console.error("[applicationController] autoSync error:", e.message)
-        );
+        await autoSyncDisbursedCases(application.companyId);
       } catch (e) {
-        // ignore require issues
+        console.error("[applicationController] autoSync error:", e.message);
       }
     }
 

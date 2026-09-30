@@ -137,6 +137,25 @@ export default function OperationsRedesign() {
   const [appTotalPages, setAppTotalPages] = useState(1);
   const [appTotalItems, setAppTotalItems] = useState(0);
 
+  // Live KPI Summary Metrics across all filtered applications
+  const [opsSummary, setOpsSummary] = useState({
+    totalApplications: 0,
+    totalAppliedAmount: 0,
+    totalSanctionedAmount: 0,
+    totalDisbursedAmount: 0,
+    disbursedCount: 0,
+    sanctionedCount: 0,
+    pendingCount: 0,
+    rejectedCount: 0,
+    stageCounts: {},
+  });
+
+  // Disbursal Confirmation Modal State
+  const [disburseModalApp, setDisburseModalApp] = useState(null);
+  const [disburseAmountInput, setDisburseAmountInput] = useState("");
+  const [disburseRemarksInput, setDisburseRemarksInput] = useState("");
+  const [disburseSubmitting, setDisburseSubmitting] = useState(false);
+
   // Leads Queue State
   const [leads, setLeads] = useState([]);
   const [leadsLoading, setLeadsLoading] = useState(false);
@@ -276,6 +295,9 @@ export default function OperationsRedesign() {
       };
       const res = await axios.get(`${API_URL}/applications`, { params });
       setApplications(res.data?.applications || res.data?.data || []);
+      if (res.data?.summary) {
+        setOpsSummary(res.data.summary);
+      }
       const pagination = res.data?.pagination || {};
       setAppTotalPages(pagination.totalPages || 1);
       setAppTotalItems(pagination.totalItems || 0);
@@ -607,7 +629,7 @@ export default function OperationsRedesign() {
                 setAppCurrentPage(1);
               }}
             >
-              All Files ({appTotalItems})
+              All Files ({opsSummary?.totalApplications ?? appTotalItems})
             </button>
             <button
               type="button"
@@ -617,7 +639,7 @@ export default function OperationsRedesign() {
                 setAppCurrentPage(1);
               }}
             >
-              ⏳ Pending Files
+              ⏳ Pending Files ({opsSummary?.pendingCount ?? 0})
             </button>
             <button
               type="button"
@@ -627,7 +649,7 @@ export default function OperationsRedesign() {
                 setAppCurrentPage(1);
               }}
             >
-              ✅ Completed Files (Green)
+              ✅ Completed Files ({(opsSummary?.disbursedCount || 0) + (opsSummary?.sanctionedCount || 0)})
             </button>
             {PIPELINE_STAGES.map((s) => (
               <button
@@ -639,7 +661,7 @@ export default function OperationsRedesign() {
                   setAppCurrentPage(1);
                 }}
               >
-                {s.label}
+                {s.label} ({opsSummary?.stageCounts?.[s.key] ?? 0})
               </button>
             ))}
           </div>
@@ -762,8 +784,60 @@ export default function OperationsRedesign() {
     }
   };
 
+  // Disburse Loan Modal Handlers
+  const initiateDisburseModal = (app) => {
+    setDisburseModalApp(app);
+    const defaultAmt = app.disbursedAmount || app.sanctionedAmount || app.appliedAmount || "";
+    setDisburseAmountInput(defaultAmt ? String(defaultAmt) : "");
+    setDisburseRemarksInput(`Disbursed via ${app.lender?.name || "Bank Partner"}`);
+  };
+
+  const handleConfirmDisburse = async (e) => {
+    if (e) e.preventDefault();
+    if (!disburseModalApp) return;
+    const amt = parseFloat(disburseAmountInput);
+    if (isNaN(amt) || amt <= 0) {
+      toast.error("Please enter a valid disbursed amount");
+      return;
+    }
+
+    setDisburseSubmitting(true);
+    try {
+      await axios.patch(`${API_URL}/applications/${disburseModalApp.id}/status`, {
+        status: "DISBURSED",
+        disbursedAmount: amt,
+        remarks: disburseRemarksInput || "Loan successfully disbursed",
+      });
+
+      toast.success(`Application #${disburseModalApp.applicationNumber} marked as DISBURSED! Payout & Lead synced.`);
+      setDisburseModalApp(null);
+      fetchApplications(appCurrentPage);
+
+      if (verificationApp && verificationApp.id === disburseModalApp.id) {
+        setVerificationApp((prev) => ({
+          ...prev,
+          status: "DISBURSED",
+          disbursedAmount: amt,
+        }));
+      }
+    } catch (error) {
+      console.error("Disburse error:", error);
+      toast.error(error.response?.data?.message || "Failed to disburse loan application");
+    } finally {
+      setDisburseSubmitting(false);
+    }
+  };
+
   // Transition Application Pipeline Stage
   const handleStageTransition = async (appId, newStatus) => {
+    if (newStatus === "DISBURSED") {
+      const app = applications.find((a) => a.id === appId) || (verificationApp?.id === appId ? verificationApp : null);
+      if (app) {
+        initiateDisburseModal(app);
+        return;
+      }
+    }
+
     try {
       await axios.patch(`${API_URL}/applications/${appId}/status`, { status: newStatus });
       toast.success(`Application stage updated to ${newStatus.replace(/_/g, " ")}`);
@@ -1380,6 +1454,16 @@ export default function OperationsRedesign() {
                           </td>
                           <td onClick={(e) => e.stopPropagation()}>
                             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                              {app.status !== "DISBURSED" && (
+                                <button
+                                  type="button"
+                                  className="cc-ops-action-btn cc-btn-disburse"
+                                  title="Confirm & Mark Loan as Disbursed"
+                                  onClick={() => initiateDisburseModal(app)}
+                                >
+                                  <CheckCircle2 size={12} /> Disburse
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 className="cc-ops-action-btn mail-dispatch"
@@ -2492,6 +2576,191 @@ export default function OperationsRedesign() {
         </div>
       )}
 
+      {/* MODAL: CONFIRM LOAN DISBURSAL & FINANCIAL SYNC */}
+      {disburseModalApp && (
+        <div className="cc-disburse-backdrop" onClick={() => !disburseSubmitting && setDisburseModalApp(null)}>
+          <div className="cc-disburse-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="cc-disburse-header">
+              <div className="cc-disburse-title-wrap">
+                <div className="cc-disburse-icon-badge">
+                  <CheckCircle2 size={20} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#fff" }}>
+                    Confirm Loan Disbursal
+                  </h3>
+                  <small style={{ color: "#94a3b8", fontSize: 12 }}>
+                    App #{disburseModalApp.applicationNumber} • {disburseModalApp.customer?.name}
+                  </small>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="cc-disburse-close-btn"
+                onClick={() => !disburseSubmitting && setDisburseModalApp(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmDisburse} style={{ padding: "20px 24px" }}>
+              {/* Case Summary Card */}
+              <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 12, padding: "14px 16px", marginBottom: 18 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 14px", fontSize: 12.5 }}>
+                  <div>
+                    <span style={{ color: "#64748b", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>Borrower</span>
+                    <strong style={{ display: "block", color: "#0f172a", fontSize: 13, marginTop: 1 }}>{disburseModalApp.customer?.name}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: "#64748b", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>Contact</span>
+                    <strong style={{ display: "block", color: "#0f172a", fontSize: 13, marginTop: 1 }}>{disburseModalApp.customer?.mobile || "—"}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: "#64748b", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>Loan Product</span>
+                    <strong style={{ display: "block", color: "#0f172a", fontSize: 13, marginTop: 1 }}>{disburseModalApp.loanProduct}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: "#64748b", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>Assigned Bank</span>
+                    <strong style={{ display: "block", color: "#047857", fontSize: 13, marginTop: 1 }}>{disburseModalApp.lender?.name || "Direct / Bank"}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: "#64748b", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>Applied Amount</span>
+                    <strong style={{ display: "block", color: "#0f172a", fontSize: 13, marginTop: 1 }}>{currencyFormatter.format(disburseModalApp.appliedAmount || 0)}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: "#64748b", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>Sanctioned Amount</span>
+                    <strong style={{ display: "block", color: "#0284c7", fontSize: 13, marginTop: 1 }}>
+                      {disburseModalApp.sanctionedAmount ? currencyFormatter.format(disburseModalApp.sanctionedAmount) : "—"}
+                    </strong>
+                  </div>
+                </div>
+              </div>
+
+              {/* Disbursed Amount Input */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 6 }}>
+                  Final Disbursed Amount (₹) <span style={{ color: "#ef4444" }}>*</span>
+                </label>
+                <div style={{ position: "relative" }}>
+                  <IndianRupee size={17} style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "#64748b" }} />
+                  <input
+                    type="number"
+                    step="1"
+                    min="1"
+                    required
+                    value={disburseAmountInput}
+                    onChange={(e) => setDisburseAmountInput(e.target.value)}
+                    placeholder="e.g. 5000000"
+                    style={{
+                      width: "100%",
+                      padding: "11px 14px 11px 40px",
+                      borderRadius: 10,
+                      border: "2px solid #cbd5e1",
+                      fontSize: 16,
+                      fontWeight: 700,
+                      color: "#047857",
+                      background: "#fff",
+                      boxSizing: "border-box",
+                      outline: "none",
+                    }}
+                    onFocus={(e) => (e.target.style.borderColor = "#047857")}
+                    onBlur={(e) => (e.target.style.borderColor = "#cbd5e1")}
+                  />
+                </div>
+                {disburseAmountInput && !isNaN(parseFloat(disburseAmountInput)) && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, color: "#047857", fontWeight: 700, fontSize: 13, marginTop: 6 }}>
+                    <CheckCircle2 size={13} />
+                    <span>Amount: {currencyFormatter.format(parseFloat(disburseAmountInput))}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Disbursal Remarks */}
+              <div style={{ marginBottom: 18 }}>
+                <label style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#334155", marginBottom: 6 }}>
+                  Remarks / UTR / Reference
+                </label>
+                <input
+                  type="text"
+                  value={disburseRemarksInput}
+                  onChange={(e) => setDisburseRemarksInput(e.target.value)}
+                  placeholder="e.g. Disbursal confirmed, UTR #..., Banker approval"
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    fontSize: 13,
+                    color: "#0f172a",
+                    boxSizing: "border-box",
+                    outline: "none",
+                  }}
+                  onFocus={(e) => (e.target.style.borderColor = "#64748b")}
+                  onBlur={(e) => (e.target.style.borderColor = "#cbd5e1")}
+                />
+              </div>
+
+              {/* Notice Alert */}
+              <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderLeft: "4px solid #047857", borderRadius: 8, padding: "11px 14px", marginBottom: 20, fontSize: 12, color: "#334155", display: "flex", gap: 10, alignItems: "flex-start" }}>
+                <CheckCircle2 size={16} style={{ flexShrink: 0, marginTop: 1, color: "#047857" }} />
+                <div style={{ lineHeight: 1.5 }}>
+                  <strong>Direct Payout Sync:</strong> Marking this application as <strong>Disbursed</strong> will automatically update the linked lead status to <strong>DISBURSED</strong> and generate the case payout &amp; invoice record in <strong>Case Payouts</strong>.
+                </div>
+              </div>
+
+              {/* Modal Actions */}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                <button
+                  type="button"
+                  disabled={disburseSubmitting}
+                  onClick={() => setDisburseModalApp(null)}
+                  style={{
+                    padding: "10px 18px",
+                    borderRadius: 9,
+                    border: "1px solid #cbd5e1",
+                    background: "#f8fafc",
+                    color: "#475569",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={disburseSubmitting}
+                  style={{
+                    padding: "10px 22px",
+                    borderRadius: 9,
+                    border: "none",
+                    background: "#047857",
+                    color: "#fff",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 8,
+                    boxShadow: "0 2px 6px rgba(4, 120, 87, 0.35)",
+                  }}
+                >
+                  {disburseSubmitting ? (
+                    <>
+                      <RefreshCw size={14} className="cc-spin" /> Disbursing...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 size={16} /> Confirm &amp; Disburse
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* MODAL: CUSTOMER DOCUMENT REQUEST LINK (OPS) */}
       <LeadDocumentRequestModal
         isOpen={Boolean(opsDocReqLead)}
@@ -2506,6 +2775,101 @@ export default function OperationsRedesign() {
 }
 
 const opsStyles = `
+  /* Disburse Modal Backdrop & Dialog (Clean Grey Frosted Background) */
+  .cc-disburse-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 99999;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: rgba(15, 23, 42, 0.75);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    padding: 16px;
+    animation: ccDisburseFadeIn 0.2s ease-out;
+  }
+  @keyframes ccDisburseFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  .cc-disburse-dialog {
+    background: #ffffff;
+    max-width: 530px;
+    width: 100%;
+    border-radius: 16px;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(226, 232, 240, 0.8);
+    overflow: hidden;
+    animation: ccDisbursePopIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @keyframes ccDisbursePopIn {
+    from { transform: scale(0.95) translateY(10px); opacity: 0; }
+    to { transform: scale(1) translateY(0); opacity: 1; }
+  }
+  .cc-disburse-header {
+    background: #0f172a;
+    color: #ffffff;
+    padding: 18px 22px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid #1e293b;
+  }
+  .cc-disburse-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .cc-disburse-icon-badge {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    background: rgba(16, 185, 129, 0.15);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #10b981;
+    flex-shrink: 0;
+  }
+  .cc-disburse-close-btn {
+    background: transparent;
+    border: 0;
+    color: #94a3b8;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.15s ease, background 0.15s ease;
+  }
+  .cc-disburse-close-btn:hover {
+    color: #ffffff;
+    background: #334155;
+  }
+
+  /* Disburse Action Button */
+  .cc-ops-action-btn.cc-btn-disburse {
+    background: #ecfdf5;
+    color: #047857;
+    border: 1px solid #a7f3d0;
+    font-weight: 600;
+  }
+  .cc-ops-action-btn.cc-btn-disburse:hover {
+    background: #047857;
+    color: #ffffff;
+    border-color: #047857;
+  }
+
+  /* Disburse Modal */
+  .cc-disburse-modal {
+    max-width: 540px;
+    width: 100%;
+    border-radius: 14px;
+    overflow: hidden;
+  }
+
   .cc-ops-top-panel { padding: 10px 18px; margin-bottom: 14px; }
   .cc-ops-nav-cluster { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
   .cc-ops-mode-tabs { display: flex; gap: 8px; flex-wrap: wrap; }
