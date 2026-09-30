@@ -486,6 +486,18 @@ const updateStatus = async (req, res, next) => {
       remarks: remarks || `Application status changed from ${beforeStatus} to ${status}`,
     });
 
+    // If application is marked DISBURSED or has disbursed amount, sync with case payouts
+    if (status === "DISBURSED" || (disbursedAmount !== undefined && parseFloat(disbursedAmount) > 0)) {
+      try {
+        const { autoSyncDisbursedCases } = require("./casePayoutController");
+        autoSyncDisbursedCases(application.companyId).catch((e) =>
+          console.error("[applicationController] autoSync error:", e.message)
+        );
+      } catch (e) {
+        // ignore require issues
+      }
+    }
+
     return res.json({
       message: `Application status updated to ${status}`,
       application,

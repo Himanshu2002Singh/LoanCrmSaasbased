@@ -738,6 +738,15 @@ exports.updateLead = async (req, res) => {
       });
     }
 
+    if (["DISBURSED", "SANCTIONED", "APPROVED", "COMPLETED", "CLOSED"].includes(String(lead.status || "").toUpperCase())) {
+      try {
+        const { autoSyncDisbursedCases } = require("./casePayoutController");
+        autoSyncDisbursedCases(lead.companyId).catch((e) =>
+          console.error("[leadController] autoSync error:", e.message)
+        );
+      } catch (e) {}
+    }
+
     return res.status(200).json({ message: "Lead updated", data: serializeLead(lead, statuses.byValue, req.user) });
   } catch (error) {
     console.error("[leads] updateLead error:", error);
@@ -792,6 +801,15 @@ exports.updateLeadStatus = async (req, res) => {
       remarks: remarkOf(req.body),
       companyId: lead.companyId,
     });
+
+    if (["DISBURSED", "SANCTIONED", "APPROVED", "COMPLETED", "CLOSED"].includes(String(status.value || "").toUpperCase())) {
+      try {
+        const { autoSyncDisbursedCases } = require("./casePayoutController");
+        autoSyncDisbursedCases(lead.companyId).catch((e) =>
+          console.error("[leadController] autoSync error:", e.message)
+        );
+      } catch (e) {}
+    }
 
     return res.status(200).json({ message: "Status updated", data: serializeLead(lead, statuses.byValue, req.user) });
   } catch (error) {

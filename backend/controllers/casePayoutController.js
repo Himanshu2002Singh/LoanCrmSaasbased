@@ -85,14 +85,20 @@ const autoSyncDisbursedCases = async (companyId) => {
 
     for (const lead of leads) {
       const apps = lead.applications || [];
-      const primaryApp = apps.find((a) => parseFloat(a.sanctionedAmount || 0) > 0) || apps[0];
+      const primaryApp =
+        apps.find((a) =>
+          parseFloat(a.disbursedAmount || 0) > 0 ||
+          parseFloat(a.sanctionedAmount || 0) > 0 ||
+          COMPLETED_STATUSES.includes((a.status || "").toUpperCase())
+        ) || apps[0];
       const leadStatusUpper = (lead.status || "").toUpperCase();
       const appStatusUpper = (primaryApp?.status || "").toUpperCase();
 
       const isDisbursed =
         COMPLETED_STATUSES.includes(leadStatusUpper) ||
         COMPLETED_STATUSES.includes(appStatusUpper) ||
-        parseFloat(primaryApp?.sanctionedAmount || 0) > 0;
+        parseFloat(primaryApp?.sanctionedAmount || 0) > 0 ||
+        parseFloat(primaryApp?.disbursedAmount || 0) > 0;
 
       if (!isDisbursed) continue;
 
@@ -101,13 +107,14 @@ const autoSyncDisbursedCases = async (companyId) => {
         where: { companyId, leadId: lead.id },
       });
 
-      const loanAmount = primaryApp?.sanctionedAmount
-        ? parseFloat(primaryApp.sanctionedAmount)
-        : primaryApp?.appliedAmount
-        ? parseFloat(primaryApp.appliedAmount)
-        : lead.requiredAmount
-        ? parseFloat(lead.requiredAmount)
-        : 0;
+      const loanAmount =
+        parseFloat(primaryApp?.disbursedAmount || 0) > 0
+          ? parseFloat(primaryApp.disbursedAmount)
+          : parseFloat(primaryApp?.sanctionedAmount || 0) > 0
+          ? parseFloat(primaryApp.sanctionedAmount)
+          : parseFloat(primaryApp?.appliedAmount || 0) > 0
+          ? parseFloat(primaryApp.appliedAmount)
+          : parseFloat(lead.requiredAmount || 0);
 
       const partyName = lead.leadSource || "Direct";
       const sourceConfig = configMap.get(partyName.toLowerCase());
@@ -188,7 +195,7 @@ const autoSyncDisbursedCases = async (companyId) => {
           partyName: isSelf ? "Self" : partyName,
           partyCode: isSelf ? "—" : partyCode,
           partyCommissionPercent: partyCommPctFinal,
-          partyCommissionDue,
+          partyCommissionDue: partyCommDue,
           partyTdsPercent,
           partyTdsAmount,
           partyGstPercent,
@@ -203,6 +210,26 @@ const autoSyncDisbursedCases = async (companyId) => {
           status: "PENDING",
         });
       } else {
+        // If loanAmount was updated on lead/app and no receipts/payments yet, keep payout in sync
+        if (
+          parseFloat(payout.bankReceivedAmount || 0) === 0 &&
+          parseFloat(payout.partyPaidAmount || 0) === 0 &&
+          loanAmount > 0 &&
+          Math.abs(parseFloat(payout.loanAmount || 0) - loanAmount) > 0.01
+        ) {
+          await payout.update({
+            loanAmount,
+            baseAmount,
+            bankCommissionDue: bankCommDue,
+            bankRemainingDue: bankCommDue,
+            partyCommissionDue: partyCommDue,
+            partyNetPayable,
+            partyRemainingDue: partyNetPayable,
+            netMargin,
+            applicationId: primaryApp?.id || payout.applicationId,
+          });
+        }
+
         // Sync paid/received amounts from actual transactions
         const receipts = await BankReceipt.findAll({
           where: { companyId, casePayoutId: payout.id },
@@ -325,9 +352,14 @@ exports.getDisbursedPayouts = async (req, res) => {
             {
               model: Application,
               as: "applications",
-              attributes: ["id", "applicationNumber", "loanProduct", "sanctionedAmount", "status"],
+              attributes: ["id", "applicationNumber", "loanProduct", "sanctionedAmount", "disbursedAmount", "status"],
             },
           ],
+        },
+        {
+          model: Application,
+          as: "application",
+          attributes: ["id", "applicationNumber", "loanProduct", "appliedAmount", "sanctionedAmount", "disbursedAmount", "status"],
         },
       ],
       order: [["disbursalDate", "DESC"], ["id", "DESC"]],
@@ -1032,3 +1064,5 @@ exports.getInvoiceData = async (req, res) => {
     return res.status(500).json({ message: "Failed to generate invoice data", error: error.message });
   }
 };
+
+exports.autoSyncDisbursedCases = autoSyncDisbursedCases;
