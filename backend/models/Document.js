@@ -84,6 +84,11 @@ const Document = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: true,
       field: "customer_request_id",
+      references: {
+        model: "lead_document_requests",
+        key: "id",
+      },
+      onDelete: "SET NULL",
     },
     verificationStatus: {
       type: DataTypes.ENUM(

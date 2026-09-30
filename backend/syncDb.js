@@ -9,7 +9,8 @@ const syncAndSeed = async () => {
     console.log("Database connection successful.");
 
     const force = process.argv.includes("--force");
-    const alter = !force;
+    // When alter is used without force, explicitly use { drop: false } so NO columns or tables are ever dropped!
+    const alter = force ? false : { drop: false };
 
     if (force) {
       console.log("Dropping all existing tables for a clean start...");
@@ -24,9 +25,25 @@ const syncAndSeed = async () => {
       console.log("All old tables dropped.");
     }
 
-    console.log(`Syncing schema (force: ${force}, alter: ${alter})...`);
+    console.log(`Syncing schema (force: ${force}, alter: ${JSON.stringify(alter)})...`);
+
+    // Disable foreign key checks during sync so tables can sync in any order without constraint errors
+    await db.sequelize.query("SET FOREIGN_KEY_CHECKS = 0;");
+
+    // Ensure standalone tables exist first
+    if (db.LeadDocumentRequest) {
+      await db.LeadDocumentRequest.sync();
+    }
+    if (db.Note) {
+      await db.Note.sync();
+    }
+
+    // Sync all models safely without dropping any existing columns or data
     await db.sequelize.sync({ force, alter });
-    console.log("All 16+ SaaS Tables synchronized successfully!");
+
+    // Re-enable foreign key checks
+    await db.sequelize.query("SET FOREIGN_KEY_CHECKS = 1;");
+    console.log("All SaaS Tables synchronized successfully without data loss!");
 
     // Seed Initial Platform Data
     console.log("\nSeeding Initial Platform Data...");
