@@ -12,6 +12,7 @@ import 'package:capital_care/features/leads/models/lead_model.dart';
 import 'package:capital_care/features/leads/providers/leads_provider.dart';
 import 'package:capital_care/features/telecalling/views/log_call_dialog.dart';
 import 'package:capital_care/features/leads/views/widgets/template_dialog.dart';
+import 'package:capital_care/features/documents/views/widgets/lead_document_request_dialog.dart';
 
 class LeadsScreen extends ConsumerStatefulWidget {
   const LeadsScreen({super.key});
@@ -433,33 +434,45 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                         lead.owner != null ? 'Assigned: ${lead.owner}' : 'Unassigned',
                         style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
                       ),
-                    Row(
-                      children: [
-                        // WhatsApp Button
-                        IconButton(
-                          icon: const FaIcon(FontAwesomeIcons.whatsapp, color: Color(0xFF25D366), size: 20),
-                          visualDensity: VisualDensity.compact,
-                          padding: const EdgeInsets.all(6),
-                          constraints: const BoxConstraints(),
-                          onPressed: () => _openWhatsApp(context, lead),
-                        ),
-                        const SizedBox(width: 12),
-                        // Direct Call Button
-                        Container(
-                          decoration: BoxDecoration(
-                            color: AppColors.primarySurface,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: IconButton(
-                            icon: const Icon(Icons.phone, color: AppColors.primary, size: 18),
+                      Row(
+                        children: [
+                          // Document Request Link Button
+                          IconButton(
+                            icon: const Icon(Icons.add_link_rounded, color: Color(0xFF7C3AED), size: 20),
+                            tooltip: 'Request Documents',
                             visualDensity: VisualDensity.compact,
                             padding: const EdgeInsets.all(6),
                             constraints: const BoxConstraints(),
-                            onPressed: () => _makeCall(context, lead),
+                            onPressed: () => LeadDocumentRequestDialog.show(context, lead: lead),
                           ),
-                        ),
-                      ],
-                    ),
+                          const SizedBox(width: 8),
+                          // WhatsApp Button
+                          IconButton(
+                            icon: const FaIcon(FontAwesomeIcons.whatsapp, color: Color(0xFF25D366), size: 20),
+                            tooltip: 'WhatsApp',
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.all(6),
+                            constraints: const BoxConstraints(),
+                            onPressed: () => _openWhatsApp(context, lead),
+                          ),
+                          const SizedBox(width: 8),
+                          // Direct Call Button
+                          Container(
+                            decoration: BoxDecoration(
+                              color: AppColors.primarySurface,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: IconButton(
+                              icon: const Icon(Icons.phone, color: AppColors.primary, size: 18),
+                              tooltip: 'Call',
+                              visualDensity: VisualDensity.compact,
+                              padding: const EdgeInsets.all(6),
+                              constraints: const BoxConstraints(),
+                              onPressed: () => _makeCall(context, lead),
+                            ),
+                          ),
+                        ],
+                      ),
                   ],
                 ),
               ],

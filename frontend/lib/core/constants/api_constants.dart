@@ -42,6 +42,10 @@ class ApiConstants {
   static String get documents => '$baseUrl/documents';
   static String get applications => '$baseUrl/applications';
   static String get lenders => '$baseUrl/lenders';
+  static String get documentRequests => '$baseUrl/document-requests';
+  static String get documentRequestConfigDocs => '$baseUrl/document-requests/config-docs';
+  static String documentRequestsByLead(int leadId) => '$baseUrl/document-requests/lead/$leadId';
+  static String cancelDocumentRequest(int id) => '$baseUrl/document-requests/$id/cancel';
 
   // Expenses & Claims
   static String get expenses => '$baseUrl/expenses';

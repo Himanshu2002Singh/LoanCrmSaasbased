@@ -22,6 +22,11 @@ app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
+app.use("/uploads/documents", express.static(path.join(__dirname, "uploads", "documents")));
+app.use("/uploads/logos", express.static(path.join(__dirname, "uploads", "logos")));
+app.use("/uploads/templates", express.static(path.join(__dirname, "uploads", "templates")));
+app.use("/uploads/docs", express.static(path.join(__dirname, "uploads", "documents")));
+app.use("/uploads", express.static(path.join(__dirname, "uploads", "documents")));
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 app.get("/", (req, res) => res.json({ service: "CapitalCare CRM API", status: "running" }));

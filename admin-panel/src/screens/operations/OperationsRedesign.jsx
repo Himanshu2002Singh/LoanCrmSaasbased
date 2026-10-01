@@ -1773,7 +1773,11 @@ export default function OperationsRedesign() {
                               <div className="cc-doc-actions-row">
                                 {doc.fileUrl && (
                                   <a
-                                    href={doc.fileUrl.startsWith("http") ? doc.fileUrl : `${API_URL.replace("/api", "")}/${doc.fileUrl}`}
+                                    href={
+                                      doc.fileUrl.startsWith("http")
+                                        ? doc.fileUrl
+                                        : `${API_URL.replace(/\/api\/?$/, "")}/${doc.fileUrl.replace(/^\//, "")}`
+                                    }
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="cc-doc-open-btn"

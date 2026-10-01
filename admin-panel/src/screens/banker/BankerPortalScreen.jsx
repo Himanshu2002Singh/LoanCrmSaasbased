@@ -740,7 +740,11 @@ export default function BankerPortalScreen() {
                             <div className="cc-doc-actions">
                               {doc.fileUrl && (
                                 <a
-                                  href={doc.fileUrl.startsWith("http") ? doc.fileUrl : `${API_URL.replace("/api", "")}/${doc.fileUrl}`}
+                                  href={
+                                    doc.fileUrl.startsWith("http")
+                                      ? doc.fileUrl
+                                      : `${API_URL.replace(/\/api\/?$/, "")}/${doc.fileUrl.replace(/^\//, "")}`
+                                  }
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="cc-doc-link-btn"

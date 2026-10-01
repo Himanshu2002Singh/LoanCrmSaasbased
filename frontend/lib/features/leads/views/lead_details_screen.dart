@@ -15,6 +15,8 @@ import 'package:capital_care/features/leads/views/widgets/template_dialog.dart';
 import 'package:capital_care/features/dashboard/providers/dashboard_provider.dart';
 import 'package:capital_care/features/tasks_and_followups/providers/tasks_provider.dart';
 import 'package:capital_care/features/notes/views/widgets/add_edit_note_dialog.dart';
+import 'package:capital_care/features/documents/views/widgets/lead_document_request_dialog.dart';
+import 'package:capital_care/features/documents/views/widgets/lead_doc_requests_list.dart';
 
 class LeadDetailsScreen extends ConsumerStatefulWidget {
   final int leadId;
@@ -31,7 +33,7 @@ class _LeadDetailsScreenState extends ConsumerState<LeadDetailsScreen> with Sing
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
   }
 
   @override
@@ -303,16 +305,32 @@ class _LeadDetailsScreenState extends ConsumerState<LeadDetailsScreen> with Sing
         title: const Text('Lead Overview'),
         actions: [
           leadAsync.maybeWhen(
-            data: (lead) => IconButton(
-              icon: const Icon(Icons.note_add_outlined),
-              tooltip: 'Add Private Note',
-              onPressed: () {
-                AddEditNoteDialog.show(
-                  context,
-                  preselectedLeadId: lead.id,
-                  preselectedLeadName: '${lead.name} (${lead.number})',
-                );
-              },
+            data: (lead) => Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.add_link_rounded),
+                  tooltip: 'Request Documents Link',
+                  onPressed: () {
+                    LeadDocumentRequestDialog.show(
+                      context,
+                      lead: lead,
+                      onSuccess: () => ref.invalidate(singleLeadProvider(widget.leadId)),
+                    );
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.note_add_outlined),
+                  tooltip: 'Add Private Note',
+                  onPressed: () {
+                    AddEditNoteDialog.show(
+                      context,
+                      preselectedLeadId: lead.id,
+                      preselectedLeadName: '${lead.name} (${lead.number})',
+                    );
+                  },
+                ),
+              ],
             ),
             orElse: () => const SizedBox.shrink(),
           ),
@@ -429,6 +447,18 @@ class _LeadDetailsScreenState extends ConsumerState<LeadDetailsScreen> with Sing
                     onTap: () => _openWhatsApp(lead),
                   ),
                   _buildLeadActionButton(
+                    iconWidget: const Icon(Icons.link_rounded, color: Color(0xFF7C3AED), size: 18),
+                    label: 'Doc Link',
+                    color: const Color(0xFF7C3AED),
+                    onTap: () {
+                      LeadDocumentRequestDialog.show(
+                        context,
+                        lead: lead,
+                        onSuccess: () => ref.invalidate(singleLeadProvider(widget.leadId)),
+                      );
+                    },
+                  ),
+                  _buildLeadActionButton(
                     iconWidget: const Icon(Icons.post_add, color: AppColors.warning, size: 18),
                     label: 'Log Call',
                     color: AppColors.warning,
@@ -451,16 +481,19 @@ class _LeadDetailsScreenState extends ConsumerState<LeadDetailsScreen> with Sing
           ),
         ),
 
-        // Tabs: Details, Call Logs, Followups
+        // Tabs: Details, Docs & Links, Call Logs, Followups
         Container(
           color: AppColors.surface,
           child: TabBar(
             controller: _tabController,
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
             labelColor: AppColors.primary,
             unselectedLabelColor: AppColors.textSecondary,
             indicatorColor: AppColors.primary,
             tabs: [
               const Tab(text: 'Details'),
+              const Tab(text: 'Docs & Links'),
               Tab(text: 'Calls (${lead.callLogs.length})'),
               Tab(text: 'Follow-ups (${lead.followUps.length})'),
             ],
@@ -473,6 +506,7 @@ class _LeadDetailsScreenState extends ConsumerState<LeadDetailsScreen> with Sing
             controller: _tabController,
             children: [
               _buildDetailsTab(lead),
+              LeadDocRequestsList(lead: lead),
               _buildCallLogsTab(lead),
               _buildFollowUpsTab(lead),
             ],

@@ -148,8 +148,10 @@ const loadStatuses = async (companyId) => {
 const resolveStatus = (statuses, input) => {
   if (!input) return null;
   const wanted = String(input).trim();
+  const normalized = wanted.toUpperCase().replace(/[\s-]+/g, "_");
   return (
     statuses.rows.find((row) => row.value === wanted.toUpperCase()) ||
+    statuses.rows.find((row) => row.value === normalized) ||
     statuses.rows.find((row) => row.label.toLowerCase() === wanted.toLowerCase()) ||
     statuses.rows.find((row) => String(row.id) === wanted) ||
     null
@@ -162,8 +164,10 @@ const resolveStatus = (statuses, input) => {
  * is declared in master_configs or workflow constants.
  * Company admins and superadmins are not restricted.
  */
-const canSetStatus = (role, status) => {
+const canSetStatus = (user, status, permissions = {}) => {
+  const role = typeof user === "string" ? user : user?.role;
   if ([ROLES.SUPERADMIN, ROLES.COMPANY_ADMIN, ROLES.OPS].includes(role)) return true;
+  if (permissions?.manageOperations || permissions?.viewAllLeads) return true;
   const team = status?.team || teamForStatus(status?.value, status?.team);
   if (role === ROLES.EMPLOYEE || role === ROLES.MANAGER) return team === "calling" || team === "both";
   return false;
@@ -175,6 +179,9 @@ const canSetStatus = (role, status) => {
  */
 const visibilityScope = async (req) => {
   if (req.user.role === ROLES.EMPLOYEE) {
+    if (req.permissions?.viewAllLeads || (req.query.team === "operations" && req.permissions?.manageOperations)) {
+      return {};
+    }
     return {
       [Op.or]: [
         { assignedEmployeeId: req.user.id },
@@ -291,16 +298,22 @@ exports.getLeads = async (req, res) => {
     if (req.query.statusCategory || req.query.stage) {
       const cat = (req.query.statusCategory || req.query.stage).toUpperCase();
       if (cat === "COMPLETED") {
-        where.status = { [Op.in]: completedValues };
+        where.status = validTeamStatusSet
+          ? { [Op.in]: completedValues.filter((v) => validTeamStatusSet.includes(v)) }
+          : { [Op.in]: completedValues };
       } else if (cat === "PENDING") {
-        where.status = { [Op.notIn]: [...completedValues, ...rejectedValues] };
+        where.status = validTeamStatusSet
+          ? { [Op.in]: validTeamStatusSet.filter((v) => !completedValues.includes(v) && !rejectedValues.includes(v)) }
+          : { [Op.notIn]: [...completedValues, ...rejectedValues] };
       } else if (cat === "REJECTED") {
-        where.status = { [Op.in]: rejectedValues };
+        where.status = validTeamStatusSet
+          ? { [Op.in]: rejectedValues.filter((v) => validTeamStatusSet.includes(v)) }
+          : { [Op.in]: rejectedValues };
       }
     } else if (req.query.status) {
       const status = resolveStatus(statuses, req.query.status);
       where.status = status ? status.value : req.query.status;
-    } else if (validTeamStatusSet && validTeamStatusSet.length > 0 && req.query.team === "calling") {
+    } else if (validTeamStatusSet && validTeamStatusSet.length > 0) {
       where.status = { [Op.in]: validTeamStatusSet };
     }
 
@@ -481,7 +494,7 @@ exports.createLead = async (req, res) => {
     const requested = resolveStatus(statuses, body.status || body.status_id);
     const status = requested || resolveInitialStatus(statuses.rows);
 
-    if (requested && !canSetStatus(req.user.role, requested)) {
+    if (requested && !canSetStatus(req.user, requested, req.permissions)) {
       await transaction.rollback();
       return res.status(403).json({ message: `Your role cannot set the status "${requested.label}"` });
     }
@@ -665,7 +678,7 @@ exports.updateLead = async (req, res) => {
     let statusChange = null;
     const requested = resolveStatus(statuses, body.status ?? body.status_id);
     if (requested && requested.value !== lead.status) {
-      if (!canSetStatus(req.user.role, requested)) {
+      if (!canSetStatus(req.user, requested, req.permissions)) {
         return res.status(403).json({ message: `Your role cannot set the status "${requested.label}"` });
       }
       statusChange = { from: lead.status, to: requested.value };
@@ -780,7 +793,7 @@ exports.updateLeadStatus = async (req, res) => {
     if (!status) {
       return res.status(400).json({ message: "Unknown status" });
     }
-    if (!canSetStatus(req.user.role, status)) {
+    if (!canSetStatus(req.user, status, req.permissions)) {
       return res.status(403).json({ message: `Your role cannot set the status "${status.label}"` });
     }
 
@@ -821,7 +834,8 @@ exports.updateLeadStatus = async (req, res) => {
       } catch (e) {}
     }
 
-    return res.status(200).json({ message: "Status updated", data: serializeLead(lead, statuses.byValue, req.user) });
+    const serialized = serializeLead(lead, statuses.byValue, req.user);
+    return res.status(200).json({ message: "Status updated", data: serialized, lead: serialized });
   } catch (error) {
     console.error("[leads] updateLeadStatus error:", error);
     return res.status(500).json({ message: "Internal Server Error", error: error.message });
@@ -1252,6 +1266,40 @@ exports.importLeadsFromExcel = async (req, res) => {
     });
   } catch (error) {
     console.error("[leads] importLeadsFromExcel error:", error);
+    return res.status(500).json({ message: "Internal Server Error", error: error.message });
+  }
+};
+
+exports.assignLeadSingle = async (req, res) => {
+  try {
+    const lead = await Lead.findByPk(req.params.id);
+    if (!lead || !belongsToScope(req, lead)) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
+    const targetUserId = req.body.assignedEmployeeId || req.body.userId || req.body.person_id;
+    let owner = null;
+    if (targetUserId) {
+      owner = await User.findByPk(targetUserId);
+      if (!owner || owner.companyId !== lead.companyId) {
+        return res.status(400).json({ message: "Target user not found in this company" });
+      }
+    }
+    await lead.update({
+      assignedEmployeeId: owner ? owner.id : null,
+      assignedManagerId: owner ? (owner.managerId ?? null) : null,
+    });
+    await logActivity(req, {
+      recordType: "Lead",
+      recordId: lead.id,
+      action: "ASSIGNED",
+      newValue: { assignedEmployeeId: owner ? owner.id : null, assignedTo: owner ? owner.name : "Unassigned" },
+      companyId: lead.companyId,
+    });
+    const statuses = await loadStatuses(lead.companyId);
+    const serialized = serializeLead(lead, statuses.byValue, req.user);
+    return res.status(200).json({ message: "Lead assigned", data: serialized, lead: serialized });
+  } catch (error) {
+    console.error("[leads] assignLeadSingle error:", error);
     return res.status(500).json({ message: "Internal Server Error", error: error.message });
   }
 };

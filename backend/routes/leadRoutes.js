@@ -64,7 +64,10 @@ router.get("/", leadController.getLeads);
 router.post("/", canCreateLead, leadController.createLead);
 router.get("/:id", leadController.getLeadById);
 router.put("/:id", canEditLead, leadController.updateLead);
+router.patch("/:id", canEditLead, leadController.updateLead);
 router.put("/:id/status", leadController.updateLeadStatus);
+router.patch("/:id/status", leadController.updateLeadStatus);
+router.patch("/:id/assign", canAssign, leadController.assignLeadSingle);
 router.delete("/:id", requireRole(ROLES.COMPANY_ADMIN, ROLES.MANAGER), leadController.deleteLead);
 
 module.exports = router;

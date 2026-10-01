@@ -18,7 +18,7 @@ const uploadDocument = async (req, res, next) => {
       return res.status(400).json({ message: "Document type (docType) is required" });
     }
 
-    const fileUrl = `/uploads/${req.file.filename}`;
+    const fileUrl = `/uploads/documents/${req.file.filename}`;
     const fileName = req.file.originalname;
 
     const document = await Document.create({
