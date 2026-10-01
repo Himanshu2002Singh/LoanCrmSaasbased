@@ -237,16 +237,25 @@ export default function PartyPayoutsScreen() {
     setPaymentTargetParty(party);
     setSelectedLeadForPayment(prefillLead || null);
     setModalLeadSearch("");
+    const defaultAmount =
+      prefillLead?.remainingDue !== undefined && prefillLead.remainingDue !== null && parseFloat(prefillLead.remainingDue) > 0
+        ? String(prefillLead.remainingDue)
+        : prefillLead?.netPayable !== undefined && prefillLead.netPayable !== null && parseFloat(prefillLead.netPayable) > 0
+        ? String(prefillLead.netPayable)
+        : prefillLead?.commissionDue
+        ? String(prefillLead.commissionDue)
+        : "";
+
     setPaymentForm({
       partyName: party.partyName,
       partyCode: party.partyCode || "",
       paymentType: prefillLead ? "LINKED_PAYMENT" : "ADVANCE",
-      amount: prefillLead?.commissionDue || "",
+      amount: defaultAmount,
       paymentDate: new Date().toISOString().split("T")[0],
       paymentMode: "BANK_TRANSFER",
       referenceNumber: "",
       leadId: prefillLead?.leadId || "",
-      notes: prefillLead ? `Payment for Lead #${prefillLead.leadId} (${prefillLead.customerName})` : "",
+      notes: prefillLead ? `Commission payout for Lead #${prefillLead.leadId} (${prefillLead.customerName})` : "",
     });
     setPaymentModalOpen(true);
 
@@ -271,15 +280,22 @@ export default function PartyPayoutsScreen() {
 
   const handleSelectLeadInModal = (lead) => {
     setSelectedLeadForPayment(lead);
+    const suggestedAmount =
+      lead.remainingDue !== undefined && lead.remainingDue !== null && parseFloat(lead.remainingDue) > 0
+        ? String(lead.remainingDue)
+        : lead.netPayable !== undefined && lead.netPayable !== null && parseFloat(lead.netPayable) > 0
+        ? String(lead.netPayable)
+        : lead.commissionDue > 0
+        ? String(lead.commissionDue)
+        : "";
+
     setPaymentForm((prev) => ({
       ...prev,
       leadId: lead.leadId,
       amount:
         prev.amount && parseFloat(prev.amount) > 0
           ? prev.amount
-          : lead.commissionDue > 0
-          ? String(lead.commissionDue)
-          : prev.amount,
+          : suggestedAmount || prev.amount,
       notes:
         prev.notes ||
         `Commission payout for Lead #${lead.leadId} (${lead.customerName} - ${lead.loanProduct})`,
@@ -1127,13 +1143,15 @@ export default function PartyPayoutsScreen() {
                     <table className="cc-ledger-table">
                       <thead>
                         <tr>
-                          <th>Lead ID</th>
+                          <th>Lead & App</th>
                           <th>Customer</th>
                           <th>Loan Product</th>
-                          <th>Assigned Bank</th>
-                          <th>Amount</th>
-                          <th>Comm %</th>
-                          <th>Commission Due</th>
+                          <th>Bank</th>
+                          <th>Loan Disbursed</th>
+                          <th>Bank Base Payout (₹)</th>
+                          <th>DSA Comm % (on Bank Net)</th>
+                          <th>Party Due (₹)</th>
+                          <th>Paid / Remaining</th>
                           <th>Status</th>
                           <th>Date</th>
                           <th>Action</th>
@@ -1142,69 +1160,169 @@ export default function PartyPayoutsScreen() {
                       <tbody>
                         {filteredDrawerLeads.length === 0 ? (
                           <tr>
-                            <td colSpan={10} style={{ textAlign: "center", padding: "30px", color: "#94a3b8" }}>
+                            <td colSpan={12} style={{ textAlign: "center", padding: "30px", color: "#94a3b8" }}>
                               {drawerLeadSearch
                                 ? `No leads matching "${drawerLeadSearch}" found for this party.`
                                 : "No leads associated with this connector yet."}
                             </td>
                           </tr>
                         ) : (
-                          filteredDrawerLeads.map((c) => (
-                            <tr key={c.leadId}>
-                              <td>
-                                <strong>#{c.leadId}</strong>
-                                {c.applicationNumber && (
-                                  <small style={{ display: "block", color: "#94a3b8", fontSize: 10 }}>
-                                    {c.applicationNumber}
+                          filteredDrawerLeads.map((c) => {
+                            const isDisbursed = c.isDisbursed;
+                            const dsaDue = parseFloat(
+                              c.netPayable !== undefined && c.netPayable !== null ? c.netPayable : c.commissionDue || 0
+                            );
+                            const partyPaid = parseFloat(c.paidAmount || 0);
+                            const remaining = parseFloat(
+                              c.remainingDue !== undefined ? c.remainingDue : Math.max(0, dsaDue - partyPaid)
+                            );
+
+                            return (
+                              <tr key={c.leadId}>
+                                <td>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                                    <span className="cc-lead-id-tag">#{c.leadId}</span>
+                                    {c.applicationNumber && (
+                                      <span
+                                        style={{
+                                          fontSize: 10,
+                                          background: "#f1f5f9",
+                                          border: "1px solid #cbd5e1",
+                                          padding: "1px 5px",
+                                          borderRadius: 4,
+                                          color: "#475569",
+                                          fontWeight: 600,
+                                        }}
+                                      >
+                                        {c.applicationNumber}
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td>
+                                  <strong style={{ fontSize: 13, color: "#0f172a" }}>{c.customerName}</strong>
+                                  <small style={{ display: "block", color: "#64748b", fontSize: 11 }}>
+                                    {c.customerMobile}
                                   </small>
-                                )}
-                              </td>
-                              <td>
-                                <strong>{c.customerName}</strong>
-                                <small style={{ display: "block", color: "#64748b", fontSize: 11 }}>
-                                  {c.customerMobile}
-                                </small>
-                              </td>
-                              <td>{c.loanProduct}</td>
-                              <td>
-                                {c.bankName ? (
-                                  <span className="cc-ledger-bank-tag">
-                                    <Building2 size={12} /> {c.bankName}
+                                </td>
+                                <td>
+                                  <span className="cc-product-tag" style={{ fontSize: 11.5, background: "#f8fafc", border: "1px solid #e2e8f0", padding: "2px 7px", borderRadius: 4, color: "#334155" }}>
+                                    {c.loanProduct}
                                   </span>
-                                ) : (
-                                  <span style={{ color: "#94a3b8" }}>—</span>
-                                )}
-                              </td>
-                              <td>
-                                <strong>{currencyFormatter.format(c.baseAmount)}</strong>
-                                <small style={{ display: "block", color: "#94a3b8", fontSize: 10 }}>
-                                  {c.sanctionedAmount ? "Sanctioned" : "Required"}
-                                </small>
-                              </td>
-                              <td>{c.commissionPercent}%</td>
-                              <td>
-                                <strong style={{ color: c.commissionDue > 0 ? "#047857" : "#64748b" }}>
-                                  {currencyFormatter.format(c.commissionDue)}
-                                </strong>
-                              </td>
-                              <td>
-                                <span className={`cc-lead-status-pill ${c.isDisbursed ? "disbursed" : "pending"}`}>
-                                  {c.isDisbursed ? "DISBURSED" : (c.status || "IN_PROGRESS").replace(/_/g, " ")}
-                                </span>
-                              </td>
-                              <td>{new Date(c.date).toLocaleDateString("en-IN")}</td>
-                              <td>
-                                <button
-                                  type="button"
-                                  className="cc-ledger-pay-btn"
-                                  onClick={() => openRecordPaymentModal(selectedParty, c)}
-                                  title="Pay / Settle against this lead"
-                                >
-                                  {c.isDisbursed ? "Settle Case" : "Select & Pay"}
-                                </button>
-                              </td>
-                            </tr>
-                          ))
+                                </td>
+                                <td>
+                                  {c.bankName ? (
+                                    <span className="cc-ledger-bank-tag">
+                                      <Building2 size={12} /> {c.bankName}
+                                    </span>
+                                  ) : (
+                                    <span style={{ color: "#94a3b8" }}>—</span>
+                                  )}
+                                </td>
+                                <td>
+                                  <strong style={{ fontSize: 13, color: "#0f172a" }}>
+                                    {currencyFormatter.format(c.loanAmount || c.baseAmount || 0)}
+                                  </strong>
+                                </td>
+                                <td>
+                                  {isDisbursed && c.bankBaseAmount > 0 ? (
+                                    <div>
+                                      <strong style={{ fontSize: 13, color: "#047857" }}>
+                                        {currencyFormatter.format(c.bankBaseAmount)}
+                                      </strong>
+                                      {c.bankNetReceivable > 0 && (
+                                        <small style={{ display: "block", color: "#059669", fontSize: 10.5 }}>
+                                          Net Bank: {currencyFormatter.format(c.bankNetReceivable)}
+                                        </small>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span style={{ color: "#94a3b8" }}>—</span>
+                                  )}
+                                </td>
+                                <td>
+                                  {isDisbursed ? (
+                                    <div>
+                                      <span className="cc-rate-tag purple">{c.commissionPercent}%</span>
+                                      <small style={{ display: "block", color: "#7c3aed", fontSize: 10, marginTop: 2 }}>
+                                        on Bank Net
+                                      </small>
+                                    </div>
+                                  ) : (
+                                    <span>{c.commissionPercent}%</span>
+                                  )}
+                                </td>
+                                <td>
+                                  {isDisbursed ? (
+                                    <div>
+                                      <strong style={{ fontSize: 13, color: dsaDue > 0 ? "#047857" : "#64748b" }}>
+                                        {currencyFormatter.format(dsaDue)}
+                                      </strong>
+                                      {c.commissionDue > dsaDue && (
+                                        <small style={{ display: "block", color: "#64748b", fontSize: 10 }}>
+                                          Gross: {currencyFormatter.format(c.commissionDue)}
+                                        </small>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span style={{ color: "#94a3b8" }}>₹0 (Pipeline)</span>
+                                  )}
+                                </td>
+                                <td>
+                                  {isDisbursed ? (
+                                    <div style={{ fontSize: 11 }}>
+                                      {partyPaid > 0 && (
+                                        <div style={{ color: "#059669", fontWeight: 600 }}>
+                                          Paid: {currencyFormatter.format(partyPaid)}
+                                        </div>
+                                      )}
+                                      <div style={{ color: remaining > 0 ? "#b45309" : "#64748b" }}>
+                                        Rem: {currencyFormatter.format(remaining)}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <span style={{ color: "#94a3b8" }}>—</span>
+                                  )}
+                                </td>
+                                <td>
+                                  <span
+                                    className={`cc-lead-status-pill ${
+                                      isDisbursed
+                                        ? remaining === 0 && dsaDue > 0
+                                          ? "settled"
+                                          : partyPaid > 0
+                                          ? "partial"
+                                          : "disbursed"
+                                        : "pending"
+                                    }`}
+                                  >
+                                    {isDisbursed
+                                      ? remaining === 0 && dsaDue > 0
+                                        ? "SETTLED"
+                                        : partyPaid > 0
+                                        ? "PARTIALLY PAID"
+                                        : "DISBURSED"
+                                      : (c.status || "IN_PROGRESS").replace(/_/g, " ")}
+                                  </span>
+                                </td>
+                                <td>{new Date(c.date).toLocaleDateString("en-IN")}</td>
+                                <td>
+                                  <button
+                                    type="button"
+                                    className="cc-ledger-pay-btn"
+                                    onClick={() => openRecordPaymentModal(selectedParty, c)}
+                                    title="Pay / Settle against this lead"
+                                  >
+                                    {remaining === 0 && isDisbursed && dsaDue > 0
+                                      ? "View / Pay"
+                                      : isDisbursed
+                                      ? "Settle Case"
+                                      : "Select & Pay"}
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })
                         )}
                       </tbody>
                     </table>
@@ -1448,13 +1566,22 @@ export default function PartyPayoutsScreen() {
                           </span>
                         </div>
                         <div style={{ fontSize: 11, color: "#475569", marginTop: 4 }}>
-                          {selectedLeadForPayment.loanProduct} • {selectedLeadForPayment.bankName || "Bank not assigned"} • Base: {currencyFormatter.format(selectedLeadForPayment.baseAmount || 0)}
+                          {selectedLeadForPayment.loanProduct} • {selectedLeadForPayment.bankName || "Bank not assigned"} • Disbursed: {currencyFormatter.format(selectedLeadForPayment.loanAmount || selectedLeadForPayment.baseAmount || 0)}
+                          {selectedLeadForPayment.bankBaseAmount > 0 && ` • Bank Base: ${currencyFormatter.format(selectedLeadForPayment.bankBaseAmount)}`}
                         </div>
                       </div>
                       <div style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                        <div style={{ fontSize: 10, color: "#64748b" }}>Due ({selectedLeadForPayment.commissionPercent}%)</div>
+                        <div style={{ fontSize: 10, color: "#64748b" }}>
+                          {selectedLeadForPayment.bankBaseAmount > 0
+                            ? `Net Due (${selectedLeadForPayment.commissionPercent}% on Bank Base)`
+                            : `Net Due (${selectedLeadForPayment.commissionPercent}%)`}
+                        </div>
                         <strong style={{ fontSize: 13, color: "#047857" }}>
-                          {currencyFormatter.format(selectedLeadForPayment.commissionDue || 0)}
+                          {currencyFormatter.format(
+                            selectedLeadForPayment.remainingDue !== undefined
+                              ? selectedLeadForPayment.remainingDue
+                              : (selectedLeadForPayment.commissionDue || 0)
+                          )}
                         </strong>
                       </div>
                     </div>
@@ -1510,13 +1637,16 @@ export default function PartyPayoutsScreen() {
                                 </span>
                               </div>
                               <div style={{ fontSize: 11, color: "#64748b", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                {l.loanProduct} {l.bankName ? `• ${l.bankName}` : ""} • ₹{numberFormatter.format(l.baseAmount || 0)}
+                                {l.loanProduct} {l.bankName ? `• ${l.bankName}` : ""} • Disbursed: ₹{numberFormatter.format(l.loanAmount || l.baseAmount || 0)}
+                                {l.bankBaseAmount > 0 ? ` • Bank Base: ₹${numberFormatter.format(l.bankBaseAmount)}` : ""}
                               </div>
                             </div>
                             <div style={{ textAlign: "right", whiteSpace: "nowrap", paddingLeft: 8 }}>
-                              <div style={{ fontSize: 10, color: "#64748b" }}>Due ({l.commissionPercent}%)</div>
-                              <strong style={{ fontSize: 12, color: l.commissionDue > 0 ? "#047857" : "#64748b" }}>
-                                {currencyFormatter.format(l.commissionDue || 0)}
+                              <div style={{ fontSize: 10, color: "#64748b" }}>
+                                {l.bankBaseAmount > 0 ? `Due (${l.commissionPercent}% on Bank Base)` : `Due (${l.commissionPercent}%)`}
+                              </div>
+                              <strong style={{ fontSize: 12, color: (l.remainingDue || l.commissionDue) > 0 ? "#047857" : "#64748b" }}>
+                                {currencyFormatter.format(l.remainingDue !== undefined ? l.remainingDue : (l.commissionDue || 0))}
                               </strong>
                               <div style={{ fontSize: 10, color: "#2563eb", fontWeight: 700, marginTop: 2 }}>
                                 Set Lead →

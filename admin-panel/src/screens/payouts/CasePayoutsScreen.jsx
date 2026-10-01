@@ -328,7 +328,8 @@ export default function CasePayoutsScreen() {
     const pType = isSelfCase ? "SELF" : "VENDOR";
 
     const partyPct = item.partyCommissionPercent !== undefined && item.partyCommissionPercent !== null ? parseFloat(item.partyCommissionPercent) : (isSelfCase ? 0 : 50.0);
-    const partyGross = isSelfCase ? 0 : (item.partyCommissionDue !== undefined && item.partyCommissionDue !== null ? parseFloat(item.partyCommissionDue) : Math.round((baseAmt * partyPct) / 100));
+    // Party Commission is calculated on bankNet (after Bank GST & TDS)
+    const partyGross = isSelfCase ? 0 : (item.partyCommissionDue !== undefined && item.partyCommissionDue !== null ? parseFloat(item.partyCommissionDue) : Math.round((bankNet * partyPct) / 100));
     const tdsPct = isSelfCase ? 0 : (item.partyTdsPercent !== undefined && item.partyTdsPercent !== null ? parseFloat(item.partyTdsPercent) : 0);
     const tdsAmt = isSelfCase ? 0 : (item.partyTdsAmount !== undefined && item.partyTdsAmount !== null ? parseFloat(item.partyTdsAmount) : Math.round((partyGross * tdsPct) / 100));
     const gstPct = isSelfCase ? 0 : (item.partyGstPercent !== undefined && item.partyGstPercent !== null ? parseFloat(item.partyGstPercent) : 0);
@@ -430,7 +431,8 @@ export default function CasePayoutsScreen() {
       } else {
         // VENDOR CASE:
         pPct = parseFloat(merged.partyCommissionPercent) || 0;
-        partyGross = Math.round((base * pPct) / 100);
+        // Party Commission is calculated on Bank Net Receivable (after Bank GST & TDS)
+        partyGross = Math.round((bankNet * pPct) / 100);
 
         pTdsPct = parseFloat(merged.partyTdsPercent) || 0;
         pTdsAmt = parseFloat(merged.partyTdsAmount) || 0;
@@ -614,7 +616,7 @@ export default function CasePayoutsScreen() {
         "Case Sourcing Type": isSelf ? "Self (In-House)" : "Vendor (Connector)",
         "Connector / Party": isSelf ? "Self" : (c.partyName || "Direct"),
         "Party Code": isSelf ? "—" : (c.partyCode || "—"),
-        "Party Comm % (on Base)": isSelf ? "0%" : `${c.partyCommissionPercent}%`,
+        "Party Comm % (on Bank Net)": isSelf ? "0%" : `${c.partyCommissionPercent}%`,
         "Gross Party Comm (₹)": isSelf ? 0 : c.partyCommissionDue,
         "Vendor TDS Deducted (₹)": isSelf ? 0 : (c.partyTdsAmount || 0),
         "Vendor GST Deducted (₹)": isSelf ? 0 : (c.partyGstAmount || 0),
@@ -647,7 +649,7 @@ export default function CasePayoutsScreen() {
       "Case Sourcing Type": "—",
       "Connector / Party": "—",
       "Party Code": "—",
-      "Party Comm % (on Base)": "—",
+      "Party Comm % (on Bank Net)": "—",
       "Gross Party Comm (₹)": grandTotals.totalPartyCommissionDue,
       "Vendor TDS Deducted (₹)": grandTotals.totalPartyTds,
       "Vendor GST Deducted (₹)": grandTotals.totalPartyGst,
@@ -1045,7 +1047,7 @@ export default function CasePayoutsScreen() {
                   <th className="th-credit">Bank Gross Base (₹)</th>
                   <th>Bank Deduct &amp; Net (₹)</th>
                   <th>Vendor / Type</th>
-                  <th>Vendor %</th>
+                  <th>Vendor % (on Bank Net)</th>
                   <th>Vendor Gross (₹)</th>
                   <th className="th-deduct">Deductions (Taxes/Staff)</th>
                   <th className="th-net">Party Net Payable (₹)</th>
@@ -1209,7 +1211,7 @@ export default function CasePayoutsScreen() {
                                 </button>
                               </div>
                               <small style={{ color: "#7c3aed", fontSize: 10, display: "block", marginTop: 2 }}>
-                                on Base Value
+                                on Bank Net
                               </small>
                             </>
                           )}
@@ -2204,7 +2206,7 @@ export default function CasePayoutsScreen() {
                         value={editForm.partyCommissionPercent}
                         onChange={(e) => recomputeEditForm({ partyCommissionPercent: e.target.value })}
                       />
-                      <small style={{ color: "#64748b", fontSize: 10 }}>on Base Value</small>
+                      <small style={{ color: "#64748b", fontSize: 10 }}>on Bank Net (After Bank GST &amp; TDS)</small>
                     </div>
 
                     <div className="cc-fgroup">

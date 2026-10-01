@@ -156,7 +156,8 @@ const autoSyncDisbursedCases = async (companyId) => {
       const payoutType = isSelf ? "SELF" : "VENDOR";
 
       let partyCommPctFinal = isSelf ? 0.0 : partyCommPct;
-      let partyCommDue = isSelf ? 0.0 : Math.round((baseAmount * partyCommPctFinal) / 100);
+      // Party commission is ALWAYS calculated on the final net balance received from Bank after GST & TDS:
+      let partyCommDue = isSelf ? 0.0 : Math.round((bankNetReceivable * partyCommPctFinal) / 100);
       let partyTdsPercent = 0.0;
       let partyTdsAmount = 0.0;
       let partyGstPercent = 0.0;
@@ -224,6 +225,9 @@ const autoSyncDisbursedCases = async (companyId) => {
           await payout.update({
             loanAmount,
             baseAmount,
+            bankGstAmount,
+            bankTdsAmount,
+            bankNetReceivable,
             bankCommissionDue: bankCommDue,
             bankRemainingDue: bankCommDue,
             partyCommissionDue: partyCommDue,
@@ -239,6 +243,51 @@ const autoSyncDisbursedCases = async (companyId) => {
         }
         if (!payout.lenderId && lender?.id) {
           await payout.update({ lenderId: lender.id, bankName });
+        }
+
+        // Ensure bank deductions and net receivable are set, and party commission is based on bank net receivable
+        let curBankNet = parseFloat(payout.bankNetReceivable || 0);
+        let curBankGst = parseFloat(payout.bankGstAmount || 0);
+        let curBankTds = parseFloat(payout.bankTdsAmount || 0);
+        const curBase = parseFloat(payout.baseAmount || 0);
+
+        if ((curBankNet === 0 || (curBankGst === 0 && curBankTds === 0)) && curBase > 0) {
+          curBankGst = Math.round((curBase * (parseFloat(payout.bankGstPercent) || 18.0)) / 100);
+          curBankTds = Math.round((curBase * (parseFloat(payout.bankTdsPercent) || 5.0)) / 100);
+          curBankNet = Math.max(0, curBase - curBankGst - curBankTds);
+        }
+
+        const isPayoutSelf = payout.payoutType === "SELF" || (payout.partyName || "").toLowerCase() === "self";
+        const curPartyPct = isPayoutSelf ? 0 : parseFloat(payout.partyCommissionPercent || 0);
+        const correctPartyCommDue = isPayoutSelf ? 0 : Math.round((curBankNet * curPartyPct) / 100);
+        const correctPartyTds = Math.round((correctPartyCommDue * (parseFloat(payout.partyTdsPercent) || 0)) / 100);
+        const correctPartyGst = Math.round((correctPartyCommDue * (parseFloat(payout.partyGstPercent) || 0)) / 100);
+        const correctPartyNet = Math.max(0, correctPartyCommDue - correctPartyTds - correctPartyGst - (parseFloat(payout.extraCharges) || 0));
+        const correctMargin = isPayoutSelf
+          ? Math.round(curBankNet - (parseFloat(payout.extraCharges) || 0))
+          : Math.round(curBankNet - correctPartyNet);
+
+        const partyPaid = parseFloat(payout.partyPaidAmount || 0);
+        const shouldUpdateToNetRule =
+          parseFloat(payout.bankNetReceivable || 0) !== curBankNet ||
+          parseFloat(payout.bankGstAmount || 0) !== curBankGst ||
+          parseFloat(payout.bankTdsAmount || 0) !== curBankTds ||
+          Math.abs(parseFloat(payout.partyCommissionDue || 0) - correctPartyCommDue) > 0.5;
+
+        if (shouldUpdateToNetRule) {
+          await payout.update({
+            bankGstAmount: curBankGst,
+            bankTdsAmount: curBankTds,
+            bankNetReceivable: curBankNet,
+            bankCommissionDue: curBankNet,
+            bankRemainingDue: Math.max(0, curBankNet - parseFloat(payout.bankReceivedAmount || 0)),
+            partyCommissionDue: correctPartyCommDue,
+            partyTdsAmount: correctPartyTds,
+            partyGstAmount: correctPartyGst,
+            partyNetPayable: correctPartyNet,
+            partyRemainingDue: Math.max(0, correctPartyNet - partyPaid),
+            netMargin: correctMargin,
+          });
         }
 
         // Sync paid/received amounts from actual transactions
@@ -539,9 +588,9 @@ exports.updateCasePayoutRates = async (req, res) => {
       partyRemainingDue = 0.0;
       netMargin = Math.round(bankNetReceivable - newExtraCharges);
     } else {
-      // VENDOR Payout: Gross Vendor Comm minus Vendor TDS, GST, and Manpower cost
+      // VENDOR Payout: Gross Vendor Comm (calculated on Bank Net Receivable after Bank GST & TDS) minus Vendor TDS, GST, and Manpower cost
       newPartyPct = partyCommissionPercent !== undefined && partyCommissionPercent !== "" ? parseFloat(partyCommissionPercent) : parseFloat(casePayout.partyCommissionPercent || 0);
-      partyCommissionDue = Math.round((newBase * newPartyPct) / 100);
+      partyCommissionDue = Math.round((bankNetReceivable * newPartyPct) / 100);
 
       newPartyTdsPct = partyTdsPercent !== undefined && partyTdsPercent !== "" ? parseFloat(partyTdsPercent) : parseFloat(casePayout.partyTdsPercent || 0);
       newPartyTdsAmt = partyTdsAmount !== undefined && partyTdsAmount !== "" ? parseFloat(partyTdsAmount) : Math.round((partyCommissionDue * newPartyTdsPct) / 100);
