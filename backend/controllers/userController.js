@@ -124,8 +124,9 @@ exports.getUsers = async (req, res) => {
     if (req.query.branchId) where.branchId = parseInt(req.query.branchId, 10);
     if (req.query.managerId) where.managerId = parseInt(req.query.managerId, 10);
 
-    // A manager only sees their own team.
-    if (req.user.role === ROLES.MANAGER) {
+    // A manager only filters to their own team if teamOnly is explicitly requested.
+    // Otherwise, company staff are visible so leads can be reassigned to other employees in the company.
+    if (req.user.role === ROLES.MANAGER && req.query.teamOnly === "true") {
       where[Op.and] = [
         ...(where[Op.and] || []),
         { [Op.or]: [{ managerId: req.user.id }, { id: req.user.id }] },
@@ -144,6 +145,16 @@ exports.getUsers = async (req, res) => {
     const formattedRows = rows.map((u) => {
       const json = u.toJSON ? u.toJSON() : { ...u };
       json.resolvedPermissions = resolveUserPermissions(u);
+      // Hide salary for non-admin / non-finance users unless viewing their own profile or permitted
+      if (
+        ![ROLES.SUPERADMIN, ROLES.COMPANY_ADMIN, ROLES.FINANCE].includes(req.user.role) &&
+        !req.permissions?.manageUsers &&
+        !req.permissions?.viewExpenses
+      ) {
+        if (json.id !== req.user.id) {
+          delete json.salary;
+        }
+      }
       return json;
     });
 

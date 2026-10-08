@@ -103,11 +103,12 @@ export default function ExpenseTrackerScreen() {
     }
   }, []);
 
-  const canViewFullExpenses = isCompanyAdmin || Boolean(userPermissions.viewExpenses);
+  const canViewOfficeExpenses = isCompanyAdmin || Boolean(userPermissions.viewExpenses || userPermissions.manageExpenses);
+  const canViewFullExpenses = canViewOfficeExpenses;
 
   const [selectedMonth, setSelectedMonth] = useState(getTodayMonthStr);
-  // Admin tabs: 'OFFICE' | 'EMPLOYEE_EXPENSES' | 'STAFF' | 'PARTNER' | 'ANALYTICS'
-  const [activeTab, setActiveTab] = useState(canViewFullExpenses ? "OFFICE" : "MY_EXPENSES");
+  // Default tab is always 'EMPLOYEE_EXPENSES' as requested
+  const [activeTab, setActiveTab] = useState(canViewFullExpenses ? "EMPLOYEE_EXPENSES" : "MY_EXPENSES");
 
   // Data states
   const [expenses, setExpenses] = useState([]);
@@ -671,15 +672,6 @@ export default function ExpenseTrackerScreen() {
         <div className="cc-exp-tabs-container">
           <button
             type="button"
-            className={`cc-exp-tab-btn ${activeTab === "OFFICE" ? "active" : ""}`}
-            onClick={() => setActiveTab("OFFICE")}
-          >
-            <Receipt size={16} /> Office Running Costs Table
-            <span className="cc-exp-badge">{summaryData?.summary?.officeExpenseCount || 0}</span>
-          </button>
-
-          <button
-            type="button"
             className={`cc-exp-tab-btn highlight-tab ${activeTab === "EMPLOYEE_EXPENSES" ? "active" : ""}`}
             onClick={() => setActiveTab("EMPLOYEE_EXPENSES")}
           >
@@ -687,6 +679,15 @@ export default function ExpenseTrackerScreen() {
             <span className="cc-exp-badge cyan-badge">
               {summaryData?.summary?.employeeExpenseCount || 0}
             </span>
+          </button>
+
+          <button
+            type="button"
+            className={`cc-exp-tab-btn ${activeTab === "OFFICE" ? "active" : ""}`}
+            onClick={() => setActiveTab("OFFICE")}
+          >
+            <Receipt size={16} /> Office Running Costs Table
+            <span className="cc-exp-badge">{summaryData?.summary?.officeExpenseCount || 0}</span>
           </button>
 
           <button

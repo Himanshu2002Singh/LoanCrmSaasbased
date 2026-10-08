@@ -1,10 +1,11 @@
 const { Op } = require("sequelize");
-const { Application, Lead, Customer, Lender, User, Document, BankerQuery, MasterConfig, sequelize } = require("../models");
+const { Application, Lead, Customer, Lender, User, Document, BankerQuery, MasterConfig, OperationStatusHistory, sequelize } = require("../models");
 const { buildQuery, paginated } = require("../utils/query");
 const { logActivity, diffFields } = require("../utils/activity");
 const { companyScope, belongsToScope } = require("../middlewares/auth");
 const { ROLES } = require("../constants/roles");
 const { sendMail } = require("../utils/emailService");
+const { getPublicApiBaseUrl } = require("../utils/documentHelper");
 
 const APP_FIELDS = [
   "loanProduct",
@@ -14,6 +15,16 @@ const APP_FIELDS = [
   "assignedBankerId",
   "lenderId",
   "rejectionReason",
+  "legalStatus",
+  "legalRemark",
+  "technicalStatus",
+  "technicalRemark",
+  "pddStatus",
+  "pddRemark",
+  "otcStatus",
+  "otcRemark",
+  "disbursedRemark",
+  "lastOpsRemark",
 ];
 
 const getCompanyId = (req) => req.companyId || req.user?.companyId;
@@ -48,6 +59,21 @@ const createApplication = async (req, res, next) => {
     if (!lead || !belongsToScope(req, lead)) {
       await t.rollback();
       return res.status(404).json({ message: "Referenced lead not found" });
+    }
+
+    if (req.user.role === ROLES.EMPLOYEE) {
+      if (
+        !req.permissions?.editAllLeads &&
+        !req.permissions?.manageOperations &&
+        lead.assignedEmployeeId !== req.user.id &&
+        lead.assignedManagerId !== req.user.id
+      ) {
+        await t.rollback();
+        return res.status(403).json({
+          code: "WORKED_LEAD_READ_ONLY",
+          message: "This lead is currently assigned to another employee. You have read-only access to this worked lead.",
+        });
+      }
     }
 
     const resolvedCustomerId = customerId ? parseInt(customerId, 10) : lead.customerId;
@@ -97,9 +123,18 @@ const createApplication = async (req, res, next) => {
   }
 };
 
+const parseList = (val) => {
+  if (!val) return [];
+  if (Array.isArray(val)) return val.map((s) => String(s).trim()).filter(Boolean);
+  return String(val)
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+};
+
 /**
- * @desc    List Loan Applications with filters & pagination
- *          Scoped automatically to assigned banker if user role is BANKER
+ * @desc    List Loan Applications with combined multi-select filters & pagination
+ *          Supports Employee, DSA, Bank/NBFC, Association, and Status/Stage workflow filters
  * @route   GET /api/applications
  */
 const listApplications = async (req, res, next) => {
@@ -150,34 +185,169 @@ const listApplications = async (req, res, next) => {
       where.createdAt = range;
     }
 
-    if (status && status !== "ALL") {
-      if (status === "COMPLETED_STAGES" || status === "COMPLETED") {
-        where.status = { [Op.in]: ["SANCTIONED", "DISBURSED", "APPROVED"] };
-      } else if (status === "PENDING_STAGES" || status === "PENDING") {
-        where.status = { [Op.in]: ["DOCS_PENDING", "UNDER_VERIFICATION", "SUBMITTED_TO_BANK", "UNDER_REVIEW", "QUERY_RAISED", "LOGGED_IN", "UNDERWRITING"] };
-      } else {
-        where.status = status;
-      }
+    // 1. Bank / NBFC Multi-select or Single Filter
+    const bankParams = parseList(req.query.bankIds || req.query.bankId || req.query.lenderIds || lenderId).filter(
+      (b) => b !== "ALL"
+    );
+    const validBankIds = bankParams.map(Number).filter((n) => !isNaN(n) && n > 0);
+    if (validBankIds.length === 1) {
+      where.lenderId = validBankIds[0];
+    } else if (validBankIds.length > 1) {
+      where.lenderId = { [Op.in]: validBankIds };
     }
-    if (lenderId && lenderId !== "ALL") where.lenderId = parseInt(lenderId, 10);
+
     if (customerId) where.customerId = parseInt(customerId, 10);
     if (leadId) where.leadId = parseInt(leadId, 10);
+
+    // 2. Status / Stage Workflow Combined Filter
+    const stageParams = parseList(req.query.stageFilter || status).filter((s) => s !== "ALL");
+    if (stageParams.length > 0) {
+      const stageOrConditions = [];
+      stageParams.forEach((st) => {
+        const key = st.toUpperCase();
+        if (key === "COMPLETED_STAGES" || key === "COMPLETED") {
+          stageOrConditions.push({ status: { [Op.in]: ["SANCTIONED", "DISBURSED", "APPROVED"] } });
+        } else if (key === "PENDING_STAGES" || key === "PENDING") {
+          stageOrConditions.push({
+            status: {
+              [Op.in]: [
+                "DOCS_PENDING",
+                "UNDER_VERIFICATION",
+                "SUBMITTED_TO_BANK",
+                "UNDER_REVIEW",
+                "QUERY_RAISED",
+                "LOGGED_IN",
+                "READY_TO_SEND",
+                "UNDERWRITING",
+              ],
+            },
+          });
+        } else if (key === "DOCS_PENDING") {
+          stageOrConditions.push({ status: "DOCS_PENDING" });
+        } else if (key === "READY_TO_SEND" || key === "LOGGED_IN") {
+          stageOrConditions.push({ status: { [Op.in]: ["READY_TO_SEND", "LOGGED_IN"] } });
+        } else if (key === "SUBMITTED_TO_BANK") {
+          stageOrConditions.push({ status: "SUBMITTED_TO_BANK" });
+        } else if (key === "PD" || key === "PD_ALL") {
+          stageOrConditions.push({ pdStatus: { [Op.ne]: null } });
+        } else if (key === "PD_PENDING") {
+          stageOrConditions.push({ pdStatus: "PENDING" });
+        } else if (key === "PD_COMPLETED") {
+          stageOrConditions.push({ pdStatus: "COMPLETED" });
+        } else if (key === "QUERY" || key === "QUERY_ALL") {
+          stageOrConditions.push({ opsQueryStatus: { [Op.in]: ["PENDING", "COMPLETED"] } });
+        } else if (key === "QUERY_PENDING") {
+          stageOrConditions.push({ opsQueryStatus: "PENDING" });
+        } else if (key === "QUERY_COMPLETED") {
+          stageOrConditions.push({ opsQueryStatus: "COMPLETED" });
+        } else if (key === "LEGAL" || key === "LEGAL_ALL") {
+          stageOrConditions.push({ legalStatus: { [Op.ne]: null } });
+        } else if (key === "LEGAL_INITIATED") {
+          stageOrConditions.push({ legalStatus: "INITIATED" });
+        } else if (key === "LEGAL_RESOLVED") {
+          stageOrConditions.push({ legalStatus: "RESOLVED" });
+        } else if (key === "LEGAL_REJECTED") {
+          stageOrConditions.push({ legalStatus: "REJECTED" });
+        } else if (key === "TECHNICAL" || key === "TECHNICAL_ALL") {
+          stageOrConditions.push({ technicalStatus: { [Op.ne]: null } });
+        } else if (key === "TECHNICAL_INITIATED") {
+          stageOrConditions.push({ technicalStatus: "INITIATED" });
+        } else if (key === "TECHNICAL_RESOLVED") {
+          stageOrConditions.push({ technicalStatus: "RESOLVED" });
+        } else if (key === "TECHNICAL_REJECTED") {
+          stageOrConditions.push({ technicalStatus: "REJECTED" });
+        } else if (key === "SANCTIONED") {
+          stageOrConditions.push({ status: "SANCTIONED" });
+        } else if (key === "PDD" || key === "PDD_ALL") {
+          stageOrConditions.push({ pddStatus: { [Op.ne]: null } });
+        } else if (key === "PDD_PENDING") {
+          stageOrConditions.push({ pddStatus: "PENDING" });
+        } else if (key === "PDD_RESOLVED") {
+          stageOrConditions.push({ pddStatus: "RESOLVED" });
+        } else if (key === "OTC" || key === "OTC_ALL") {
+          stageOrConditions.push({ otcStatus: { [Op.ne]: null } });
+        } else if (key === "OTC_PENDING") {
+          stageOrConditions.push({ otcStatus: "PENDING" });
+        } else if (key === "OTC_RESOLVED") {
+          stageOrConditions.push({ otcStatus: "RESOLVED" });
+        } else if (key === "PENDING_DISBURSEMENT") {
+          stageOrConditions.push({
+            status: "SANCTIONED",
+            [Op.or]: [{ pddStatus: "PENDING" }, { otcStatus: "PENDING" }],
+          });
+        } else if (key === "DISBURSED") {
+          stageOrConditions.push({ status: "DISBURSED" });
+        } else if (key === "REJECTED") {
+          stageOrConditions.push({ status: { [Op.in]: ["REJECTED", "CANCELLED"] } });
+        } else {
+          stageOrConditions.push({ status: st });
+        }
+      });
+
+      if (stageOrConditions.length === 1) {
+        Object.assign(where, stageOrConditions[0]);
+      } else if (stageOrConditions.length > 1) {
+        where[Op.or] = stageOrConditions;
+      }
+    }
+
+    // 3. Employee, DSA, and Association Filters (on linked Lead)
+    const employeeParams = parseList(req.query.employeeIds || req.query.employeeId).map(Number).filter((n) => !isNaN(n) && n > 0);
+    const dsaParams = parseList(req.query.dsaNames || req.query.dsaName || req.query.dsa);
+    const associationParams = parseList(req.query.associations || req.query.association);
+
+    const leadWhere = {};
+    let leadRequired = false;
+
+    if (employeeParams.length > 0) {
+      leadWhere.assignedEmployeeId = { [Op.in]: employeeParams };
+      leadRequired = true;
+    }
+
+    if (dsaParams.length > 0 && associationParams.length > 0) {
+      // Find intersection or both
+      const common = dsaParams.filter((d) => associationParams.includes(d));
+      leadWhere.leadSource = { [Op.in]: common.length > 0 ? common : dsaParams.concat(associationParams) };
+      leadRequired = true;
+    } else if (dsaParams.length > 0) {
+      leadWhere.leadSource = { [Op.in]: dsaParams };
+      leadRequired = true;
+    } else if (associationParams.length > 0) {
+      leadWhere.leadSource = { [Op.in]: associationParams };
+      leadRequired = true;
+    }
+
+    if (req.query.assignedOnly === "true") {
+      leadWhere[Op.or] = [
+        { assignedEmployeeId: req.user.id },
+        { assignedManagerId: req.user.id },
+      ];
+      leadRequired = true;
+    }
 
     const leadInclude = {
       model: Lead,
       as: "lead",
-      attributes: ["id", "assignedEmployeeId", "assignedManagerId"],
-      required: false,
+      attributes: [
+        "id",
+        "assignedEmployeeId",
+        "assignedManagerId",
+        "leadSource",
+        "loanType",
+        "requiredAmount",
+        "priority",
+        "status",
+      ],
+      include: [
+        {
+          model: User,
+          as: "assignedEmployee",
+          attributes: ["id", "name", "email", "phone"],
+        },
+      ],
+      required: leadRequired,
+      where: Object.keys(leadWhere).length > 0 ? leadWhere : undefined,
     };
-    if (req.query.assignedOnly === "true") {
-      leadInclude.where = {
-        [Op.or]: [
-          { assignedEmployeeId: req.user.id },
-          { assignedManagerId: req.user.id },
-        ],
-      };
-      leadInclude.required = true;
-    }
 
     const { count, rows } = await Application.findAndCountAll({
       where,
@@ -185,9 +355,24 @@ const listApplications = async (req, res, next) => {
       offset,
       order,
       distinct: true,
+      subQuery: false,
       include: [
         leadInclude,
-        { model: Customer, as: "customer", attributes: ["id", "name", "mobile", "city", "email", "employmentType", "monthlyIncome", "panNumber", "aadhaarMasked"] },
+        {
+          model: Customer,
+          as: "customer",
+          attributes: [
+            "id",
+            "name",
+            "mobile",
+            "city",
+            "email",
+            "employmentType",
+            "monthlyIncome",
+            "panNumber",
+            "aadhaarMasked",
+          ],
+        },
         { model: Lender, as: "lender", attributes: ["id", "name", "shortCode", "lenderType"] },
         { model: User, as: "assignedBanker", attributes: ["id", "name", "email", "phone"] },
         { model: Document, as: "documents" },
@@ -199,7 +384,88 @@ const listApplications = async (req, res, next) => {
       ],
     });
 
-    const payload = paginated({ count, rows, page, limit });
+    const { getLatestRemarksForLeads } = require("./leadController");
+    const leadIds = rows.map((r) => r.leadId).filter(Boolean);
+    const remarksMap = await getLatestRemarksForLeads(leadIds, getCompanyId(req));
+
+    const serializedRows = rows.map((r) => {
+      const plain = r.get ? r.get({ plain: true }) : { ...r };
+      const rem = remarksMap.get(r.leadId);
+
+      // Determine the true latest remark between Lead and Application Ops
+      let latestRemark = rem?.remarks || null;
+      let latestRemarkDate = rem?.createdAt || null;
+      let latestRemarkBy = rem?.actor || null;
+
+      if (plain.lastOpsRemark) {
+        if (!latestRemarkDate || new Date(plain.lastOpsUpdatedAt) >= new Date(latestRemarkDate)) {
+          latestRemark = plain.lastOpsRemark;
+          latestRemarkDate = plain.lastOpsUpdatedAt;
+          latestRemarkBy = "Operations";
+        }
+      }
+
+      // Compute precise workflow status summary and disbursement readiness
+      const pddStatus = (plain.pddStatus || "PENDING").toUpperCase();
+      const otcStatus = (plain.otcStatus || "PENDING").toUpperCase();
+      const isPddResolved = pddStatus === "RESOLVED";
+      const isOtcResolved = otcStatus === "RESOLVED";
+      const isDisbursed = plain.status === "DISBURSED";
+      const isSanctioned = plain.status === "SANCTIONED" || plain.status === "APPROVED";
+
+      let workflowStage = plain.status;
+      let stageDisplay = plain.status;
+      let disbursementReadiness = "LOCKED"; // "LOCKED" | "PENDING_PDD_OTC" | "READY" | "DISBURSED"
+
+      if (isDisbursed) {
+        workflowStage = "DISBURSED";
+        stageDisplay = "Disbursed";
+        disbursementReadiness = "DISBURSED";
+      } else if (plain.status === "REJECTED" || plain.status === "CANCELLED") {
+        workflowStage = "REJECTED";
+        stageDisplay = "Rejected";
+        disbursementReadiness = "LOCKED";
+      } else if (isSanctioned) {
+        if (!isPddResolved || !isOtcResolved) {
+          workflowStage = "PENDING_DISBURSEMENT";
+          stageDisplay = "Pending for Disbursement";
+          disbursementReadiness = "PENDING_PDD_OTC";
+        } else {
+          workflowStage = "READY_FOR_DISBURSEMENT";
+          stageDisplay = "Ready to Disburse";
+          disbursementReadiness = "READY";
+        }
+      } else if (plain.technicalStatus === "INITIATED") {
+        workflowStage = "TECHNICAL_INITIATED";
+        stageDisplay = "Technical: Initiated";
+      } else if (plain.legalStatus === "INITIATED") {
+        workflowStage = "LEGAL_INITIATED";
+        stageDisplay = "Legal: Initiated";
+      } else if (plain.status === "SUBMITTED_TO_BANK") {
+        workflowStage = "SUBMITTED_TO_BANK";
+        stageDisplay = "Submitted to Bank";
+      } else if (plain.status === "READY_TO_SEND" || plain.status === "LOGGED_IN") {
+        workflowStage = "READY_TO_SEND";
+        stageDisplay = "Ready to Send";
+      } else {
+        workflowStage = "DOCS_PENDING";
+        stageDisplay = "Documents Pending";
+      }
+
+      return {
+        ...plain,
+        workflowStage,
+        stageDisplay,
+        disbursementReadiness,
+        isPddResolved,
+        isOtcResolved,
+        latest_remark: latestRemark,
+        latest_remark_date: latestRemarkDate,
+        latest_remark_by: latestRemarkBy,
+      };
+    });
+
+    const payload = paginated({ count, rows: serializedRows, page, limit });
     payload.pagination.totalItems = count;
     payload.applications = payload.data;
 
@@ -519,6 +785,21 @@ const updateStatus = async (req, res, next) => {
       return res.status(403).json({ message: "You are not authorized to update this application" });
     }
 
+    // ENFORCE BUSINESS RULE: PDD & OTC must BOTH be RESOLVED before DISBURSED
+    if (status === "DISBURSED") {
+      const pddResolved = (application.pddStatus || "").toUpperCase() === "RESOLVED";
+      const otcResolved = (application.otcStatus || "").toUpperCase() === "RESOLVED";
+      if (!pddResolved || !otcResolved) {
+        const pendingReasons = [];
+        if (!pddResolved) pendingReasons.push("PDD is Pending");
+        if (!otcResolved) pendingReasons.push("OTC is Pending");
+        return res.status(400).json({
+          message: `Cannot disburse! Case is 'Pending for Disbursement' (${pendingReasons.join(", ")}). Both PDD and OTC must be Resolved before Final Disbursement.`,
+          pendingReasons,
+        });
+      }
+    }
+
     const beforeStatus = application.status;
     application.status = status;
     if (status === "REJECTED" && rejectionReason) {
@@ -536,9 +817,29 @@ const updateStatus = async (req, res, next) => {
 
     if (status === "SANCTIONED" && (!application.sanctionedAmount || application.sanctionedAmount === 0)) {
       application.sanctionedAmount = application.appliedAmount || 0;
+      if (!application.pddStatus) application.pddStatus = "PENDING";
+      if (!application.otcStatus) application.otcStatus = "PENDING";
+    }
+
+    if (remarks) {
+      application.lastOpsRemark = remarks;
+      application.lastOpsUpdatedAt = new Date();
+      application.lastOpsUpdatedBy = req.user?.id || null;
     }
 
     await application.save();
+
+    // Log to OperationStatusHistory
+    await OperationStatusHistory.create({
+      companyId: application.companyId,
+      applicationId: application.id,
+      leadId: application.leadId,
+      statusType: "STAGE",
+      oldStatus: beforeStatus,
+      newStatus: status,
+      remark: remarks || rejectionReason || `Status changed from ${beforeStatus} to ${status}`,
+      updatedBy: req.user?.id || null,
+    }).catch((e) => console.error("Error creating OperationStatusHistory:", e.message));
 
     await logActivity(req, {
       recordType: "Application",
@@ -630,6 +931,233 @@ const updateStatus = async (req, res, next) => {
     return res.json({
       message: `Application status updated to ${status}`,
       application,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * @desc    Update an Application's stage or sub-status (Legal, Technical, PDD, OTC, Disbursement)
+ *          Enforces mandatory remark, PDD/OTC disbursement check, and status history logging
+ * @route   PUT /api/applications/:id/stage-status
+ */
+const updateStageStatus = async (req, res, next) => {
+  const t = await sequelize.transaction();
+  try {
+    const {
+      stageType,
+      status,
+      remark,
+      sanctionedAmount,
+      disbursedAmount,
+      disbursementDate,
+      rejectionReason,
+    } = req.body;
+
+    if (!stageType) {
+      await t.rollback();
+      return res.status(400).json({ message: "stageType is required (PD, QUERY, LEGAL, TECHNICAL, PDD, OTC, DISBURSED, STAGE)" });
+    }
+    if (!status) {
+      await t.rollback();
+      return res.status(400).json({ message: "status is required" });
+    }
+
+    const application = await Application.findByPk(req.params.id, { transaction: t });
+    if (!application || !belongsToScope(req, application)) {
+      await t.rollback();
+      return res.status(404).json({ message: "Application not found" });
+    }
+
+    const statusUpper = String(status).toUpperCase();
+    const typeUpper = String(stageType).toUpperCase();
+    const trimmedRemark = (remark && typeof remark === "string" && remark.trim())
+      ? remark.trim()
+      : (statusUpper ? `${typeUpper} status updated to ${statusUpper}` : "Status updated");
+    const userId = req.user?.id || null;
+    const now = new Date();
+    let oldStatus = null;
+    let newStatus = statusUpper;
+
+    if (typeUpper === "PD") {
+      oldStatus = application.pdStatus || "PENDING";
+      application.pdStatus = statusUpper;
+      application.pdRemark = trimmedRemark;
+      application.pdUpdatedAt = now;
+      application.pdUpdatedBy = userId;
+    } else if (typeUpper === "QUERY") {
+      oldStatus = application.opsQueryStatus || "NONE";
+      application.opsQueryStatus = statusUpper;
+      application.opsQueryRemark = trimmedRemark;
+      application.opsQueryUpdatedAt = now;
+      application.opsQueryUpdatedBy = userId;
+    } else if (typeUpper === "LEGAL") {
+      oldStatus = application.legalStatus || "NOT_INITIATED";
+      application.legalStatus = statusUpper;
+      application.legalRemark = trimmedRemark;
+      application.legalUpdatedAt = now;
+      application.legalUpdatedBy = userId;
+    } else if (typeUpper === "TECHNICAL") {
+      oldStatus = application.technicalStatus || "NOT_INITIATED";
+      application.technicalStatus = statusUpper;
+      application.technicalRemark = trimmedRemark;
+      application.technicalUpdatedAt = now;
+      application.technicalUpdatedBy = userId;
+    } else if (typeUpper === "PDD") {
+      oldStatus = application.pddStatus || "PENDING";
+      application.pddStatus = statusUpper;
+      application.pddRemark = trimmedRemark;
+      application.pddUpdatedAt = now;
+      application.pddUpdatedBy = userId;
+    } else if (typeUpper === "OTC") {
+      oldStatus = application.otcStatus || "PENDING";
+      application.otcStatus = statusUpper;
+      application.otcRemark = trimmedRemark;
+      application.otcUpdatedAt = now;
+      application.otcUpdatedBy = userId;
+    } else if (typeUpper === "DISBURSED" || statusUpper === "DISBURSED") {
+      // CRITICAL BUSINESS RULE: Both PDD and OTC must be RESOLVED!
+      const pddResolved = (application.pddStatus || "").toUpperCase() === "RESOLVED";
+      const otcResolved = (application.otcStatus || "").toUpperCase() === "RESOLVED";
+
+      if (!pddResolved || !otcResolved) {
+        await t.rollback();
+        const blockers = [];
+        if (!pddResolved) blockers.push("PDD is Pending");
+        if (!otcResolved) blockers.push("OTC is Pending");
+        return res.status(400).json({
+          message: `Cannot disburse! Case is 'Pending for Disbursement' (${blockers.join(", ")}). Both PDD and OTC must be Resolved before Final Disbursement.`,
+          blockers,
+        });
+      }
+
+      oldStatus = application.status;
+      newStatus = "DISBURSED";
+      application.status = "DISBURSED";
+      application.disbursedAt = disbursementDate ? new Date(disbursementDate) : now;
+      application.disbursedBy = userId;
+      application.disbursedRemark = trimmedRemark;
+      if (disbursedAmount) {
+        application.disbursedAmount = parseFloat(disbursedAmount);
+      } else if (!application.disbursedAmount) {
+        application.disbursedAmount = application.sanctionedAmount || application.appliedAmount || 0;
+      }
+    } else {
+      // General workflow stage change (DOCS_PENDING, READY_TO_SEND, SUBMITTED_TO_BANK, SANCTIONED, REJECTED)
+      oldStatus = application.status;
+      application.status = statusUpper;
+      if (statusUpper === "SANCTIONED") {
+        if (sanctionedAmount) application.sanctionedAmount = parseFloat(sanctionedAmount);
+        else if (!application.sanctionedAmount) application.sanctionedAmount = application.appliedAmount || 0;
+        if (!application.pddStatus) application.pddStatus = "PENDING";
+        if (!application.otcStatus) application.otcStatus = "PENDING";
+      }
+      if (statusUpper === "REJECTED") {
+        application.rejectionReason = rejectionReason || trimmedRemark;
+      }
+    }
+
+    application.lastOpsRemark = trimmedRemark;
+    application.lastOpsUpdatedAt = now;
+    application.lastOpsUpdatedBy = userId;
+
+    await application.save({ transaction: t });
+
+    // Save to OperationStatusHistory
+    const historyRecord = await OperationStatusHistory.create(
+      {
+        companyId: application.companyId,
+        applicationId: application.id,
+        leadId: application.leadId,
+        statusType: typeUpper,
+        oldStatus: oldStatus || "NONE",
+        newStatus,
+        remark: trimmedRemark,
+        updatedBy: userId,
+      },
+      { transaction: t }
+    );
+
+    // Sync Lead status if relevant
+    if (application.leadId) {
+      const lead = await Lead.findByPk(application.leadId, { transaction: t });
+      if (lead) {
+        if (newStatus === "DISBURSED") await lead.update({ status: "DISBURSED" }, { transaction: t });
+        else if (newStatus === "SANCTIONED") await lead.update({ status: "SANCTIONED" }, { transaction: t });
+        else if (newStatus === "REJECTED") await lead.update({ status: "REJECTED" }, { transaction: t });
+      }
+    }
+
+    // Log Activity
+    await logActivity(
+      req,
+      {
+        recordType: "Application",
+        recordId: application.id,
+        action: `OPS_${typeUpper}_${newStatus}`,
+        oldValue: { [typeUpper]: oldStatus },
+        newValue: { [typeUpper]: newStatus },
+        remarks: `[${typeUpper}] ${oldStatus || "—"} → ${newStatus} | Remark: ${trimmedRemark}`,
+      },
+      t
+    );
+
+    await t.commit();
+
+    // If application is marked DISBURSED, sync case payouts
+    if (newStatus === "DISBURSED") {
+      try {
+        const { autoSyncDisbursedCases } = require("./casePayoutController");
+        await autoSyncDisbursedCases(application.companyId);
+      } catch (e) {
+        console.error("[applicationController] autoSync error:", e.message);
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: `${typeUpper} status updated to ${newStatus}`,
+      application,
+      history: historyRecord,
+    });
+  } catch (error) {
+    await t.rollback();
+    next(error);
+  }
+};
+
+/**
+ * @desc    Get complete audit timeline & status history for an application
+ * @route   GET /api/applications/:id/history
+ */
+const getApplicationHistory = async (req, res, next) => {
+  try {
+    const application = await Application.findByPk(req.params.id);
+    if (!application || !belongsToScope(req, application)) {
+      return res.status(404).json({ message: "Application not found" });
+    }
+
+    const history = await OperationStatusHistory.findAll({
+      where: {
+        applicationId: application.id,
+        companyId: getCompanyId(req),
+      },
+      include: [
+        {
+          model: User,
+          as: "updater",
+          attributes: ["id", "name", "email", "role"],
+        },
+      ],
+      order: [["createdAt", "DESC"]],
+    });
+
+    return res.json({
+      success: true,
+      applicationId: application.id,
+      applicationNumber: application.applicationNumber,
+      history,
     });
   } catch (error) {
     next(error);
@@ -786,10 +1314,35 @@ const sendApplicationToBank = async (req, res, next) => {
       });
     }
 
+    const baseUrl = getPublicApiBaseUrl(req);
+    const zipDownloadUrl = `${baseUrl}/api/public/documents/application/${application.id}/download-all`;
+
     const attachments = attachedDocs.map((doc) => ({
       filename: `${doc.docType.replace(/\s+/g, "_")}_${doc.fileName}`,
       fileUrl: doc.fileUrl,
     }));
+
+    // Enriched document items with direct, public download links
+    const docItemsHtml = attachedDocs
+      .map((doc) => {
+        const downloadUrl = `${baseUrl}/api/public/documents/${doc.id}/download`;
+        const viewUrl = `${baseUrl}/api/public/documents/${doc.id}/view`;
+        return `
+          <tr style="border-bottom: 1px solid #e2e8f0;">
+            <td style="padding: 10px 14px; font-weight: 600; color: #1e293b; font-size: 13px;">
+              ${doc.docType}
+            </td>
+            <td style="padding: 10px 14px; color: #475569; font-size: 12.5px;">
+              ${doc.fileName}
+            </td>
+            <td style="padding: 10px 14px; text-align: right; white-space: nowrap;">
+              <a href="${downloadUrl}" style="display: inline-block; padding: 5px 12px; background: #0284c7; color: #ffffff; text-decoration: none; border-radius: 6px; font-size: 12px; font-weight: 600; margin-right: 6px;">📥 Download</a>
+              <a href="${viewUrl}" target="_blank" style="display: inline-block; padding: 5px 10px; background: #f1f5f9; color: #334155; text-decoration: none; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 12px; font-weight: 500;">👁 View</a>
+            </td>
+          </tr>
+        `;
+      })
+      .join("");
 
     // Send email via emailService
     const mailResult = await sendMail({
@@ -799,8 +1352,8 @@ const sendApplicationToBank = async (req, res, next) => {
       subject: subject.trim(),
       text: content.trim(),
       html: `
-        <div style="font-family: Arial, -apple-system, sans-serif; line-height: 1.6; color: #1e293b; max-width: 650px; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; background: #ffffff;">
-          <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: #ffffff; padding: 22px 28px;">
+        <div style="font-family: Arial, -apple-system, sans-serif; line-height: 1.6; color: #1e293b; max-width: 680px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; background: #ffffff;">
+          <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: #ffffff; padding: 24px 28px;">
             <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #94a3b8; font-weight: 700; margin-bottom: 4px;">Loan Docket Submission</div>
             <h2 style="margin: 0; font-size: 20px; font-weight: 700; color: #ffffff;">${application.loanProduct || "Loan Application"}</h2>
             <p style="margin: 6px 0 0; font-size: 13px; color: #cbd5e1;">Application Ref: <strong>${application.applicationNumber}</strong> • Applied: <strong>₹${Number(application.appliedAmount || 0).toLocaleString("en-IN")}</strong></p>
@@ -809,11 +1362,25 @@ const sendApplicationToBank = async (req, res, next) => {
             <div style="white-space: pre-wrap; font-size: 14px; color: #334155; line-height: 1.65; margin-bottom: 24px;">${content.trim()}</div>
             ${
               attachedDocs.length > 0
-                ? `<div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px 20px; margin-top: 24px;">
-                    <div style="font-size: 13px; font-weight: 700; color: #0f172a; margin-bottom: 10px;">📎 Attached Applicant Documents (${attachedDocs.length})</div>
-                    <ul style="margin: 0; padding-left: 20px; font-size: 12.5px; color: #475569;">
-                      ${attachedDocs.map((d) => `<li style="margin-bottom: 4px;"><strong>${d.docType}:</strong> ${d.fileName}</li>`).join("")}
-                    </ul>
+                ? `<div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 18px 20px; margin-top: 24px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                      <div style="font-size: 13.5px; font-weight: 700; color: #0f172a;">📎 Attached Applicant Documents (${attachedDocs.length})</div>
+                      <a href="${zipDownloadUrl}" style="display: inline-block; padding: 6px 14px; background: #059669; color: #ffffff; text-decoration: none; border-radius: 6px; font-size: 12px; font-weight: 700;">
+                        📦 Download All Docs (ZIP)
+                      </a>
+                    </div>
+                    <table style="width: 100%; border-collapse: collapse; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
+                      <thead>
+                        <tr style="background: #f1f5f9; text-align: left; font-size: 11px; text-transform: uppercase; color: #64748b;">
+                          <th style="padding: 8px 14px;">Doc Type</th>
+                          <th style="padding: 8px 14px;">Filename</th>
+                          <th style="padding: 8px 14px; text-align: right;">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        ${docItemsHtml}
+                      </tbody>
+                    </table>
                   </div>`
                 : ""
             }
@@ -867,6 +1434,8 @@ module.exports = {
   getApplicationById,
   updateApplication,
   updateStatus,
+  updateStageStatus,
+  getApplicationHistory,
   createBankerQuery,
   resolveBankerQuery,
   sendApplicationToBank,

@@ -667,14 +667,36 @@ export default function FollowupWorkScreen() {
                           )}
                         </td>
 
-                        {/* Remarks */}
+                        {/* Remarks with Date & Time */}
                         <td className="py-3.5 px-4 max-w-xs">
                           {item.remarks ? (
-                            <div className="p-2 bg-slate-50 rounded-lg border border-slate-100 text-slate-700 text-xs line-clamp-3">
-                              {item.remarks}
+                            <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200/80 text-slate-800 text-xs shadow-xs">
+                              <div className="font-medium line-clamp-3 leading-relaxed">
+                                "{item.remarks}"
+                              </div>
+                              <div className="mt-1.5 flex items-center justify-between text-[10.5px] text-slate-500 font-medium">
+                                <span className="flex items-center gap-1">
+                                  <Clock className="w-3 h-3 text-slate-400" />
+                                  {formatScheduledTime(item.updatedAt || item.createdAt)}
+                                </span>
+                                {item.owner && (
+                                  <span className="text-emerald-700 font-semibold">
+                                    by {item.owner}
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           ) : (
-                            <span className="text-slate-400 italic">No remark logged yet</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-slate-400 italic text-[11px]">No remark logged yet</span>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEdit(item)}
+                                className="px-2 py-0.5 text-[10.5px] font-semibold rounded bg-indigo-50 text-indigo-600 hover:bg-indigo-100 cursor-pointer"
+                              >
+                                + Add
+                              </button>
+                            </div>
                           )}
                         </td>
 

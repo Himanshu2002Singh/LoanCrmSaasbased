@@ -410,6 +410,12 @@ exports.getDisbursedPayouts = async (req, res) => {
           attributes: ["id", "loanType", "leadSource", "commissionPercent"],
           include: [
             {
+              model: Customer,
+              as: "customer",
+              attributes: ["id", "name", "email", "mobile"],
+              required: false,
+            },
+            {
               model: Application,
               as: "applications",
               attributes: ["id", "applicationNumber", "loanProduct", "sanctionedAmount", "disbursedAmount", "status"],
@@ -1125,4 +1131,256 @@ exports.getInvoiceData = async (req, res) => {
   }
 };
 
+/**
+ * POST /api/payouts/cases
+ * Allows Finance role and Admin to manually create/record a case payout for a lead
+ */
+exports.createCasePayout = async (req, res) => {
+  const t = await sequelize.transaction();
+  try {
+    const companyId = resolveCompanyId(req);
+    const {
+      leadId,
+      customerName,
+      customerMobile,
+      customerEmail,
+      loanProduct,
+      bankName,
+      lenderId,
+      loanAmount,
+      bankCommissionPercent = 2.0,
+      baseAmount,
+      bankGstPercent = 18.0,
+      bankTdsPercent = 5.0,
+      disbursalDate,
+      partyName,
+      partyCode,
+      partyCommissionPercent = 50.0,
+      extraCharges = 0,
+      notes,
+    } = req.body;
+
+    if (!customerName && !leadId) {
+      await t.rollback();
+      return res.status(400).json({ message: "Customer Name or Lead selection is required" });
+    }
+
+    const newLoan = parseFloat(loanAmount || 0);
+    if (isNaN(newLoan) || newLoan <= 0) {
+      await t.rollback();
+      return res.status(400).json({ message: "Valid loan amount is required" });
+    }
+
+    let targetLead = null;
+    let targetCustomer = null;
+
+    if (leadId) {
+      targetLead = await Lead.findOne({
+        where: { id: leadId, companyId },
+        include: [{ model: Customer, as: "customer" }],
+        transaction: t,
+      });
+      if (!targetLead) {
+        await t.rollback();
+        return res.status(404).json({ message: "Selected lead not found" });
+      }
+      targetCustomer = targetLead.customer;
+      if (targetCustomer && (customerEmail || customerMobile || customerName)) {
+        await targetCustomer.update(
+          {
+            name: customerName ? customerName.trim() : targetCustomer.name,
+            mobile: customerMobile ? String(customerMobile).trim() : targetCustomer.mobile,
+            email: customerEmail ? customerEmail.trim() : targetCustomer.email,
+          },
+          { transaction: t }
+        );
+      }
+    } else {
+      // Find or create customer
+      const mobileVal = customerMobile ? String(customerMobile).trim() : `9999${Date.now().toString().slice(-6)}`;
+      targetCustomer = await Customer.create(
+        {
+          companyId,
+          name: customerName ? customerName.trim() : "Customer",
+          mobile: mobileVal,
+          email: customerEmail ? customerEmail.trim() : null,
+        },
+        { transaction: t }
+      );
+
+      targetLead = await Lead.create(
+        {
+          companyId,
+          customerId: targetCustomer.id,
+          loanType: loanProduct || "Personal Loan",
+          leadSource: partyName || "Self",
+          requiredAmount: newLoan,
+          sanctioned_amount: newLoan,
+          bank_name: bankName || "Bank",
+          status: "DISBURSED",
+          priority: "HIGH",
+          commissionPercent: parseFloat(partyCommissionPercent) || 0,
+          createdById: req.user?.id || null,
+        },
+        { transaction: t }
+      );
+    }
+
+    // Check if payout already exists for this lead
+    let payout = await CasePayout.findOne({
+      where: { companyId, leadId: targetLead.id },
+      transaction: t,
+    });
+
+    const newBankPct = parseFloat(bankCommissionPercent || 2.0);
+    let newBase =
+      baseAmount !== undefined && baseAmount !== ""
+        ? parseFloat(baseAmount)
+        : Math.round((newLoan * newBankPct) / 100);
+
+    const newBankGstPct = parseFloat(bankGstPercent ?? 18.0);
+    const newBankGstAmt = Math.round((newBase * newBankGstPct) / 100);
+    const newBankTdsPct = parseFloat(bankTdsPercent ?? 5.0);
+    const newBankTdsAmt = Math.round((newBase * newBankTdsPct) / 100);
+
+    const bankNetReceivable = Math.max(0, newBase - newBankGstAmt - newBankTdsAmt);
+    const bankCommissionDue = bankNetReceivable;
+
+    const effectivePartyName = partyName || targetLead.leadSource || "Self";
+    const isSelf =
+      effectivePartyName.toLowerCase() === "self" || effectivePartyName.toLowerCase() === "direct";
+    const payoutType = isSelf ? "SELF" : "VENDOR";
+
+    let partyCommPct = isSelf ? 0.0 : parseFloat(partyCommissionPercent ?? 50.0);
+    let partyCommDue = isSelf ? 0.0 : Math.round((bankNetReceivable * partyCommPct) / 100);
+    let newExtra = parseFloat(extraCharges || 0);
+    let partyNetPayable = isSelf ? 0.0 : Math.max(0, partyCommDue - newExtra);
+    let netMargin = isSelf
+      ? Math.round(bankNetReceivable - newExtra)
+      : Math.round(bankNetReceivable - partyNetPayable);
+
+    const disbDateVal = disbursalDate ? disbursalDate : new Date().toISOString().slice(0, 10);
+    const custName = customerName ? customerName.trim() : targetCustomer?.name || "Customer";
+    const custMobile = customerMobile ? String(customerMobile).trim() : targetCustomer?.mobile || "—";
+    const loanProd = loanProduct || targetLead.loanType || "Personal Loan";
+    const finalBank = bankName || "Bank";
+
+    if (payout) {
+      await payout.update(
+        {
+          customerName: custName,
+          customerMobile: custMobile,
+          loanProduct: loanProd,
+          bankName: finalBank,
+          lenderId: lenderId || payout.lenderId || null,
+          disbursalDate: disbDateVal,
+          loanAmount: newLoan,
+          baseAmount: newBase,
+          bankCommissionPercent: newBankPct,
+          bankCommissionDue,
+          bankGstPercent: newBankGstPct,
+          bankGstAmount: newBankGstAmt,
+          bankTdsPercent: newBankTdsPct,
+          bankTdsAmount: newBankTdsAmt,
+          bankNetReceivable,
+          bankRemainingDue: Math.max(0, bankCommissionDue - parseFloat(payout.bankReceivedAmount || 0)),
+          payoutType,
+          partyName: effectivePartyName,
+          partyCode: partyCode || payout.partyCode || null,
+          partyCommissionPercent: partyCommPct,
+          partyCommissionDue: partyCommDue,
+          extraCharges: newExtra,
+          partyNetPayable,
+          partyRemainingDue: Math.max(0, partyNetPayable - parseFloat(payout.partyPaidAmount || 0)),
+          netMargin,
+          notes: notes || payout.notes,
+        },
+        { transaction: t }
+      );
+    } else {
+      const currentYear = new Date().getFullYear();
+      const invoiceNumber = `INV-${currentYear}-${String(targetLead.id).padStart(4, "0")}`;
+
+      payout = await CasePayout.create(
+        {
+          companyId,
+          leadId: targetLead.id,
+          customerName: custName,
+          customerMobile: custMobile,
+          loanProduct: loanProd,
+          bankName: finalBank,
+          lenderId: lenderId || null,
+          disbursalDate: disbDateVal,
+          loanAmount: newLoan,
+          baseAmount: newBase,
+          bankCommissionPercent: newBankPct,
+          bankCommissionDue,
+          bankGstPercent: newBankGstPct,
+          bankGstAmount: newBankGstAmt,
+          bankTdsPercent: newBankTdsPct,
+          bankTdsAmount: newBankTdsAmt,
+          bankNetReceivable,
+          bankReceivedAmount: 0.0,
+          bankRemainingDue: bankCommissionDue,
+          payoutType,
+          partyName: effectivePartyName,
+          partyCode: partyCode || null,
+          partyCommissionPercent: partyCommPct,
+          partyCommissionDue: partyCommDue,
+          partyTdsPercent: 0,
+          partyTdsAmount: 0,
+          partyGstPercent: 0,
+          partyGstAmount: 0,
+          extraCharges: newExtra,
+          partyNetPayable,
+          partyPaidAmount: 0.0,
+          partyRemainingDue: partyNetPayable,
+          netMargin,
+          invoiceNumber,
+          invoiceDate: new Date(),
+          status: "PENDING",
+          notes: notes || null,
+        },
+        { transaction: t }
+      );
+    }
+
+    // Keep lead in sync with loan amount, bank, status
+    await targetLead.update(
+      {
+        sanctioned_amount: newLoan,
+        bank_name: finalBank,
+        loanType: loanProd,
+        leadSource: effectivePartyName,
+        commissionPercent: partyCommPct,
+      },
+      { transaction: t }
+    );
+
+    await logActivity(
+      req,
+      {
+        recordType: "CASE_PAYOUT",
+        recordId: payout.id,
+        action: "CREATE_CASE_PAYOUT",
+        remarks: `Recorded case payout of ₹${newLoan.toLocaleString("en-IN")} for ${custName} (${finalBank})`,
+      },
+      t
+    );
+
+    await t.commit();
+
+    return res.status(201).json({
+      success: true,
+      message: "Case payout recorded successfully",
+      data: payout,
+    });
+  } catch (error) {
+    await t.rollback();
+    console.error("[casePayoutController] createCasePayout error:", error);
+    return res.status(500).json({ message: "Failed to record case payout", error: error.message });
+  }
+};
+
 exports.autoSyncDisbursedCases = autoSyncDisbursedCases;
+

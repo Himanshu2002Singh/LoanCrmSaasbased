@@ -11,7 +11,7 @@ const { ROLES } = require("../constants/roles");
  * Calculate effective permissions for all primary roles given company role overrides
  */
 const buildEffectiveRolePermissions = (companyRolePermissions = {}) => {
-  const roles = [ROLES.MANAGER, ROLES.OPS, ROLES.EMPLOYEE, ROLES.BANKER];
+  const roles = [ROLES.MANAGER, ROLES.OPS, ROLES.FINANCE, ROLES.EMPLOYEE, ROLES.BANKER];
   const effective = {};
 
   for (const r of roles) {

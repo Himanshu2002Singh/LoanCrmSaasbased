@@ -199,4 +199,60 @@ exports.changePassword = async (req, res) => {
   }
 };
 
+/**
+ * PUT /api/auth/profile - user updates their own profile details (name, email, phone)
+ */
+exports.updateProfile = async (req, res) => {
+  try {
+    const user = await User.findByPk(req.user.id, {
+      include: [
+        { model: Company, as: "company", required: false },
+        { model: Branch, as: "branch", required: false },
+      ],
+    });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const { name, phone, email } = req.body;
+    const updates = {};
+    if (name && typeof name === "string" && name.trim()) {
+      updates.name = name.trim();
+    }
+    if (phone !== undefined) {
+      updates.phone = typeof phone === "string" ? phone.trim() : phone;
+    }
+    if (email && typeof email === "string" && email.trim() && email.trim().toLowerCase() !== user.email?.toLowerCase()) {
+      const emailTrimmed = email.trim().toLowerCase();
+      const existing = await User.findOne({
+        where: { email: emailTrimmed, id: { [Op.ne]: user.id } },
+      });
+      if (existing) {
+        return res.status(409).json({ message: "Email is already in use by another account" });
+      }
+      updates.email = emailTrimmed;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await user.update(updates);
+    }
+
+    await logActivity(req, {
+      recordType: "User",
+      recordId: user.id,
+      action: "UPDATED",
+      remarks: "Updated own profile details",
+    });
+
+    return res.status(200).json({
+      message: "Profile updated successfully",
+      user: publicUser(user),
+    });
+  } catch (error) {
+    console.error("[auth] updateProfile error:", error);
+    return res.status(500).json({ message: "Internal Server Error", error: error.message });
+  }
+};
+
 exports.publicUser = publicUser;
+

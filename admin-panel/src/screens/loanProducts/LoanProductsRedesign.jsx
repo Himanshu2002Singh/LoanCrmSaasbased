@@ -36,6 +36,19 @@ const emptyForm = () => ({
 });
 
 export default function LoanProductsRedesign() {
+  const userRole = localStorage.getItem("userRole") || "";
+  const isCompanyAdmin = userRole === "COMPANY_ADMIN" || userRole === "SUPERADMIN";
+  const userPermissions = useMemo(() => {
+    try {
+      const stored = localStorage.getItem("userPermissions");
+      return stored ? JSON.parse(stored) : {};
+    } catch {
+      return {};
+    }
+  }, []);
+  const canManage = isCompanyAdmin || Boolean(userPermissions.manageLoanProducts || userPermissions.manageSettings);
+  const canDelete = isCompanyAdmin || Boolean(userPermissions.manageLoanProducts || userPermissions.manageSettings || userPermissions.deleteRecords);
+
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -74,6 +87,10 @@ export default function LoanProductsRedesign() {
   }, [searchTerm]);
 
   const openCreate = () => {
+    if (!canManage) {
+      toast.error("You do not have permission to add loan products");
+      return;
+    }
     setEditing(null);
     const nextOrder = products.length > 0 
       ? Math.max(...products.map(p => p.orderIndex || 0)) + 10 
@@ -86,6 +103,10 @@ export default function LoanProductsRedesign() {
   };
 
   const openEdit = (product) => {
+    if (!canManage) {
+      toast.error("You do not have permission to edit loan products");
+      return;
+    }
     setEditing(product);
     setForm({
       label: product.label || "",
@@ -137,6 +158,10 @@ export default function LoanProductsRedesign() {
   };
 
   const handleToggleActive = async (product) => {
+    if (!canManage) {
+      toast.error("You do not have permission to modify loan products");
+      return;
+    }
     try {
       await axios.put(`${API_URL}/master-configs/${product.id}`, {
         isActive: !product.isActive,
@@ -157,6 +182,10 @@ export default function LoanProductsRedesign() {
 
   const handleDelete = async (hard = true) => {
     if (!deleteTarget) return;
+    if (!canDelete) {
+      toast.error("You do not have permission to delete loan products");
+      return;
+    }
     setDeleting(true);
     try {
       await axios.delete(`${API_URL}/master-configs/${deleteTarget.id}${hard ? "?hard=true" : ""}`);

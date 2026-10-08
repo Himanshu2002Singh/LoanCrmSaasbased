@@ -43,6 +43,8 @@ import {
   X,
   XCircle,
   Link,
+  Download,
+  RotateCcw,
 } from "lucide-react";
 import API_URL from "../../config";
 import LeadDocumentRequestModal from "../leads/LeadDocumentRequestModal";
@@ -89,14 +91,367 @@ const renderStatusBadge = (status) => {
 };
 
 const PIPELINE_STAGES = [
-  { key: "DOCS_PENDING", label: "Docs Pending", color: "#b45309", bg: "#fef3c7", border: "#fde68a" },
-  { key: "UNDER_VERIFICATION", label: "Under Verification", color: "#0369a1", bg: "#e0f2fe", border: "#bae6fd" },
-  { key: "SUBMITTED_TO_BANK", label: "Submitted to Bank", color: "#4338ca", bg: "#e0e7ff", border: "#c7d2fe" },
-  { key: "QUERY_RAISED", label: "Query Raised", color: "#be123c", bg: "#fff1f2", border: "#fecdd3" },
-  { key: "SANCTIONED", label: "Sanctioned", color: "#15803d", bg: "#f0fdf4", border: "#bbf7d0" },
-  { key: "DISBURSED", label: "Disbursed", color: "#047857", bg: "#ecfdf5", border: "#a7f3d0" },
+  { key: "DOCS_PENDING", label: "1. Docs Pending", color: "#b45309", bg: "#fef3c7", border: "#fde68a" },
+  { key: "READY_TO_SEND", label: "2. Ready to Send", color: "#4f46e5", bg: "#eef2ff", border: "#c7d2fe" },
+  { key: "SUBMITTED_TO_BANK", label: "3. Submitted to Bank", color: "#0369a1", bg: "#e0f2fe", border: "#bae6fd" },
+  { key: "PD", label: "4. PD Status", color: "#6366f1", bg: "#eef2ff", border: "#c7d2fe" },
+  { key: "QUERY", label: "5. Banker Query", color: "#e11d48", bg: "#ffe4e6", border: "#fecdd3" },
+  { key: "LEGAL", label: "6. Legal", color: "#7c3aed", bg: "#f5f3ff", border: "#ddd6fe" },
+  { key: "TECHNICAL", label: "7. Technical", color: "#0891b2", bg: "#ecfeff", border: "#a5f3fc" },
+  { key: "SANCTIONED", label: "8. Sanctioned", color: "#15803d", bg: "#f0fdf4", border: "#bbf7d0" },
+  { key: "PDD", label: "9. PDD", color: "#d97706", bg: "#fffbeb", border: "#fde68a" },
+  { key: "OTC", label: "10. OTC", color: "#ea580c", bg: "#fff7ed", border: "#ffedd5" },
+  { key: "DISBURSED", label: "11. Final Disbursed", color: "#047857", bg: "#ecfdf5", border: "#a7f3d0" },
   { key: "REJECTED", label: "Rejected", color: "#b91c1c", bg: "#fef2f2", border: "#fecaca" },
 ];
+
+const renderOpsStatusCell = ({
+  status,
+  updatedAt,
+  remark,
+  onClick,
+  pendingText = "Pending",
+  completedText = "Completed",
+}) => {
+  const stUpper = String(status || "").toUpperCase();
+  const isDone = stUpper === "COMPLETED" || stUpper === "RESOLVED";
+  const isInit = stUpper === "INITIATED";
+  const isRej = stUpper === "REJECTED";
+  const isPend = stUpper === "PENDING";
+  const isNone = !status || stUpper === "NONE" || stUpper === "NO_QUERY" || stUpper === "NOT_STARTED";
+
+  let badgeClass = "pending";
+  let label = isDone ? `${completedText} ✓` : isInit ? "Initiated ⚡" : isRej ? "Rejected ❌" : isPend ? `${pendingText} ⏳` : "— Update";
+  if (isDone) badgeClass = "resolved";
+  else if (isInit) badgeClass = "initiated";
+  else if (isRej) badgeClass = "rejected";
+  else if (isNone) {
+    badgeClass = "not-started";
+    label = "Update";
+  }
+
+  return (
+    <td
+      onClick={(e) => {
+        e.stopPropagation();
+        if (onClick) onClick();
+      }}
+      className="cc-ops-clickable-status-td"
+      title="Click to update status and remark"
+    >
+      <div className="cc-ops-status-cell-inner">
+        <span className={`cc-substatus-pill ${badgeClass}`}>
+          <strong>{label}</strong>
+        </span>
+        {updatedAt ? (
+          <div className="cc-status-cell-time">
+            <Clock size={10} />
+            <span>
+              {new Date(updatedAt).toLocaleDateString("en-IN", {
+                day: "2-digit",
+                month: "short",
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: true,
+              })}
+            </span>
+          </div>
+        ) : null}
+        {remark ? (
+          <div className="cc-status-cell-remark" title={remark}>
+            "{remark.length > 22 ? remark.slice(0, 22) + "…" : remark}"
+          </div>
+        ) : null}
+      </div>
+    </td>
+  );
+};
+
+function MultiSelectDropdown({
+  label,
+  icon: Icon,
+  options = [],
+  selectedValues = [],
+  onChange,
+  searchPlaceholder = "Search...",
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const dropdownRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setIsOpen(false);
+      }
+    };
+    if (isOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isOpen]);
+
+  const filteredOptions = useMemo(() => {
+    if (!query.trim()) return options;
+    const q = query.toLowerCase();
+    return options.filter(
+      (opt) =>
+        (opt.label || "").toLowerCase().includes(q) ||
+        (opt.subtitle || "").toLowerCase().includes(q)
+    );
+  }, [options, query]);
+
+  const toggleOption = (val) => {
+    const exists = selectedValues.includes(val);
+    let next;
+    if (exists) {
+      next = selectedValues.filter((v) => v !== val);
+    } else {
+      next = [...selectedValues, val];
+    }
+    onChange(next);
+  };
+
+  const clearSelection = (e) => {
+    e.stopPropagation();
+    onChange([]);
+  };
+
+  const hasSelection = selectedValues.length > 0;
+
+  const summaryLabel = useMemo(() => {
+    if (!hasSelection) return `All ${label}`;
+    if (selectedValues.length === 1) {
+      const match = options.find((o) => o.value === selectedValues[0]);
+      return match ? match.label : `1 ${label}`;
+    }
+    return `${selectedValues.length} ${label}s`;
+  }, [hasSelection, selectedValues, options, label]);
+
+  return (
+    <div className="cc-ops-multiselect" ref={dropdownRef}>
+      <button
+        type="button"
+        className={`cc-ops-multiselect-btn ${hasSelection ? "active" : ""}`}
+        onClick={() => setIsOpen((prev) => !prev)}
+        title={`Filter by ${label}`}
+      >
+        {Icon && <Icon size={13} className="cc-multiselect-icon" />}
+        <span className="cc-multiselect-label">{summaryLabel}</span>
+        {hasSelection ? (
+          <span
+            className="cc-multiselect-badge"
+            onClick={clearSelection}
+            title="Clear selection"
+          >
+            {selectedValues.length} <X size={10} />
+          </span>
+        ) : (
+          <span className="cc-multiselect-chevron">▾</span>
+        )}
+      </button>
+
+      {isOpen && (
+        <div className="cc-ops-multiselect-menu">
+          <div className="cc-ops-multiselect-search">
+            <Search size={13} />
+            <input
+              type="text"
+              autoFocus
+              placeholder={searchPlaceholder}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            {query && (
+              <button type="button" onClick={() => setQuery("")}>
+                <X size={12} />
+              </button>
+            )}
+          </div>
+
+          <div className="cc-ops-multiselect-actions">
+            <button
+              type="button"
+              onClick={() => onChange(options.map((o) => o.value))}
+            >
+              Select All
+            </button>
+            <button type="button" onClick={() => onChange([])}>
+              Clear
+            </button>
+          </div>
+
+          <div className="cc-ops-multiselect-list">
+            {filteredOptions.length === 0 ? (
+              <div className="cc-ops-multiselect-empty">No options found</div>
+            ) : (
+              filteredOptions.map((opt) => {
+                const isChecked = selectedValues.includes(opt.value);
+                return (
+                  <label
+                    key={opt.value}
+                    className={`cc-ops-multiselect-item ${isChecked ? "checked" : ""}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => toggleOption(opt.value)}
+                    />
+                    <div className="cc-ops-multiselect-item-content">
+                      <span className="cc-ops-multiselect-item-text">
+                        {opt.label}
+                      </span>
+                      {opt.subtitle && (
+                        <span className="cc-ops-multiselect-item-sub">
+                          {opt.subtitle}
+                        </span>
+                      )}
+                    </div>
+                  </label>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const renderWorkflowStageBadge = (app) => {
+  const s = String(app.status || "DOCS_PENDING").toUpperCase();
+  const isPddPending = (app.pddStatus || "PENDING").toUpperCase() === "PENDING";
+  const isOtcPending = (app.otcStatus || "PENDING").toUpperCase() === "PENDING";
+
+  if (s === "DISBURSED") {
+    return (
+      <span className="cc-ops-status-tag completed-green" title="Final Loan Disbursed">
+        <CheckCircle2 size={13} /> Disbursed
+      </span>
+    );
+  }
+  if (s === "REJECTED" || s === "CANCELLED") {
+    return (
+      <span className="cc-ops-status-tag rejected" title={app.rejectionReason || "Application Rejected"}>
+        <XCircle size={13} /> Rejected
+      </span>
+    );
+  }
+  if (s === "SANCTIONED" || s === "APPROVED") {
+    if (isPddPending || isOtcPending) {
+      return (
+        <span className="cc-ops-status-tag pending-amber" title="Sanctioned - Pending PDD/OTC Resolution">
+          <Clock size={12} /> Pending for Disbursement
+        </span>
+      );
+    }
+    return (
+      <span className="cc-ops-status-tag ready-green" title="PDD & OTC Resolved - Ready to Disburse">
+        <CheckCircle2 size={13} /> Ready to Disburse
+      </span>
+    );
+  }
+  if (app.technicalStatus === "INITIATED") {
+    return (
+      <span className="cc-ops-status-tag info-blue" title="Technical Inspection / Verification in Progress">
+        <Clock size={12} /> Technical: Initiated
+      </span>
+    );
+  }
+  if (app.legalStatus === "INITIATED") {
+    return (
+      <span className="cc-ops-status-tag info-blue" title="Legal Title Verification in Progress">
+        <Clock size={12} /> Legal: Initiated
+      </span>
+    );
+  }
+  if (s === "SUBMITTED_TO_BANK" || s === "UNDER_REVIEW") {
+    return (
+      <span className="cc-ops-status-tag info-blue" title="Submitted to Bank Partner">
+        <Send size={12} /> Submitted to Bank
+      </span>
+    );
+  }
+  if (s === "READY_TO_SEND" || s === "LOGGED_IN") {
+    return (
+      <span className="cc-ops-status-tag ready-purple" title="Ready to Send / Logged In">
+        <FileCheck size={12} /> Ready to Send
+      </span>
+    );
+  }
+  return (
+    <span className="cc-ops-status-tag pending-amber" title="Documents Pending">
+      <Clock size={12} /> Documents Pending
+    </span>
+  );
+};
+
+const renderStagePendingNotice = (app) => {
+  const s = String(app.status || "DOCS_PENDING").toUpperCase();
+  const isPddPending = (app.pddStatus || "PENDING").toUpperCase() === "PENDING";
+  const isOtcPending = (app.otcStatus || "PENDING").toUpperCase() === "PENDING";
+
+  if (s === "DISBURSED") return null;
+
+  if (s === "SANCTIONED" || s === "APPROVED") {
+    if (isPddPending && isOtcPending) {
+      return (
+        <div className="cc-stage-stuck-notice warning">
+          ⚠️ Case is currently pending for PDD &amp; OTC resolution.
+        </div>
+      );
+    }
+    if (isPddPending) {
+      return (
+        <div className="cc-stage-stuck-notice warning">
+          ⚠️ Case is currently pending for PDD resolution.
+        </div>
+      );
+    }
+    if (isOtcPending) {
+      return (
+        <div className="cc-stage-stuck-notice warning">
+          ⚠️ Case is currently pending for OTC completion.
+        </div>
+      );
+    }
+    return (
+      <div className="cc-stage-stuck-notice success">
+        ✓ PDD &amp; OTC Resolved. Case is eligible for Final Disbursement.
+      </div>
+    );
+  }
+
+  if (app.legalStatus === "INITIATED") {
+    return (
+      <div className="cc-stage-stuck-notice info">
+        ℹ️ Case is currently pending at Legal verification.
+      </div>
+    );
+  }
+  if (app.technicalStatus === "INITIATED") {
+    return (
+      <div className="cc-stage-stuck-notice info">
+        ℹ️ Case is currently pending at Technical inspection.
+      </div>
+    );
+  }
+  if (s === "SUBMITTED_TO_BANK") {
+    return (
+      <div className="cc-stage-stuck-notice neutral">
+        🏛️ Awaiting underwriting decision from {app.lender?.name || "Bank"}.
+      </div>
+    );
+  }
+  if (s === "DOCS_PENDING") {
+    return (
+      <div className="cc-stage-stuck-notice neutral">
+        📄 Pending customer KYC &amp; income documents.
+      </div>
+    );
+  }
+  return null;
+};
 
 export default function OperationsRedesign() {
   const navigate = useNavigate();
@@ -126,6 +481,64 @@ export default function OperationsRedesign() {
   const [selectedMonth, setSelectedMonth] = useState("");
   const [selectedFY, setSelectedFY] = useState("");
   const [selectedLenderFilter, setSelectedLenderFilter] = useState("ALL");
+
+  // Advanced Operations Combined Filters
+  const [employees, setEmployees] = useState([]);
+  const [associationsList, setAssociationsList] = useState([]);
+  const [selectedEmployees, setSelectedEmployees] = useState([]);
+  const [selectedDSAs, setSelectedDSAs] = useState([]);
+  const [selectedBanks, setSelectedBanks] = useState([]);
+  const [selectedAssociations, setSelectedAssociations] = useState([]);
+  const [selectedStages, setSelectedStages] = useState([]);
+
+  // Sub-status Popups State
+  // 0a. PD Status Modal
+  const [pdModalApp, setPdModalApp] = useState(null);
+  const [pdStatusInput, setPdStatusInput] = useState("PENDING");
+  const [pdRemarkInput, setPdRemarkInput] = useState("");
+  const [pdSubmitting, setPdSubmitting] = useState(false);
+
+  // 0b. Banker Query Modal
+  const [queryModalApp, setQueryModalApp] = useState(null);
+  const [queryStatusInput, setQueryStatusInput] = useState("PENDING");
+  const [queryRemarkInput, setQueryRemarkInput] = useState("");
+  const [querySubmitting, setQuerySubmitting] = useState(false);
+
+  // 1. Legal Modal
+  const [legalModalApp, setLegalModalApp] = useState(null);
+  const [legalStatusInput, setLegalStatusInput] = useState("INITIATED");
+  const [legalRemarkInput, setLegalRemarkInput] = useState("");
+  const [legalSubmitting, setLegalSubmitting] = useState(false);
+
+  // 2. Technical Modal
+  const [technicalModalApp, setTechnicalModalApp] = useState(null);
+  const [technicalStatusInput, setTechnicalStatusInput] = useState("INITIATED");
+  const [technicalRemarkInput, setTechnicalRemarkInput] = useState("");
+  const [technicalSubmitting, setTechnicalSubmitting] = useState(false);
+
+  // 3. PDD Modal
+  const [pddModalApp, setPddModalApp] = useState(null);
+  const [pddStatusInput, setPddStatusInput] = useState("PENDING");
+  const [pddRemarkInput, setPddRemarkInput] = useState("");
+  const [pddSubmitting, setPddSubmitting] = useState(false);
+
+  // 4. OTC Modal
+  const [otcModalApp, setOtcModalApp] = useState(null);
+  const [otcStatusInput, setOtcStatusInput] = useState("PENDING");
+  const [otcRemarkInput, setOtcRemarkInput] = useState("");
+  const [otcSubmitting, setOtcSubmitting] = useState(false);
+
+  // 5. General Stage Modal
+  const [stageModalApp, setStageModalApp] = useState(null);
+  const [stageTargetInput, setStageTargetInput] = useState("DOCS_PENDING");
+  const [stageRemarkInput, setStageRemarkInput] = useState("");
+  const [stageSanctionedAmtInput, setStageSanctionedAmtInput] = useState("");
+  const [stageSubmitting, setStageSubmitting] = useState(false);
+
+  // 6. History / Timeline Modal
+  const [historyModalApp, setHistoryModalApp] = useState(null);
+  const [historyTimeline, setHistoryTimeline] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   // Applications & Pipeline State
   const [applications, setApplications] = useState([]);
@@ -246,22 +659,122 @@ export default function OperationsRedesign() {
   // Fetch Auxiliary Lenders, Bankers, and Master Document Types
   const fetchAuxData = async () => {
     try {
-      const [lenderRes, bankerRes, docTypeRes] = await Promise.all([
+      const [lenderRes, bankerRes, docTypeRes, usersRes, leadSrcRes] = await Promise.all([
         axios.get(`${API_URL}/lenders`, { params: { includeInactive: false } }),
         axios.get(`${API_URL}/users`, { params: { role: "BANKER", limit: 100 } }),
         axios.get(`${API_URL}/master-configs/DOC_TYPE`, { params: { includeInactive: false } }).catch(() => ({ data: { data: [] } })),
+        axios.get(`${API_URL}/users`, { params: { limit: 200 } }).catch(() => ({ data: { users: [] } })),
+        axios.get(`${API_URL}/master-configs/LEAD_SOURCE`, { params: { includeInactive: false } }).catch(() => ({ data: { data: [] } })),
       ]);
-      setLenders(lenderRes.data?.lenders || lenderRes.data?.data || []);
+      const lenderList = lenderRes.data?.lenders || lenderRes.data?.data || [];
+      setLenders(lenderList);
       setBankers(bankerRes.data?.data || bankerRes.data?.users || []);
       const docTypesList = docTypeRes.data?.data || [];
       setMasterDocTypes(docTypesList);
       if (docTypesList.length > 0) {
         setUploadDocType(docTypesList[0].label || docTypesList[0].value);
       }
+      const userList = usersRes.data?.users || usersRes.data?.data || [];
+      setEmployees(userList);
+      const leadSources = leadSrcRes.data?.data || [];
+      setAssociationsList(leadSources);
     } catch (error) {
       console.error("Error fetching aux data:", error);
     }
   };
+
+  // Bank / NBFC Options (Banks and NBFC partners)
+  const bankOptions = useMemo(() => {
+    return lenders
+      .filter((l) => l.lenderType !== "DSA")
+      .map((l) => ({
+        value: String(l.id || l.lender_id),
+        label: l.name,
+        subtitle: l.shortCode || l.lenderType || "Bank Partner",
+      }));
+  }, [lenders]);
+
+  // DSA Options (Lenders of type DSA + LEAD_SOURCE entries mentioning DSA/Partner/Finance)
+  const dsaOptions = useMemo(() => {
+    const list = new Map();
+    lenders.forEach((l) => {
+      if (l.lenderType === "DSA" || (l.name || "").toLowerCase().includes("dsa")) {
+        list.set(l.name, { value: l.name, label: l.name, subtitle: "DSA Partner" });
+      }
+    });
+    associationsList.forEach((a) => {
+      const val = a.value || a.label;
+      const lbl = a.label || a.value;
+      if (
+        (lbl || "").toLowerCase().includes("dsa") ||
+        (lbl || "").toLowerCase().includes("finance") ||
+        (lbl || "").toLowerCase().includes("consultan") ||
+        (lbl || "").toLowerCase().includes("partner")
+      ) {
+        if (!list.has(val)) {
+          list.set(val, { value: val, label: lbl, subtitle: "Sourcing Channel" });
+        }
+      }
+    });
+    if (list.size === 0) {
+      ["DSA Partner", "Sharma & Associates (DSA)", "Pooja Finance", "ABC Finance"].forEach((d) => {
+        list.set(d, { value: d, label: d, subtitle: "Channel Partner" });
+      });
+    }
+    return Array.from(list.values());
+  }, [lenders, associationsList]);
+
+  // Association Options
+  const associationOptions = useMemo(() => {
+    if (associationsList.length > 0) {
+      return associationsList.map((a) => ({
+        value: a.value || a.label,
+        label: a.label || a.value,
+        subtitle: a.code || undefined,
+      }));
+    }
+    return [
+      { value: "Direct Walkin", label: "Self / Direct Walkin" },
+      { value: "DSA Partner", label: "DSA Direct Partner" },
+      { value: "Sharma DSA", label: "Sharma & Associates (DSA)" },
+      { value: "Pooja Finance", label: "Pooja Financial Consultancy" },
+      { value: "FinTech Connect", label: "FinTech Connectors Network" },
+      { value: "Bank Referral", label: "Bank Referral Channel" },
+      { value: "Online", label: "Website / Online Ads" },
+    ];
+  }, [associationsList]);
+
+  // Employee Options
+  const employeeOptions = useMemo(() => {
+    return employees.map((u) => ({
+      value: String(u.id),
+      label: u.name,
+      subtitle: u.role || (u.branch?.name ? `Branch: ${u.branch.name}` : undefined),
+    }));
+  }, [employees]);
+
+  // Status / Workflow Stage Options
+  const stageOptions = useMemo(() => [
+    { value: "DOCS_PENDING", label: "1. Documents Pending" },
+    { value: "READY_TO_SEND", label: "2. Ready to Send / Logged In" },
+    { value: "SUBMITTED_TO_BANK", label: "3. Submitted to Bank" },
+    { value: "PD_PENDING", label: "4. PD - Pending" },
+    { value: "PD_COMPLETED", label: "4. PD - Completed" },
+    { value: "QUERY_PENDING", label: "5. Query - Pending" },
+    { value: "QUERY_COMPLETED", label: "5. Query - Completed" },
+    { value: "LEGAL_INITIATED", label: "6. Legal - Initiated" },
+    { value: "LEGAL_RESOLVED", label: "6. Legal - Resolved" },
+    { value: "TECHNICAL_INITIATED", label: "7. Technical - Initiated" },
+    { value: "TECHNICAL_RESOLVED", label: "7. Technical - Resolved" },
+    { value: "SANCTIONED", label: "8. Sanctioned" },
+    { value: "PDD_PENDING", label: "9. PDD - Pending" },
+    { value: "PDD_RESOLVED", label: "9. PDD - Resolved" },
+    { value: "OTC_PENDING", label: "10. OTC - Pending" },
+    { value: "OTC_RESOLVED", label: "10. OTC - Resolved" },
+    { value: "PENDING_DISBURSEMENT", label: "⏳ Pending for Disbursement" },
+    { value: "DISBURSED", label: "11. Final Disbursed" },
+    { value: "REJECTED", label: "❌ Rejected" },
+  ], []);
 
   // Fetch Open Banker Queries
   const fetchOpenQueries = async () => {
@@ -278,7 +791,7 @@ export default function OperationsRedesign() {
     }
   };
 
-  // Fetch Applications with all date, month, financial year, and bank filters
+  // Fetch Applications with all combined filters
   const fetchApplications = useCallback(async (page = 1) => {
     setAppsLoading(true);
     try {
@@ -286,7 +799,11 @@ export default function OperationsRedesign() {
         page,
         limit: displayType === "kanban" ? 150 : PAGE_SIZE,
         search: debouncedAppSearch || undefined,
-        status: selectedStageFilter !== "ALL" ? selectedStageFilter : undefined,
+        status: selectedStages.length > 0 ? selectedStages.join(",") : (selectedStageFilter !== "ALL" ? selectedStageFilter : undefined),
+        employeeIds: selectedEmployees.length > 0 ? selectedEmployees.join(",") : undefined,
+        dsaNames: selectedDSAs.length > 0 ? selectedDSAs.join(",") : undefined,
+        bankIds: selectedBanks.length > 0 ? selectedBanks.join(",") : undefined,
+        associations: selectedAssociations.length > 0 ? selectedAssociations.join(",") : undefined,
         lenderId: selectedLenderFilter !== "ALL" ? selectedLenderFilter : undefined,
         fromDate: filterPeriodType === "custom" && customFromDate ? customFromDate : undefined,
         toDate: filterPeriodType === "custom" && customToDate ? customToDate : undefined,
@@ -311,6 +828,11 @@ export default function OperationsRedesign() {
   }, [
     debouncedAppSearch,
     selectedStageFilter,
+    selectedStages,
+    selectedEmployees,
+    selectedDSAs,
+    selectedBanks,
+    selectedAssociations,
     selectedLenderFilter,
     displayType,
     filterPeriodType,
@@ -401,17 +923,40 @@ export default function OperationsRedesign() {
     selectedMonth,
     selectedFY,
     selectedLenderFilter,
+    selectedEmployees,
+    selectedDSAs,
+    selectedBanks,
+    selectedAssociations,
+    selectedStages,
   ]);
 
   const hasActiveFilters = useMemo(() => {
     return (
       filterPeriodType !== "all" ||
       selectedLenderFilter !== "ALL" ||
+      selectedEmployees.length > 0 ||
+      selectedDSAs.length > 0 ||
+      selectedBanks.length > 0 ||
+      selectedAssociations.length > 0 ||
+      selectedStages.length > 0 ||
       (viewMode === "pipeline"
         ? selectedStageFilter !== "ALL" || Boolean(appSearch)
         : leadStatusCategory !== "ALL" || Boolean(leadSearch))
     );
-  }, [filterPeriodType, selectedLenderFilter, viewMode, selectedStageFilter, appSearch, leadStatusCategory, leadSearch]);
+  }, [
+    filterPeriodType,
+    selectedLenderFilter,
+    selectedEmployees,
+    selectedDSAs,
+    selectedBanks,
+    selectedAssociations,
+    selectedStages,
+    viewMode,
+    selectedStageFilter,
+    appSearch,
+    leadStatusCategory,
+    leadSearch,
+  ]);
 
   const resetAllFilters = () => {
     setFilterPeriodType("all");
@@ -420,6 +965,11 @@ export default function OperationsRedesign() {
     setSelectedMonth("");
     setSelectedFY("");
     setSelectedLenderFilter("ALL");
+    setSelectedEmployees([]);
+    setSelectedDSAs([]);
+    setSelectedBanks([]);
+    setSelectedAssociations([]);
+    setSelectedStages([]);
     if (viewMode === "pipeline") {
       setSelectedStageFilter("ALL");
       setAppSearch("");
@@ -464,27 +1014,98 @@ export default function OperationsRedesign() {
           )}
         </label>
 
-        {/* Assigned Bank Filter */}
-        <div className="cc-ops-filter-control">
-          <Building2 size={14} className="cc-filter-icon" />
-          <select
-            value={selectedLenderFilter}
-            onChange={(e) => {
-              setSelectedLenderFilter(e.target.value);
-              setAppCurrentPage(1);
-              setLeadCurrentPage(1);
-            }}
-            className="cc-ops-select"
-            title="Filter by Assigned Bank"
-          >
-            <option value="ALL">🏛️ All Assigned Banks</option>
-            {lenders.map((l) => (
-              <option key={l.id || l.lender_id} value={l.id || l.lender_id}>
-                {l.name} {l.shortCode ? `(${l.shortCode})` : ""}
-              </option>
-            ))}
-          </select>
-        </div>
+        {/* Combined Multi-Select Filters (Pipeline view) */}
+        {isPipeline && (
+          <>
+            {/* 1. Employee Filter */}
+            <MultiSelectDropdown
+              label="Employee"
+              icon={User}
+              options={employeeOptions}
+              selectedValues={selectedEmployees}
+              onChange={(vals) => {
+                setSelectedEmployees(vals);
+                setAppCurrentPage(1);
+              }}
+              searchPlaceholder="Search employees..."
+            />
+
+            {/* 2. DSA Filter */}
+            <MultiSelectDropdown
+              label="DSA"
+              icon={Users}
+              options={dsaOptions}
+              selectedValues={selectedDSAs}
+              onChange={(vals) => {
+                setSelectedDSAs(vals);
+                setAppCurrentPage(1);
+              }}
+              searchPlaceholder="Search DSA partners..."
+            />
+
+            {/* 3. Bank / NBFC Filter */}
+            <MultiSelectDropdown
+              label="Bank / NBFC"
+              icon={Building2}
+              options={bankOptions}
+              selectedValues={selectedBanks}
+              onChange={(vals) => {
+                setSelectedBanks(vals);
+                setAppCurrentPage(1);
+              }}
+              searchPlaceholder="Search Bank or NBFC..."
+            />
+
+            {/* 4. Association Filter */}
+            <MultiSelectDropdown
+              label="Association"
+              icon={Layers}
+              options={associationOptions}
+              selectedValues={selectedAssociations}
+              onChange={(vals) => {
+                setSelectedAssociations(vals);
+                setAppCurrentPage(1);
+              }}
+              searchPlaceholder="Search associations..."
+            />
+
+            {/* 5. Stage Filter */}
+            <MultiSelectDropdown
+              label="Stage"
+              icon={Kanban}
+              options={stageOptions}
+              selectedValues={selectedStages}
+              onChange={(vals) => {
+                setSelectedStages(vals);
+                setAppCurrentPage(1);
+              }}
+              searchPlaceholder="Search workflow stages..."
+            />
+          </>
+        )}
+
+        {/* Assigned Bank Filter for Leads Queue */}
+        {!isPipeline && (
+          <div className="cc-ops-filter-control">
+            <Building2 size={14} className="cc-filter-icon" />
+            <select
+              value={selectedLenderFilter}
+              onChange={(e) => {
+                setSelectedLenderFilter(e.target.value);
+                setLeadCurrentPage(1);
+              }}
+              className="cc-ops-select"
+              title="Filter by Assigned Bank"
+            >
+              <option value="ALL">🏛️ All Assigned Banks</option>
+              {lenders.map((l) => (
+                <option key={l.id || l.lender_id} value={l.id || l.lender_id}>
+                  {l.name} {l.shortCode ? `(${l.shortCode})` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* Time Period Filter Type */}
         <div className="cc-ops-filter-control">
@@ -789,27 +1410,45 @@ export default function OperationsRedesign() {
     setDisburseModalApp(app);
     const defaultAmt = app.disbursedAmount || app.sanctionedAmount || app.appliedAmount || "";
     setDisburseAmountInput(defaultAmt ? String(defaultAmt) : "");
-    setDisburseRemarksInput(`Disbursed via ${app.lender?.name || "Bank Partner"}`);
+    setDisburseRemarksInput("");
   };
 
   const handleConfirmDisburse = async (e) => {
     if (e) e.preventDefault();
     if (!disburseModalApp) return;
+
+    // BUSINESS RULE ENFORCEMENT: Both PDD and OTC must be RESOLVED!
+    const isPddResolved = (disburseModalApp.pddStatus || "").toUpperCase() === "RESOLVED";
+    const isOtcResolved = (disburseModalApp.otcStatus || "").toUpperCase() === "RESOLVED";
+    if (!isPddResolved || !isOtcResolved) {
+      const blockers = [];
+      if (!isPddResolved) blockers.push("PDD is Pending");
+      if (!isOtcResolved) blockers.push("OTC is Pending");
+      toast.error(`Cannot Disburse: Case is Pending for Disbursement (${blockers.join(", ")}). Both PDD and OTC must be Resolved before Final Disbursement.`);
+      return;
+    }
+
     const amt = parseFloat(disburseAmountInput);
     if (isNaN(amt) || amt <= 0) {
       toast.error("Please enter a valid disbursed amount");
       return;
     }
+    const finalRemark = disburseRemarksInput.trim() || `Loan Disbursed - Amount ${currencyFormatter.format(amt)}`;
 
     setDisburseSubmitting(true);
     try {
-      await axios.patch(`${API_URL}/applications/${disburseModalApp.id}/status`, {
+      const res = await axios.put(`${API_URL}/applications/${disburseModalApp.id}/stage-status`, {
+        stageType: "DISBURSED",
         status: "DISBURSED",
         disbursedAmount: amt,
-        remarks: disburseRemarksInput || "Loan successfully disbursed",
+        remark: finalRemark,
       });
 
       toast.success(`Application #${disburseModalApp.applicationNumber} marked as DISBURSED! Payout & Lead synced.`);
+      const updated = res.data?.application;
+      if (updated) {
+        setApplications((prev) => prev.map((a) => (a.id === updated.id ? { ...a, ...updated, status: "DISBURSED" } : a)));
+      }
       setDisburseModalApp(null);
       fetchApplications(appCurrentPage);
 
@@ -828,27 +1467,349 @@ export default function OperationsRedesign() {
     }
   };
 
-  // Transition Application Pipeline Stage
-  const handleStageTransition = async (appId, newStatus) => {
-    if (newStatus === "DISBURSED") {
-      const app = applications.find((a) => a.id === appId) || (verificationApp?.id === appId ? verificationApp : null);
-      if (app) {
-        initiateDisburseModal(app);
-        return;
+  // Sub-status Popups Handlers
+  // 0a. PD Status Modal
+  const openPdModal = (app) => {
+    setPdModalApp(app);
+    setPdStatusInput(app.pdStatus || "PENDING");
+    setPdRemarkInput(app.pdRemark || "");
+  };
+
+  const handlePdSubmit = async (e) => {
+    if (e) e.preventDefault();
+    if (!pdModalApp) return;
+    setPdSubmitting(true);
+    try {
+      const res = await axios.put(`${API_URL}/applications/${pdModalApp.id}/stage-status`, {
+        stageType: "PD",
+        status: pdStatusInput,
+        remark: pdRemarkInput.trim() || undefined,
+      });
+      toast.success(`PD status updated to ${pdStatusInput}!`);
+      const updated = res.data?.application;
+      if (updated) {
+        setApplications((prev) => prev.map((a) => (a.id === updated.id ? { ...a, ...updated, pdStatus: pdStatusInput, pdRemark: pdRemarkInput.trim(), pdUpdatedAt: new Date() } : a)));
       }
+      if (verificationApp && verificationApp.id === pdModalApp.id) {
+        setVerificationApp((prev) => ({
+          ...prev,
+          ...(updated || {}),
+          pdStatus: pdStatusInput,
+          pdRemark: pdRemarkInput.trim(),
+          pdUpdatedAt: new Date(),
+        }));
+      }
+      setPdModalApp(null);
+      fetchApplications(appCurrentPage);
+    } catch (err) {
+      console.error(err);
+      toast.error(err.response?.data?.message || "Failed to update PD status");
+    } finally {
+      setPdSubmitting(false);
+    }
+  };
+
+  // 0b. Banker Query Modal
+  const openQueryModal = (app) => {
+    setQueryModalApp(app);
+    setQueryStatusInput(app.opsQueryStatus === "COMPLETED" ? "COMPLETED" : "PENDING");
+    setQueryRemarkInput(app.opsQueryRemark || "");
+  };
+
+  const handleQuerySubmit = async (e) => {
+    if (e) e.preventDefault();
+    if (!queryModalApp) return;
+    setQuerySubmitting(true);
+    try {
+      const res = await axios.put(`${API_URL}/applications/${queryModalApp.id}/stage-status`, {
+        stageType: "QUERY",
+        status: queryStatusInput,
+        remark: queryRemarkInput.trim() || undefined,
+      });
+      toast.success(`Banker Query status updated to ${queryStatusInput}!`);
+      const updated = res.data?.application;
+      if (updated) {
+        setApplications((prev) => prev.map((a) => (a.id === updated.id ? { ...a, ...updated, opsQueryStatus: queryStatusInput, opsQueryRemark: queryRemarkInput.trim(), opsQueryUpdatedAt: new Date() } : a)));
+      }
+      if (verificationApp && verificationApp.id === queryModalApp.id) {
+        setVerificationApp((prev) => ({
+          ...prev,
+          ...(updated || {}),
+          opsQueryStatus: queryStatusInput,
+          opsQueryRemark: queryRemarkInput.trim(),
+          opsQueryUpdatedAt: new Date(),
+        }));
+      }
+      setQueryModalApp(null);
+      fetchApplications(appCurrentPage);
+    } catch (err) {
+      console.error(err);
+      toast.error(err.response?.data?.message || "Failed to update Query status");
+    } finally {
+      setQuerySubmitting(false);
+    }
+  };
+
+  // 1. Legal Status Modal
+  const openLegalModal = (app) => {
+    setLegalModalApp(app);
+    setLegalStatusInput(app.legalStatus || "INITIATED");
+    setLegalRemarkInput(app.legalRemark || "");
+  };
+
+  const handleLegalSubmit = async (e) => {
+    if (e) e.preventDefault();
+    if (!legalModalApp) return;
+    setLegalSubmitting(true);
+    try {
+      const res = await axios.put(`${API_URL}/applications/${legalModalApp.id}/stage-status`, {
+        stageType: "LEGAL",
+        status: legalStatusInput,
+        remark: legalRemarkInput.trim() || undefined,
+      });
+      toast.success(`Legal status updated to ${legalStatusInput}!`);
+      const updated = res.data?.application;
+      if (updated) {
+        setApplications((prev) => prev.map((a) => (a.id === updated.id ? { ...a, ...updated, legalStatus: legalStatusInput, legalRemark: legalRemarkInput.trim(), legalUpdatedAt: new Date() } : a)));
+      }
+      if (verificationApp && verificationApp.id === legalModalApp.id) {
+        setVerificationApp((prev) => ({
+          ...prev,
+          ...(updated || {}),
+          legalStatus: legalStatusInput,
+          legalRemark: legalRemarkInput.trim(),
+          legalUpdatedAt: new Date(),
+        }));
+      }
+      setLegalModalApp(null);
+      fetchApplications(appCurrentPage);
+    } catch (err) {
+      console.error(err);
+      toast.error(err.response?.data?.message || "Failed to update Legal status");
+    } finally {
+      setLegalSubmitting(false);
+    }
+  };
+
+  // 2. Technical Status Modal
+  const openTechnicalModal = (app) => {
+    setTechnicalModalApp(app);
+    setTechnicalStatusInput(app.technicalStatus || "INITIATED");
+    setTechnicalRemarkInput(app.technicalRemark || "");
+  };
+
+  const handleTechnicalSubmit = async (e) => {
+    if (e) e.preventDefault();
+    if (!technicalModalApp) return;
+    setTechnicalSubmitting(true);
+    try {
+      const res = await axios.put(`${API_URL}/applications/${technicalModalApp.id}/stage-status`, {
+        stageType: "TECHNICAL",
+        status: technicalStatusInput,
+        remark: technicalRemarkInput.trim() || undefined,
+      });
+      toast.success(`Technical status updated to ${technicalStatusInput}!`);
+      const updated = res.data?.application;
+      if (updated) {
+        setApplications((prev) => prev.map((a) => (a.id === updated.id ? { ...a, ...updated, technicalStatus: technicalStatusInput, technicalRemark: technicalRemarkInput.trim(), technicalUpdatedAt: new Date() } : a)));
+      }
+      if (verificationApp && verificationApp.id === technicalModalApp.id) {
+        setVerificationApp((prev) => ({
+          ...prev,
+          ...(updated || {}),
+          technicalStatus: technicalStatusInput,
+          technicalRemark: technicalRemarkInput.trim(),
+          technicalUpdatedAt: new Date(),
+        }));
+      }
+      setTechnicalModalApp(null);
+      fetchApplications(appCurrentPage);
+    } catch (err) {
+      console.error(err);
+      toast.error(err.response?.data?.message || "Failed to update Technical status");
+    } finally {
+      setTechnicalSubmitting(false);
+    }
+  };
+
+  // 3. PDD Status Modal
+  const openPddModal = (app) => {
+    setPddModalApp(app);
+    setPddStatusInput(app.pddStatus || "PENDING");
+    setPddRemarkInput(app.pddRemark || "");
+  };
+
+  const handlePddSubmit = async (e) => {
+    if (e) e.preventDefault();
+    if (!pddModalApp) return;
+    setPddSubmitting(true);
+    try {
+      const res = await axios.put(`${API_URL}/applications/${pddModalApp.id}/stage-status`, {
+        stageType: "PDD",
+        status: pddStatusInput,
+        remark: pddRemarkInput.trim() || undefined,
+      });
+      toast.success(`PDD status updated to ${pddStatusInput}!`);
+      const updated = res.data?.application;
+      if (updated) {
+        setApplications((prev) => prev.map((a) => (a.id === updated.id ? { ...a, ...updated, pddStatus: pddStatusInput, pddRemark: pddRemarkInput.trim(), pddUpdatedAt: new Date() } : a)));
+      }
+      if (verificationApp && verificationApp.id === pddModalApp.id) {
+        setVerificationApp((prev) => ({
+          ...prev,
+          ...(updated || {}),
+          pddStatus: pddStatusInput,
+          pddRemark: pddRemarkInput.trim(),
+          pddUpdatedAt: new Date(),
+          isPddResolved: pddStatusInput === "RESOLVED",
+        }));
+      }
+      setPddModalApp(null);
+      fetchApplications(appCurrentPage);
+    } catch (err) {
+      console.error(err);
+      toast.error(err.response?.data?.message || "Failed to update PDD status");
+    } finally {
+      setPddSubmitting(false);
+    }
+  };
+
+  // 4. OTC Status Modal
+  const openOtcModal = (app) => {
+    setOtcModalApp(app);
+    setOtcStatusInput(app.otcStatus || "PENDING");
+    setOtcRemarkInput(app.otcRemark || "");
+  };
+
+  const handleOtcSubmit = async (e) => {
+    if (e) e.preventDefault();
+    if (!otcModalApp) return;
+    setOtcSubmitting(true);
+    try {
+      const res = await axios.put(`${API_URL}/applications/${otcModalApp.id}/stage-status`, {
+        stageType: "OTC",
+        status: otcStatusInput,
+        remark: otcRemarkInput.trim() || undefined,
+      });
+      toast.success(`OTC status updated to ${otcStatusInput}!`);
+      const updated = res.data?.application;
+      if (updated) {
+        setApplications((prev) => prev.map((a) => (a.id === updated.id ? { ...a, ...updated, otcStatus: otcStatusInput, otcRemark: otcRemarkInput.trim(), otcUpdatedAt: new Date() } : a)));
+      }
+      if (verificationApp && verificationApp.id === otcModalApp.id) {
+        setVerificationApp((prev) => ({
+          ...prev,
+          ...(updated || {}),
+          otcStatus: otcStatusInput,
+          otcRemark: otcRemarkInput.trim(),
+          otcUpdatedAt: new Date(),
+          isOtcResolved: otcStatusInput === "RESOLVED",
+        }));
+      }
+      setOtcModalApp(null);
+      fetchApplications(appCurrentPage);
+    } catch (err) {
+      console.error(err);
+      toast.error(err.response?.data?.message || "Failed to update OTC status");
+    } finally {
+      setOtcSubmitting(false);
+    }
+  };
+
+  // 5. General Stage Modal
+  const openStageModal = (app, defaultTarget) => {
+    setStageModalApp(app);
+    setStageTargetInput(defaultTarget || app.status || "DOCS_PENDING");
+    setStageRemarkInput("");
+    setStageSanctionedAmtInput(app.sanctionedAmount ? String(app.sanctionedAmount) : "");
+  };
+
+  const handleStageSubmit = async (e) => {
+    if (e) e.preventDefault();
+    if (!stageModalApp) return;
+    setStageSubmitting(true);
+    try {
+      const res = await axios.put(`${API_URL}/applications/${stageModalApp.id}/stage-status`, {
+        stageType: "STAGE",
+        status: stageTargetInput,
+        remark: stageRemarkInput.trim() || undefined,
+        sanctionedAmount: stageSanctionedAmtInput ? parseFloat(stageSanctionedAmtInput) : undefined,
+      });
+      toast.success(`Workflow stage updated to ${stageTargetInput.replace(/_/g, " ")}!`);
+      const updated = res.data?.application;
+      if (updated) {
+        setApplications((prev) => prev.map((a) => (a.id === updated.id ? { ...a, ...updated, status: stageTargetInput } : a)));
+      }
+      if (verificationApp && verificationApp.id === stageModalApp.id) {
+        setVerificationApp((prev) => ({
+          ...prev,
+          ...(updated || {}),
+          status: stageTargetInput,
+          sanctionedAmount: stageSanctionedAmtInput ? parseFloat(stageSanctionedAmtInput) : prev.sanctionedAmount,
+        }));
+      }
+      setStageModalApp(null);
+      fetchApplications(appCurrentPage);
+    } catch (err) {
+      console.error(err);
+      toast.error(err.response?.data?.message || "Failed to update stage");
+    } finally {
+      setStageSubmitting(false);
+    }
+  };
+
+  // 6. History Timeline Modal
+  const openHistoryModal = async (app) => {
+    setHistoryModalApp(app);
+    setHistoryTimeline([]);
+    setHistoryLoading(true);
+    try {
+      const res = await axios.get(`${API_URL}/applications/${app.id}/history`);
+      setHistoryTimeline(res.data?.history || []);
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to load status history");
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  // Transition Application Pipeline Stage (Always opens corresponding popup modal)
+  const handleStageTransition = (appId, newStatus) => {
+    const app = (verificationApp?.id === appId ? verificationApp : null) || applications.find((a) => a.id === appId);
+    if (!app) return;
+
+    if (newStatus === "PD") {
+      openPdModal(app);
+      return;
+    }
+    if (newStatus === "QUERY") {
+      openQueryModal(app);
+      return;
+    }
+    if (newStatus === "LEGAL") {
+      openLegalModal(app);
+      return;
+    }
+    if (newStatus === "TECHNICAL") {
+      openTechnicalModal(app);
+      return;
+    }
+    if (newStatus === "PDD") {
+      openPddModal(app);
+      return;
+    }
+    if (newStatus === "OTC") {
+      openOtcModal(app);
+      return;
+    }
+    if (newStatus === "DISBURSED") {
+      initiateDisburseModal(app);
+      return;
     }
 
-    try {
-      await axios.patch(`${API_URL}/applications/${appId}/status`, { status: newStatus });
-      toast.success(`Application stage updated to ${newStatus.replace(/_/g, " ")}`);
-      fetchApplications(appCurrentPage);
-      if (verificationApp && verificationApp.id === appId) {
-        setVerificationApp((prev) => ({ ...prev, status: newStatus }));
-      }
-    } catch (error) {
-      console.error(error);
-      toast.error(error.response?.data?.message || "Failed to update application stage");
-    }
+    // For any general workflow stage (DOCS_PENDING, READY_TO_SEND, SUBMITTED_TO_BANK, SANCTIONED, REJECTED, etc.)
+    openStageModal(app, newStatus);
   };
 
   // Helper to replace {{placeholder}} tags
@@ -1353,32 +2314,34 @@ export default function OperationsRedesign() {
           ) : (
             /* TABLE LIST VIEW */
             <section className="cc-report-panel">
-              <div className="cc-report-table-scroll">
+              <div className="cc-report-table-scroll cc-ops-table-container">
                 <table>
                   <thead>
                     <tr>
-                      <th>App Number</th>
-                      <th>Applicant / Customer</th>
-                      <th>Loan Product</th>
-                      <th>Applied Amount</th>
-                      <th>Assigned Bank / NBFC</th>
-                      <th>Assigned Banker</th>
-                      <th>Status</th>
-                      <th>Queries</th>
+                      <th>App &amp; Borrower</th>
+                      <th>Bank &amp; Team</th>
+                      <th>Workflow Stage</th>
+                      <th>PD Status</th>
+                      <th>Banker Query</th>
+                      <th>Legal</th>
+                      <th>Technical</th>
+                      <th>PDD</th>
+                      <th>OTC</th>
+                      <th>Disbursement</th>
                       <th>Action</th>
                     </tr>
                   </thead>
                   <tbody>
                     {appsLoading ? (
                       <tr>
-                        <td colSpan={9} className="cc-report-empty">
+                        <td colSpan={11} className="cc-report-empty">
                           Loading loan applications...
                         </td>
                       </tr>
                     ) : applications.length === 0 ? (
                       <tr>
-                        <td colSpan={9} className="cc-report-empty">
-                          No loan applications match the filters.
+                        <td colSpan={11} className="cc-report-empty">
+                          No loan applications match the selected filters.
                         </td>
                       </tr>
                     ) : (
@@ -1388,96 +2351,229 @@ export default function OperationsRedesign() {
                           className="cc-ops-table-row"
                           onClick={() => openVerificationDrawer(app)}
                         >
+                          {/* 1. App & Borrower */}
                           <td>
                             <strong>{app.applicationNumber}</strong>
                             <small style={{ display: "block", color: "#94a3b8", fontSize: 11 }}>
                               {new Date(app.createdAt).toLocaleDateString("en-IN")}
                             </small>
+                            <div style={{ marginTop: 2 }}>
+                              <strong style={{ fontSize: 13, color: "#0f172a" }}>{app.customer?.name || "Customer"}</strong>
+                              <small style={{ display: "block", color: "#64748b", fontSize: 11.5 }}>
+                                {app.customer?.mobile || "—"}
+                              </small>
+                            </div>
+                            <div style={{ marginTop: 2, fontSize: 12 }}>
+                              <span style={{ color: "#475569" }}>{app.loanProduct}</span> • <strong>{currencyFormatter.format(app.appliedAmount || 0)}</strong>
+                              {app.sanctionedAmount ? (
+                                <small style={{ display: "block", color: "#0284c7", fontSize: 11 }}>
+                                  Sanct: {currencyFormatter.format(app.sanctionedAmount)}
+                                </small>
+                              ) : null}
+                            </div>
+                            <div style={{ marginTop: 4, display: "flex", flexWrap: "wrap", gap: 4 }}>
+                              {app.lead?.leadSource && (
+                                <span className="cc-ops-source-tag" title={`Lead Source / Association: ${app.lead.leadSource}`}>
+                                  <Users size={10} /> {app.lead.leadSource}
+                                </span>
+                              )}
+                              {app.lender?.lenderType === "DSA" && (
+                                <span className="cc-ops-dsa-tag" title={`DSA Partner: ${app.lender.name}`}>
+                                  DSA: {app.lender.shortCode || app.lender.name}
+                                </span>
+                              )}
+                            </div>
                           </td>
-                          <td>
-                            <strong>{app.customer?.name || "Customer"}</strong>
-                            <small style={{ display: "block", color: "#64748b", fontSize: 11.5 }}>
-                              {app.customer?.mobile || "—"}
-                            </small>
-                          </td>
-                          <td>{app.loanProduct}</td>
-                          <td>
-                            <strong>{currencyFormatter.format(app.appliedAmount || 0)}</strong>
-                          </td>
+
+                          {/* 2. Bank & Team */}
                           <td>
                             {app.lender ? (
-                              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
                                 <div style={{
-                                  width: 32, height: 32, borderRadius: 8, background: "#eef2ff",
+                                  width: 26, height: 26, borderRadius: 6, background: "#eef2ff",
                                   color: "#4f46e5", display: "grid", placeItems: "center", flexShrink: 0,
                                   border: "1px solid #c7d2fe"
                                 }}>
-                                  <Building2 size={16} />
+                                  <Building2 size={13} />
                                 </div>
                                 <div>
-                                  <strong style={{ fontSize: 13, color: "#0f172a", display: "block" }}>
+                                  <strong style={{ fontSize: 12.5, color: "#0f172a", display: "block", lineHeight: 1.2 }}>
                                     {app.lender.name}
                                   </strong>
-                                  <span style={{ fontSize: 11, color: "#64748b" }}>
-                                    {app.lender.shortCode || app.lender.lenderType || "Bank Partner"}
+                                  <span style={{ fontSize: 10.5, color: "#64748b" }}>
+                                    {app.lender.shortCode || app.lender.lenderType || "Bank"}
                                   </span>
                                 </div>
                               </div>
                             ) : (
-                              <span style={{ color: "#94a3b8", fontSize: 12, fontStyle: "italic" }}>
-                                Not Assigned
+                              <span style={{ color: "#94a3b8", fontSize: 11.5, fontStyle: "italic", display: "block" }}>
+                                Bank: Unassigned
                               </span>
                             )}
-                          </td>
-                          <td>
                             {app.assignedBanker?.name ? (
-                              <span className="cc-ops-badge banker">
-                                <UserCheck size={12} /> {app.assignedBanker.name}
+                              <span className="cc-ops-badge banker" style={{ marginBottom: 3, display: "inline-flex" }}>
+                                <UserCheck size={11} /> {app.assignedBanker.name}
                               </span>
-                            ) : (
-                              <span style={{ color: "#94a3b8", fontSize: 12 }}>Unassigned</span>
-                            )}
-                          </td>
-                          <td>
-                            {renderStatusBadge(app.status)}
-                          </td>
-                          <td>
-                            {(app.queries || []).some((q) => q.status === "OPEN") ? (
-                              <span className="cc-ops-query-flag alert">
-                                <HelpCircle size={12} /> Open Query
+                            ) : null}
+                            {app.lead?.assignedEmployee?.name ? (
+                              <span className="cc-ops-badge employee" title={`Assigned Employee: ${app.lead.assignedEmployee.name}`} style={{ display: "inline-flex" }}>
+                                <User size={11} /> {app.lead.assignedEmployee.name}
                               </span>
-                            ) : (app.queries || []).length > 0 ? (
-                              <span className="cc-ops-query-flag resolved">Resolved</span>
-                            ) : (
-                              <span style={{ color: "#94a3b8", fontSize: 12 }}>None</span>
-                            )}
+                            ) : null}
                           </td>
+
+                          {/* 3. Workflow Stage */}
+                          <td>
+                            <div
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openStageModal(app);
+                              }}
+                              title="Click to advance or change workflow stage"
+                              style={{ cursor: "pointer", display: "inline-block" }}
+                            >
+                              {renderWorkflowStageBadge(app)}
+                            </div>
+                            {renderStagePendingNotice(app)}
+                          </td>
+
+                          {/* 4. PD Status */}
+                          {renderOpsStatusCell({
+                            status: app.pdStatus || "PENDING",
+                            updatedAt: app.pdUpdatedAt,
+                            remark: app.pdRemark,
+                            onClick: () => openPdModal(app),
+                            pendingText: "Pending",
+                            completedText: "Completed",
+                          })}
+
+                          {/* 5. Banker Query */}
+                          {renderOpsStatusCell({
+                            status:
+                              app.opsQueryStatus && app.opsQueryStatus !== "NONE"
+                                ? app.opsQueryStatus
+                                : (app.queries || []).some((q) => q.status === "OPEN")
+                                ? "PENDING"
+                                : (app.queries || []).length > 0
+                                ? "COMPLETED"
+                                : "NONE",
+                            updatedAt: app.opsQueryUpdatedAt,
+                            remark: app.opsQueryRemark,
+                            onClick: () => openQueryModal(app),
+                            pendingText: "Pending",
+                            completedText: "Completed",
+                          })}
+
+                          {/* 6. Legal */}
+                          {renderOpsStatusCell({
+                            status: app.legalStatus || "NOT_STARTED",
+                            updatedAt: app.legalUpdatedAt,
+                            remark: app.legalRemark,
+                            onClick: () => openLegalModal(app),
+                            pendingText: "Initiated",
+                            completedText: "Resolved",
+                          })}
+
+                          {/* 7. Technical */}
+                          {renderOpsStatusCell({
+                            status: app.technicalStatus || "NOT_STARTED",
+                            updatedAt: app.technicalUpdatedAt,
+                            remark: app.technicalRemark,
+                            onClick: () => openTechnicalModal(app),
+                            pendingText: "Initiated",
+                            completedText: "Resolved",
+                          })}
+
+                          {/* 8. PDD */}
+                          {renderOpsStatusCell({
+                            status: app.pddStatus || "PENDING",
+                            updatedAt: app.pddUpdatedAt,
+                            remark: app.pddRemark,
+                            onClick: () => openPddModal(app),
+                            pendingText: "Pending",
+                            completedText: "Resolved",
+                          })}
+
+                          {/* 9. OTC */}
+                          {renderOpsStatusCell({
+                            status: app.otcStatus || "PENDING",
+                            updatedAt: app.otcUpdatedAt,
+                            remark: app.otcRemark,
+                            onClick: () => openOtcModal(app),
+                            pendingText: "Pending",
+                            completedText: "Resolved",
+                          })}
+
+                          {/* 10. Disbursement */}
                           <td onClick={(e) => e.stopPropagation()}>
-                            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                              {app.status !== "DISBURSED" && (
-                                <button
-                                  type="button"
-                                  className="cc-ops-action-btn cc-btn-disburse"
-                                  title="Confirm & Mark Loan as Disbursed"
-                                  onClick={() => initiateDisburseModal(app)}
-                                >
-                                  <CheckCircle2 size={12} /> Disburse
-                                </button>
-                              )}
+                            {app.status === "DISBURSED" ? (
+                              <div className="cc-ops-status-cell-inner">
+                                <span className="cc-disbursed-done-tag" title="Loan application is fully Disbursed">
+                                  <CheckCircle2 size={12} /> Disbursed
+                                </span>
+                                {app.disbursedAt && (
+                                  <div className="cc-status-cell-time">
+                                    <Clock size={10} />
+                                    <span>
+                                      {new Date(app.disbursedAt).toLocaleDateString("en-IN", {
+                                        day: "2-digit",
+                                        month: "short",
+                                        hour: "2-digit",
+                                        minute: "2-digit",
+                                        hour12: true,
+                                      })}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            ) : app.isPddResolved && app.isOtcResolved ? (
+                              <button
+                                type="button"
+                                className="cc-ops-action-btn cc-btn-disburse"
+                                title="Confirm & Mark Loan as Disbursed"
+                                onClick={() => initiateDisburseModal(app)}
+                              >
+                                <CheckCircle2 size={12} /> Disburse
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="cc-ops-action-btn cc-btn-disburse-locked"
+                                title="Disbursement locked until PDD & OTC are both Resolved"
+                                onClick={() => initiateDisburseModal(app)}
+                              >
+                                <Clock size={12} /> Disburse (Locked)
+                              </button>
+                            )}
+                          </td>
+
+                          {/* 11. Actions */}
+                          <td onClick={(e) => e.stopPropagation()}>
+                            <div style={{ display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap" }}>
+                              <button
+                                type="button"
+                                className="cc-ops-action-btn cc-btn-history"
+                                title="View Status History & Audit Trail"
+                                onClick={() => openHistoryModal(app)}
+                              >
+                                <Clock size={12} /> History
+                              </button>
+
                               <button
                                 type="button"
                                 className="cc-ops-action-btn mail-dispatch"
                                 title="Send Loan Application & KYC to Bank via Email"
                                 onClick={() => openBankMailModal(app)}
                               >
-                                <Mail size={12} /> Email Bank
+                                <Mail size={12} /> Email
                               </button>
+
                               <button
                                 type="button"
                                 className="cc-ops-action-btn"
                                 onClick={() => openVerificationDrawer(app)}
                               >
-                                Verify KYC <ChevronRight size={13} />
+                                KYC <ChevronRight size={13} />
                               </button>
                             </div>
                           </td>
@@ -1512,7 +2608,7 @@ export default function OperationsRedesign() {
               </p>
             </div>
 
-            <div className="cc-report-table-scroll">
+            <div className="cc-report-table-scroll cc-ops-table-container">
               <table>
                 <thead>
                   <tr>
@@ -1524,19 +2620,20 @@ export default function OperationsRedesign() {
                     <th>Est. Budget</th>
                     <th>Assigned Bank / NBFC</th>
                     <th>Status</th>
+                    <th style={{ minWidth: 220 }}>Latest Remark</th>
                     <th>Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {leadsLoading ? (
                     <tr>
-                      <td colSpan={9} className="cc-report-empty">
+                      <td colSpan={10} className="cc-report-empty">
                         Loading operations leads...
                       </td>
                     </tr>
                   ) : leads.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="cc-report-empty">
+                      <td colSpan={10} className="cc-report-empty">
                         {leadStatusCategory === "PENDING"
                           ? "No pending leads found for operations."
                           : leadStatusCategory === "COMPLETED"
@@ -1581,6 +2678,22 @@ export default function OperationsRedesign() {
                         </td>
                         <td>
                           {renderStatusBadge(lead.status_value || lead.status)}
+                        </td>
+                        <td>
+                          {lead.latest_remark ? (
+                            <div style={{ padding: "4px 8px", background: "#f8fafc", borderRadius: 8, border: "1px solid #e2e8f0", maxWidth: 240 }}>
+                              <div style={{ fontSize: 12, color: "#1e293b", fontWeight: 500, lineHeight: 1.3, wordBreak: "break-word" }}>
+                                "{lead.latest_remark}"
+                              </div>
+                              <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 3, fontSize: 10, color: "#64748b" }}>
+                                <Clock size={10} color="#64748b" />
+                                <span>{lead.latest_remark_date ? new Date(lead.latest_remark_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }) : "--"}</span>
+                                {lead.latest_remark_by && <strong style={{ color: "#047857" }}>by {lead.latest_remark_by}</strong>}
+                              </div>
+                            </div>
+                          ) : (
+                            <span style={{ fontSize: 11.5, color: "#94a3b8", fontStyle: "italic" }}>No remark</span>
+                          )}
                         </td>
                         <td onClick={(e) => e.stopPropagation()}>
                           <div style={{ display: "flex", gap: 6 }}>
@@ -1628,8 +2741,13 @@ export default function OperationsRedesign() {
               <div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <h2>{verificationApp.applicationNumber}</h2>
-                  <span className={`cc-ops-status-tag ${(verificationApp.status || "").toLowerCase()}`}>
-                    {verificationApp.status}
+                  <span
+                    className={`cc-ops-status-tag ${(verificationApp.status || "").toLowerCase()}`}
+                    style={{ cursor: "pointer" }}
+                    onClick={() => openStageModal(verificationApp)}
+                    title="Click to update workflow stage and view remarks"
+                  >
+                    {verificationApp.status} ✏️
                   </span>
                 </div>
                 <p>
@@ -1680,6 +2798,231 @@ export default function OperationsRedesign() {
                           {st.label}
                         </button>
                       ))}
+                    </div>
+                  </div>
+
+                  {/* Interactive Operations Sub-Status & Compliance Hub */}
+                  <div className="cc-ops-drawer-status-grid-box">
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                      <label style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", display: "flex", alignItems: "center", gap: 6 }}>
+                        <Layers size={15} style={{ color: "#4f46e5" }} /> Operations Sub-Status &amp; Verification Checks:
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => openHistoryModal(verificationApp)}
+                        style={{
+                          background: "#f1f5f9",
+                          border: "1px solid #cbd5e1",
+                          borderRadius: 6,
+                          padding: "3px 8px",
+                          fontSize: 11.5,
+                          fontWeight: 600,
+                          color: "#334155",
+                          cursor: "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 4,
+                        }}
+                      >
+                        <Clock size={12} /> Audit History
+                      </button>
+                    </div>
+
+                    <div className="cc-drawer-status-cards-grid">
+                      {/* 1. PD Status */}
+                      <div
+                        className="cc-drawer-status-card"
+                        onClick={() => openPdModal(verificationApp)}
+                        title="Click to update PD Status & Remark"
+                      >
+                        <div className="cc-dsc-head">
+                          <span className="cc-dsc-title">🤝 PD Status</span>
+                          <span className={`cc-substatus-pill ${(verificationApp.pdStatus || "").toUpperCase() === "COMPLETED" ? "resolved" : "pending"}`}>
+                            <strong>{(verificationApp.pdStatus || "").toUpperCase() === "COMPLETED" ? "Completed ✓" : "Pending ⏳"}</strong>
+                          </span>
+                        </div>
+                        {verificationApp.pdUpdatedAt && (
+                          <div className="cc-status-cell-time" style={{ marginTop: 2 }}>
+                            <Clock size={10} />
+                            <span>{new Date(verificationApp.pdUpdatedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true })}</span>
+                          </div>
+                        )}
+                        {verificationApp.pdRemark && (
+                          <div className="cc-status-cell-remark" style={{ marginTop: 2, maxWidth: "100%" }} title={verificationApp.pdRemark}>
+                            "{verificationApp.pdRemark}"
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 2. Banker Query */}
+                      <div
+                        className="cc-drawer-status-card"
+                        onClick={() => openQueryModal(verificationApp)}
+                        title="Click to update Banker Query Status & Remark"
+                      >
+                        <div className="cc-dsc-head">
+                          <span className="cc-dsc-title">❓ Banker Query</span>
+                          <span className={`cc-substatus-pill ${
+                            (verificationApp.opsQueryStatus || "").toUpperCase() === "COMPLETED" ? "resolved" :
+                            (verificationApp.opsQueryStatus || "").toUpperCase() === "PENDING" ? "pending" : "not-started"
+                          }`}>
+                            <strong>{
+                              (verificationApp.opsQueryStatus || "").toUpperCase() === "COMPLETED" ? "Completed ✓" :
+                              (verificationApp.opsQueryStatus || "").toUpperCase() === "PENDING" ? "Pending ⏳" : "No Query"
+                            }</strong>
+                          </span>
+                        </div>
+                        {verificationApp.opsQueryUpdatedAt && (
+                          <div className="cc-status-cell-time" style={{ marginTop: 2 }}>
+                            <Clock size={10} />
+                            <span>{new Date(verificationApp.opsQueryUpdatedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true })}</span>
+                          </div>
+                        )}
+                        {verificationApp.opsQueryRemark && (
+                          <div className="cc-status-cell-remark" style={{ marginTop: 2, maxWidth: "100%" }} title={verificationApp.opsQueryRemark}>
+                            "{verificationApp.opsQueryRemark}"
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 3. Legal Status */}
+                      <div
+                        className="cc-drawer-status-card"
+                        onClick={() => openLegalModal(verificationApp)}
+                        title="Click to update Legal Status & Remark"
+                      >
+                        <div className="cc-dsc-head">
+                          <span className="cc-dsc-title">⚖️ Legal</span>
+                          <span className={`cc-substatus-pill ${
+                            (verificationApp.legalStatus || "").toUpperCase() === "RESOLVED" ? "resolved" :
+                            (verificationApp.legalStatus || "").toUpperCase() === "INITIATED" ? "initiated" :
+                            (verificationApp.legalStatus || "").toUpperCase() === "REJECTED" ? "rejected" : "not-started"
+                          }`}>
+                            <strong>{
+                              (verificationApp.legalStatus || "").toUpperCase() === "RESOLVED" ? "Resolved ✓" :
+                              (verificationApp.legalStatus || "").toUpperCase() === "INITIATED" ? "Initiated ⚡" :
+                              (verificationApp.legalStatus || "").toUpperCase() === "REJECTED" ? "Rejected ❌" : "Update"
+                            }</strong>
+                          </span>
+                        </div>
+                        {verificationApp.legalUpdatedAt && (
+                          <div className="cc-status-cell-time" style={{ marginTop: 2 }}>
+                            <Clock size={10} />
+                            <span>{new Date(verificationApp.legalUpdatedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true })}</span>
+                          </div>
+                        )}
+                        {verificationApp.legalRemark && (
+                          <div className="cc-status-cell-remark" style={{ marginTop: 2, maxWidth: "100%" }} title={verificationApp.legalRemark}>
+                            "{verificationApp.legalRemark}"
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 4. Technical Status */}
+                      <div
+                        className="cc-drawer-status-card"
+                        onClick={() => openTechnicalModal(verificationApp)}
+                        title="Click to update Technical Status & Remark"
+                      >
+                        <div className="cc-dsc-head">
+                          <span className="cc-dsc-title">📐 Technical</span>
+                          <span className={`cc-substatus-pill ${
+                            (verificationApp.technicalStatus || "").toUpperCase() === "RESOLVED" ? "resolved" :
+                            (verificationApp.technicalStatus || "").toUpperCase() === "INITIATED" ? "initiated" :
+                            (verificationApp.technicalStatus || "").toUpperCase() === "REJECTED" ? "rejected" : "not-started"
+                          }`}>
+                            <strong>{
+                              (verificationApp.technicalStatus || "").toUpperCase() === "RESOLVED" ? "Resolved ✓" :
+                              (verificationApp.technicalStatus || "").toUpperCase() === "INITIATED" ? "Initiated ⚡" :
+                              (verificationApp.technicalStatus || "").toUpperCase() === "REJECTED" ? "Rejected ❌" : "Update"
+                            }</strong>
+                          </span>
+                        </div>
+                        {verificationApp.technicalUpdatedAt && (
+                          <div className="cc-status-cell-time" style={{ marginTop: 2 }}>
+                            <Clock size={10} />
+                            <span>{new Date(verificationApp.technicalUpdatedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true })}</span>
+                          </div>
+                        )}
+                        {verificationApp.technicalRemark && (
+                          <div className="cc-status-cell-remark" style={{ marginTop: 2, maxWidth: "100%" }} title={verificationApp.technicalRemark}>
+                            "{verificationApp.technicalRemark}"
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 5. PDD Status */}
+                      <div
+                        className="cc-drawer-status-card"
+                        onClick={() => openPddModal(verificationApp)}
+                        title="Click to update PDD Status & Remark"
+                      >
+                        <div className="cc-dsc-head">
+                          <span className="cc-dsc-title">📄 PDD</span>
+                          <span className={`cc-substatus-pill ${(verificationApp.pddStatus || "").toUpperCase() === "RESOLVED" ? "resolved" : "pending"}`}>
+                            <strong>{(verificationApp.pddStatus || "").toUpperCase() === "RESOLVED" ? "Resolved ✓" : "Pending ⏳"}</strong>
+                          </span>
+                        </div>
+                        {verificationApp.pddUpdatedAt && (
+                          <div className="cc-status-cell-time" style={{ marginTop: 2 }}>
+                            <Clock size={10} />
+                            <span>{new Date(verificationApp.pddUpdatedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true })}</span>
+                          </div>
+                        )}
+                        {verificationApp.pddRemark && (
+                          <div className="cc-status-cell-remark" style={{ marginTop: 2, maxWidth: "100%" }} title={verificationApp.pddRemark}>
+                            "{verificationApp.pddRemark}"
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 6. OTC Status */}
+                      <div
+                        className="cc-drawer-status-card"
+                        onClick={() => openOtcModal(verificationApp)}
+                        title="Click to update OTC Status & Remark"
+                      >
+                        <div className="cc-dsc-head">
+                          <span className="cc-dsc-title">📑 OTC</span>
+                          <span className={`cc-substatus-pill ${(verificationApp.otcStatus || "").toUpperCase() === "RESOLVED" ? "resolved" : "pending"}`}>
+                            <strong>{(verificationApp.otcStatus || "").toUpperCase() === "RESOLVED" ? "Resolved ✓" : "Pending ⏳"}</strong>
+                          </span>
+                        </div>
+                        {verificationApp.otcUpdatedAt && (
+                          <div className="cc-status-cell-time" style={{ marginTop: 2 }}>
+                            <Clock size={10} />
+                            <span>{new Date(verificationApp.otcUpdatedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true })}</span>
+                          </div>
+                        )}
+                        {verificationApp.otcRemark && (
+                          <div className="cc-status-cell-remark" style={{ marginTop: 2, maxWidth: "100%" }} title={verificationApp.otcRemark}>
+                            "{verificationApp.otcRemark}"
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 7. Disbursement */}
+                      <div
+                        className="cc-drawer-status-card"
+                        onClick={() => initiateDisburseModal(verificationApp)}
+                        title="Click to initiate Final Loan Disbursement"
+                      >
+                        <div className="cc-dsc-head">
+                          <span className="cc-dsc-title">💰 Disbursement</span>
+                          <span className={`cc-substatus-pill ${(verificationApp.status || "").toUpperCase() === "DISBURSED" ? "resolved" : "pending"}`}>
+                            <strong>{(verificationApp.status || "").toUpperCase() === "DISBURSED" ? "Disbursed ✓" : "Pending"}</strong>
+                          </span>
+                        </div>
+                        {verificationApp.disbursedAt && (
+                          <div className="cc-status-cell-time" style={{ marginTop: 2 }}>
+                            <Clock size={10} />
+                            <span>{new Date(verificationApp.disbursedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true })}</span>
+                          </div>
+                        )}
+                        <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>
+                          {verificationApp.disbursedAmount ? `₹${Number(verificationApp.disbursedAmount).toLocaleString("en-IN")}` : "Click to Disburse"}
+                        </div>
+                      </div>
                     </div>
                   </div>
 
@@ -1772,49 +3115,109 @@ export default function OperationsRedesign() {
 
                               <div className="cc-doc-actions-row">
                                 {doc.fileUrl && (
-                                  <a
-                                    href={
-                                      doc.fileUrl.startsWith("http")
-                                        ? doc.fileUrl
-                                        : `${API_URL.replace(/\/api\/?$/, "")}/${doc.fileUrl.replace(/^\//, "")}`
-                                    }
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="cc-doc-open-btn"
-                                  >
-                                    <ExternalLink size={13} /> View File
-                                  </a>
+                                  <>
+                                    <a
+                                      href={
+                                        doc.fileUrl.startsWith("http")
+                                          ? doc.fileUrl
+                                          : `${API_URL.replace(/\/api\/?$/, "")}/${doc.fileUrl.replace(/^\//, "")}`
+                                      }
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="cc-doc-open-btn"
+                                    >
+                                      <ExternalLink size={13} /> View File
+                                    </a>
+                                    <a
+                                      href={`${API_URL}/documents/${doc.id}/download?token=${localStorage.getItem("token")}`}
+                                      download={doc.fileName || `${doc.docType}.pdf`}
+                                      className="cc-doc-open-btn"
+                                      style={{ background: "#ecfdf5", color: "#059669", borderColor: "#a7f3d0" }}
+                                      title="Download Document"
+                                    >
+                                      <Download size={13} /> Download
+                                    </a>
+                                  </>
                                 )}
 
-                                <button
-                                  type="button"
-                                  className={`cc-doc-act-btn verify ${isVerified ? "active" : ""}`}
-                                  onClick={() => handleVerifyDoc(doc.id, "VERIFIED")}
-                                  disabled={docVerifying}
-                                  title="Mark Verified"
-                                >
-                                  <CheckCircle2 size={13} /> {isVerified ? "Verified" : "Verify"}
-                                </button>
+                                {isVerified ? (
+                                  <>
+                                    <span className="cc-doc-act-btn verify active" style={{ cursor: "default" }}>
+                                      <CheckCircle2 size={13} /> Verified
+                                    </span>
+                                    <button
+                                      type="button"
+                                      className="cc-doc-act-btn reset"
+                                      onClick={() => handleVerifyDoc(doc.id, "PENDING")}
+                                      disabled={docVerifying}
+                                      title="Reset status back to Pending"
+                                    >
+                                      <RotateCcw size={12} /> Reset
+                                    </button>
+                                  </>
+                                ) : isRejected ? (
+                                  <>
+                                    <span className="cc-doc-act-btn reject active" style={{ cursor: "default" }}>
+                                      <XCircle size={13} /> Rejected
+                                    </span>
+                                    <button
+                                      type="button"
+                                      className="cc-doc-act-btn reset"
+                                      onClick={() => handleVerifyDoc(doc.id, "PENDING")}
+                                      disabled={docVerifying}
+                                      title="Reset status back to Pending"
+                                    >
+                                      <RotateCcw size={12} /> Reset
+                                    </button>
+                                  </>
+                                ) : isReupload ? (
+                                  <>
+                                    <span className="cc-doc-act-btn reupload active" style={{ cursor: "default" }}>
+                                      <RefreshCw size={13} /> Re-upload Req.
+                                    </span>
+                                    <button
+                                      type="button"
+                                      className="cc-doc-act-btn reset"
+                                      onClick={() => handleVerifyDoc(doc.id, "PENDING")}
+                                      disabled={docVerifying}
+                                      title="Reset status back to Pending"
+                                    >
+                                      <RotateCcw size={12} /> Reset
+                                    </button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <button
+                                      type="button"
+                                      className="cc-doc-act-btn verify"
+                                      onClick={() => handleVerifyDoc(doc.id, "VERIFIED")}
+                                      disabled={docVerifying}
+                                      title="Approve Document"
+                                    >
+                                      <CheckCircle2 size={13} /> Approve
+                                    </button>
 
-                                <button
-                                  type="button"
-                                  className={`cc-doc-act-btn reupload ${isReupload ? "active" : ""}`}
-                                  onClick={() => setDocRejectTarget({ doc, action: "REUPLOAD_REQUIRED" })}
-                                  disabled={docVerifying}
-                                  title="Request Re-upload"
-                                >
-                                  <RefreshCw size={13} /> Request Re-upload
-                                </button>
+                                    <button
+                                      type="button"
+                                      className="cc-doc-act-btn reupload"
+                                      onClick={() => setDocRejectTarget({ doc, action: "REUPLOAD_REQUIRED" })}
+                                      disabled={docVerifying}
+                                      title="Request Re-upload"
+                                    >
+                                      <RefreshCw size={13} /> Re-upload
+                                    </button>
 
-                                <button
-                                  type="button"
-                                  className={`cc-doc-act-btn reject ${isRejected ? "active" : ""}`}
-                                  onClick={() => setDocRejectTarget({ doc, action: "REJECTED" })}
-                                  disabled={docVerifying}
-                                  title="Reject Document"
-                                >
-                                  <XCircle size={13} /> Reject
-                                </button>
+                                    <button
+                                      type="button"
+                                      className="cc-doc-act-btn reject"
+                                      onClick={() => setDocRejectTarget({ doc, action: "REJECTED" })}
+                                      disabled={docVerifying}
+                                      title="Reject Document"
+                                    >
+                                      <XCircle size={13} /> Reject
+                                    </button>
+                                  </>
+                                )}
                               </div>
                             </div>
                           );
@@ -2362,19 +3765,29 @@ export default function OperationsRedesign() {
 
                             <div className="cc-mail-doc-actions" onClick={(e) => e.stopPropagation()}>
                               {doc.fileUrl && (
-                                <a
-                                  href={
-                                    doc.fileUrl.startsWith("http")
-                                      ? doc.fileUrl
-                                      : `${API_URL.replace("/api", "")}/${doc.fileUrl.replace(/^\//, "")}`
-                                  }
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="cc-mail-doc-view-btn"
-                                  title="Inspect Document"
-                                >
-                                  <ExternalLink size={12} />
-                                </a>
+                                <>
+                                  <a
+                                    href={
+                                      doc.fileUrl.startsWith("http")
+                                        ? doc.fileUrl
+                                        : `${API_URL.replace(/\/api\/?$/, "")}/${doc.fileUrl.replace(/^\//, "")}`
+                                    }
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="cc-mail-doc-view-btn"
+                                    title="Inspect Document"
+                                  >
+                                    <ExternalLink size={12} />
+                                  </a>
+                                  <a
+                                    href={`${API_URL}/documents/${doc.id}/download?token=${localStorage.getItem("token")}`}
+                                    download={doc.fileName || `${doc.docType}.pdf`}
+                                    className="cc-mail-doc-view-btn"
+                                    title="Download Document"
+                                  >
+                                    <Download size={12} />
+                                  </a>
+                                </>
                               )}
                               <button
                                 type="button"
@@ -2640,6 +4053,72 @@ export default function OperationsRedesign() {
                 </div>
               </div>
 
+              {/* PDD & OTC Requirements Gatekeeping Check */}
+              {(() => {
+                const isPddOk = (disburseModalApp.pddStatus || "").toUpperCase() === "RESOLVED";
+                const isOtcOk = (disburseModalApp.otcStatus || "").toUpperCase() === "RESOLVED";
+                const canDisburse = isPddOk && isOtcOk;
+
+                return (
+                  <div style={{
+                    marginBottom: 18,
+                    padding: "12px 16px",
+                    borderRadius: 10,
+                    background: canDisburse ? "#ecfdf5" : "#fffbeb",
+                    border: canDisburse ? "1px solid #a7f3d0" : "1px solid #fde68a"
+                  }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: canDisburse ? "#065f46" : "#92400e", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                        Disbursement Gatekeeping Rules
+                      </span>
+                      <span style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        padding: "2px 8px",
+                        borderRadius: 12,
+                        background: canDisburse ? "#059669" : "#d97706",
+                        color: "#fff"
+                      }}>
+                        {canDisburse ? "✓ Approved to Disburse" : "⏳ Pending Requirements"}
+                      </span>
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, fontSize: 12 }}>
+                      <div style={{
+                        padding: "8px 10px",
+                        borderRadius: 8,
+                        background: isPddOk ? "#d1fae5" : "#fee2e2",
+                        border: isPddOk ? "1px solid #6ee7b7" : "1px solid #fca5a5",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between"
+                      }}>
+                        <span><strong>PDD Status:</strong> {disburseModalApp.pddStatus || "Pending"}</span>
+                        <span>{isPddOk ? "✓ Resolved" : "❌ Pending"}</span>
+                      </div>
+                      <div style={{
+                        padding: "8px 10px",
+                        borderRadius: 8,
+                        background: isOtcOk ? "#d1fae5" : "#fee2e2",
+                        border: isOtcOk ? "1px solid #6ee7b7" : "1px solid #fca5a5",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between"
+                      }}>
+                        <span><strong>OTC Status:</strong> {disburseModalApp.otcStatus || "Pending"}</span>
+                        <span>{isOtcOk ? "✓ Resolved" : "❌ Pending"}</span>
+                      </div>
+                    </div>
+
+                    {!canDisburse && (
+                      <p style={{ margin: "8px 0 0 0", fontSize: 11.5, color: "#b45309", lineHeight: 1.4 }}>
+                        🔒 <strong>Case is Pending for Disbursement:</strong> Final disbursement cannot be submitted until both PDD and OTC are marked as <strong>Resolved</strong>. Please resolve both stages before proceeding.
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* Disbursed Amount Input */}
               <div style={{ marginBottom: 16 }}>
                 <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 6 }}>
@@ -2682,7 +4161,7 @@ export default function OperationsRedesign() {
               {/* Disbursal Remarks */}
               <div style={{ marginBottom: 18 }}>
                 <label style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#334155", marginBottom: 6 }}>
-                  Remarks / UTR / Reference
+                  Remarks / UTR / Reference <span style={{ color: "#64748b", fontWeight: 400, fontSize: 12 }}>(Optional)</span>
                 </label>
                 <input
                   type="text"
@@ -2733,20 +4212,36 @@ export default function OperationsRedesign() {
                 </button>
                 <button
                   type="submit"
-                  disabled={disburseSubmitting}
+                  disabled={
+                    disburseSubmitting ||
+                    (disburseModalApp.pddStatus || "").toUpperCase() !== "RESOLVED" ||
+                    (disburseModalApp.otcStatus || "").toUpperCase() !== "RESOLVED"
+                  }
                   style={{
                     padding: "10px 22px",
                     borderRadius: 9,
                     border: "none",
-                    background: "#047857",
+                    background:
+                      (disburseModalApp.pddStatus || "").toUpperCase() === "RESOLVED" &&
+                      (disburseModalApp.otcStatus || "").toUpperCase() === "RESOLVED"
+                        ? "#047857"
+                        : "#94a3b8",
                     color: "#fff",
                     fontSize: 13,
                     fontWeight: 700,
-                    cursor: "pointer",
+                    cursor:
+                      (disburseModalApp.pddStatus || "").toUpperCase() === "RESOLVED" &&
+                      (disburseModalApp.otcStatus || "").toUpperCase() === "RESOLVED"
+                        ? "pointer"
+                        : "not-allowed",
                     display: "inline-flex",
                     alignItems: "center",
                     gap: 8,
-                    boxShadow: "0 2px 6px rgba(4, 120, 87, 0.35)",
+                    boxShadow:
+                      (disburseModalApp.pddStatus || "").toUpperCase() === "RESOLVED" &&
+                      (disburseModalApp.otcStatus || "").toUpperCase() === "RESOLVED"
+                        ? "0 2px 6px rgba(4, 120, 87, 0.35)"
+                        : "none",
                   }}
                 >
                   {disburseSubmitting ? (
@@ -2761,6 +4256,1185 @@ export default function OperationsRedesign() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: PD STATUS */}
+      {pdModalApp && (
+        <div className="cc-disburse-backdrop" onClick={() => !pdSubmitting && setPdModalApp(null)}>
+          <div className="cc-disburse-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
+            <div className="cc-disburse-header" style={{ background: "linear-gradient(135deg, #5b21b6 0%, #7c3aed 100%)" }}>
+              <div className="cc-disburse-title-wrap">
+                <div className="cc-disburse-icon-badge" style={{ background: "rgba(255, 255, 255, 0.2)" }}>
+                  🤝
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#fff" }}>
+                    PD Status (Personal Discussion)
+                  </h3>
+                  <small style={{ color: "#ede9fe", fontSize: 12 }}>
+                    App #{pdModalApp.applicationNumber} • {pdModalApp.customer?.name}
+                  </small>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="cc-disburse-close-btn"
+                onClick={() => !pdSubmitting && setPdModalApp(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handlePdSubmit} style={{ padding: "20px 24px" }}>
+              {/* Current Status Box */}
+              <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12 }}>
+                  <span style={{ color: "#64748b" }}>Current PD Status:</span>
+                  <strong style={{
+                    padding: "3px 10px",
+                    borderRadius: 12,
+                    fontSize: 12,
+                    background: pdModalApp.pdStatus === "COMPLETED" ? "#d1fae5" : "#fef3c7",
+                    color: pdModalApp.pdStatus === "COMPLETED" ? "#047857" : "#b45309",
+                  }}>
+                    {pdModalApp.pdStatus === "COMPLETED" ? "COMPLETED" : "PENDING"}
+                  </strong>
+                </div>
+                {pdModalApp.pdRemark && (
+                  <div style={{ marginTop: 8, fontSize: 11.5, color: "#475569", borderTop: "1px dashed #cbd5e1", paddingTop: 6 }}>
+                    <strong>Last Remark:</strong> "{pdModalApp.pdRemark}"
+                  </div>
+                )}
+              </div>
+
+              {/* Status Select */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 6 }}>
+                  Update PD Status <span style={{ color: "#64748b", fontWeight: 400, fontSize: 12 }}>(Select option)</span>
+                </label>
+                <select
+                  value={pdStatusInput}
+                  onChange={(e) => setPdStatusInput(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    border: "1.5px solid #cbd5e1",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: "#0f172a",
+                    background: "#fff",
+                    outline: "none",
+                  }}
+                >
+                  <option value="PENDING">Pending (Personal Discussion Scheduled / Awaited)</option>
+                  <option value="COMPLETED">Completed (Personal Discussion Verified Successfully)</option>
+                </select>
+              </div>
+
+              {/* Remark */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 6 }}>
+                  Remark / Discussion Notes <span style={{ color: "#64748b", fontWeight: 400, fontSize: 12 }}>(Optional)</span>
+                </label>
+                <textarea
+                  rows={3}
+                  value={pdRemarkInput}
+                  onChange={(e) => setPdRemarkInput(e.target.value)}
+                  placeholder="e.g. Customer PD completed at residence / business verified successfully"
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    fontSize: 13,
+                    color: "#0f172a",
+                    boxSizing: "border-box",
+                    outline: "none",
+                    resize: "vertical",
+                  }}
+                />
+              </div>
+
+              {/* Meta Info */}
+              <div style={{ background: "#f1f5f9", borderRadius: 8, padding: "8px 12px", marginBottom: 20, fontSize: 11.5, color: "#64748b", display: "flex", justifyContent: "space-between" }}>
+                <span><strong>Updated By:</strong> {localStorage.getItem("name") || "Operations User"}</span>
+                <span><strong>Date:</strong> {new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true })}</span>
+              </div>
+
+              {/* Actions */}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                <button
+                  type="button"
+                  disabled={pdSubmitting}
+                  onClick={() => setPdModalApp(null)}
+                  style={{
+                    padding: "9px 16px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    background: "#f8fafc",
+                    color: "#475569",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={pdSubmitting}
+                  style={{
+                    padding: "9px 20px",
+                    borderRadius: 8,
+                    border: "none",
+                    background: "#7c3aed",
+                    color: "#fff",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  {pdSubmitting ? <RefreshCw size={14} className="cc-spin" /> : <CheckCircle2 size={14} />} Save PD Status
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: BANKER QUERY STATUS */}
+      {queryModalApp && (
+        <div className="cc-disburse-backdrop" onClick={() => !querySubmitting && setQueryModalApp(null)}>
+          <div className="cc-disburse-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
+            <div className="cc-disburse-header" style={{ background: "linear-gradient(135deg, #b45309 0%, #d97706 100%)" }}>
+              <div className="cc-disburse-title-wrap">
+                <div className="cc-disburse-icon-badge" style={{ background: "rgba(255, 255, 255, 0.2)" }}>
+                  ❓
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#fff" }}>
+                    Banker Query Status
+                  </h3>
+                  <small style={{ color: "#fef3c7", fontSize: 12 }}>
+                    App #{queryModalApp.applicationNumber} • {queryModalApp.customer?.name}
+                  </small>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="cc-disburse-close-btn"
+                onClick={() => !querySubmitting && setQueryModalApp(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleQuerySubmit} style={{ padding: "20px 24px" }}>
+              {/* Current Status Box */}
+              <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12 }}>
+                  <span style={{ color: "#64748b" }}>Current Query Status:</span>
+                  <strong style={{
+                    padding: "3px 10px",
+                    borderRadius: 12,
+                    fontSize: 12,
+                    background: queryModalApp.opsQueryStatus === "COMPLETED" ? "#d1fae5" : queryModalApp.opsQueryStatus === "PENDING" ? "#fee2e2" : "#f1f5f9",
+                    color: queryModalApp.opsQueryStatus === "COMPLETED" ? "#047857" : queryModalApp.opsQueryStatus === "PENDING" ? "#b91c1c" : "#475569",
+                  }}>
+                    {queryModalApp.opsQueryStatus || "NO QUERY"}
+                  </strong>
+                </div>
+                {queryModalApp.opsQueryRemark && (
+                  <div style={{ marginTop: 8, fontSize: 11.5, color: "#475569", borderTop: "1px dashed #cbd5e1", paddingTop: 6 }}>
+                    <strong>Last Remark / Query:</strong> "{queryModalApp.opsQueryRemark}"
+                  </div>
+                )}
+              </div>
+
+              {/* Status Select */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 6 }}>
+                  Update Banker Query Status <span style={{ color: "#64748b", fontWeight: 400, fontSize: 12 }}>(Select option)</span>
+                </label>
+                <select
+                  value={queryStatusInput}
+                  onChange={(e) => setQueryStatusInput(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    border: "1.5px solid #cbd5e1",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: "#0f172a",
+                    background: "#fff",
+                    outline: "none",
+                  }}
+                >
+                  <option value="PENDING">Pending (Banker Query Raised / Awaiting Resolution)</option>
+                  <option value="COMPLETED">Completed (Query Resolved &amp; Clarification Provided)</option>
+                </select>
+              </div>
+
+              {/* Remark */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 6 }}>
+                  Query Details / Resolution Remark <span style={{ color: "#64748b", fontWeight: 400, fontSize: 12 }}>(Optional)</span>
+                </label>
+                <textarea
+                  rows={3}
+                  value={queryRemarkInput}
+                  onChange={(e) => setQueryRemarkInput(e.target.value)}
+                  placeholder="e.g. Additional ITR submitted / Query replied to credit officer"
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    fontSize: 13,
+                    color: "#0f172a",
+                    boxSizing: "border-box",
+                    outline: "none",
+                    resize: "vertical",
+                  }}
+                />
+              </div>
+
+              {/* Meta Info */}
+              <div style={{ background: "#f1f5f9", borderRadius: 8, padding: "8px 12px", marginBottom: 20, fontSize: 11.5, color: "#64748b", display: "flex", justifyContent: "space-between" }}>
+                <span><strong>Updated By:</strong> {localStorage.getItem("name") || "Operations User"}</span>
+                <span><strong>Date:</strong> {new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true })}</span>
+              </div>
+
+              {/* Actions */}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                <button
+                  type="button"
+                  disabled={querySubmitting}
+                  onClick={() => setQueryModalApp(null)}
+                  style={{
+                    padding: "9px 16px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    background: "#f8fafc",
+                    color: "#475569",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={querySubmitting}
+                  style={{
+                    padding: "9px 20px",
+                    borderRadius: 8,
+                    border: "none",
+                    background: "#d97706",
+                    color: "#fff",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  {querySubmitting ? <RefreshCw size={14} className="cc-spin" /> : <CheckCircle2 size={14} />} Save Query Status
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: LEGAL STATUS */}
+      {legalModalApp && (
+        <div className="cc-disburse-backdrop" onClick={() => !legalSubmitting && setLegalModalApp(null)}>
+          <div className="cc-disburse-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
+            <div className="cc-disburse-header" style={{ background: "linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%)" }}>
+              <div className="cc-disburse-title-wrap">
+                <div className="cc-disburse-icon-badge" style={{ background: "rgba(255, 255, 255, 0.2)" }}>
+                  ⚖️
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#fff" }}>
+                    Legal Status
+                  </h3>
+                  <small style={{ color: "#e0e7ff", fontSize: 12 }}>
+                    App #{legalModalApp.applicationNumber} • {legalModalApp.customer?.name}
+                  </small>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="cc-disburse-close-btn"
+                onClick={() => !legalSubmitting && setLegalModalApp(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleLegalSubmit} style={{ padding: "20px 24px" }}>
+              {/* Current Status Box */}
+              <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12 }}>
+                  <span style={{ color: "#64748b" }}>Current Legal Status:</span>
+                  <strong style={{
+                    padding: "3px 10px",
+                    borderRadius: 12,
+                    fontSize: 12,
+                    background: legalModalApp.legalStatus === "RESOLVED" ? "#d1fae5" : legalModalApp.legalStatus === "INITIATED" ? "#dbeafe" : legalModalApp.legalStatus === "REJECTED" ? "#fee2e2" : "#f1f5f9",
+                    color: legalModalApp.legalStatus === "RESOLVED" ? "#047857" : legalModalApp.legalStatus === "INITIATED" ? "#1e40af" : legalModalApp.legalStatus === "REJECTED" ? "#b91c1c" : "#475569",
+                  }}>
+                    {legalModalApp.legalStatus || "NOT STARTED"}
+                  </strong>
+                </div>
+                {legalModalApp.legalRemark && (
+                  <div style={{ marginTop: 8, fontSize: 11.5, color: "#475569", borderTop: "1px dashed #cbd5e1", paddingTop: 6 }}>
+                    <strong>Last Remark:</strong> "{legalModalApp.legalRemark}"
+                  </div>
+                )}
+              </div>
+
+              {/* Status Select */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 6 }}>
+                  Update Legal Status <span style={{ color: "#ef4444" }}>*</span>
+                </label>
+                <select
+                  value={legalStatusInput}
+                  onChange={(e) => setLegalStatusInput(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    border: "1.5px solid #cbd5e1",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: "#0f172a",
+                    background: "#fff",
+                    outline: "none",
+                  }}
+                >
+                  <option value="INITIATED">Initiated (Verification Started / Pending)</option>
+                  <option value="RESOLVED">Resolved (Completed Successfully)</option>
+                  <option value="REJECTED">Rejected (Legal Criteria Not Met)</option>
+                </select>
+              </div>
+
+              {/* Remark */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 6 }}>
+                  Remark / Notes <span style={{ color: "#64748b", fontWeight: 400, fontSize: 12 }}>(Optional)</span>
+                </label>
+                <textarea
+                  rows={3}
+                  value={legalRemarkInput}
+                  onChange={(e) => setLegalRemarkInput(e.target.value)}
+                  placeholder="e.g. Property verification initiated / Title search completed successfully"
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    fontSize: 13,
+                    color: "#0f172a",
+                    boxSizing: "border-box",
+                    outline: "none",
+                    resize: "vertical",
+                  }}
+                />
+              </div>
+
+              {/* Meta Info */}
+              <div style={{ background: "#f1f5f9", borderRadius: 8, padding: "8px 12px", marginBottom: 20, fontSize: 11.5, color: "#64748b", display: "flex", justifyContent: "space-between" }}>
+                <span><strong>Updated By:</strong> {localStorage.getItem("name") || "Operations User"}</span>
+                <span><strong>Date:</strong> {new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true })}</span>
+              </div>
+
+              {/* Actions */}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                <button
+                  type="button"
+                  disabled={legalSubmitting}
+                  onClick={() => setLegalModalApp(null)}
+                  style={{
+                    padding: "9px 16px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    background: "#f8fafc",
+                    color: "#475569",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={legalSubmitting}
+                  style={{
+                    padding: "9px 20px",
+                    borderRadius: 8,
+                    border: "none",
+                    background: "#2563eb",
+                    color: "#fff",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  {legalSubmitting ? <RefreshCw size={14} className="cc-spin" /> : <CheckCircle2 size={14} />} Save Legal Status
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: TECHNICAL STATUS */}
+      {technicalModalApp && (
+        <div className="cc-disburse-backdrop" onClick={() => !technicalSubmitting && setTechnicalModalApp(null)}>
+          <div className="cc-disburse-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
+            <div className="cc-disburse-header" style={{ background: "linear-gradient(135deg, #0e7490 0%, #06b6d4 100%)" }}>
+              <div className="cc-disburse-title-wrap">
+                <div className="cc-disburse-icon-badge" style={{ background: "rgba(255, 255, 255, 0.2)" }}>
+                  📐
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#fff" }}>
+                    Technical Status
+                  </h3>
+                  <small style={{ color: "#ecfeff", fontSize: 12 }}>
+                    App #{technicalModalApp.applicationNumber} • {technicalModalApp.customer?.name}
+                  </small>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="cc-disburse-close-btn"
+                onClick={() => !technicalSubmitting && setTechnicalModalApp(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleTechnicalSubmit} style={{ padding: "20px 24px" }}>
+              {/* Current Status Box */}
+              <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12 }}>
+                  <span style={{ color: "#64748b" }}>Current Technical Status:</span>
+                  <strong style={{
+                    padding: "3px 10px",
+                    borderRadius: 12,
+                    fontSize: 12,
+                    background: technicalModalApp.technicalStatus === "RESOLVED" ? "#d1fae5" : technicalModalApp.technicalStatus === "INITIATED" ? "#e0f2fe" : technicalModalApp.technicalStatus === "REJECTED" ? "#fee2e2" : "#f1f5f9",
+                    color: technicalModalApp.technicalStatus === "RESOLVED" ? "#047857" : technicalModalApp.technicalStatus === "INITIATED" ? "#0369a1" : technicalModalApp.technicalStatus === "REJECTED" ? "#b91c1c" : "#475569",
+                  }}>
+                    {technicalModalApp.technicalStatus || "NOT STARTED"}
+                  </strong>
+                </div>
+                {technicalModalApp.technicalRemark && (
+                  <div style={{ marginTop: 8, fontSize: 11.5, color: "#475569", borderTop: "1px dashed #cbd5e1", paddingTop: 6 }}>
+                    <strong>Last Remark:</strong> "{technicalModalApp.technicalRemark}"
+                  </div>
+                )}
+              </div>
+
+              {/* Status Select */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 6 }}>
+                  Update Technical Status <span style={{ color: "#ef4444" }}>*</span>
+                </label>
+                <select
+                  value={technicalStatusInput}
+                  onChange={(e) => setTechnicalStatusInput(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    border: "1.5px solid #cbd5e1",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: "#0f172a",
+                    background: "#fff",
+                    outline: "none",
+                  }}
+                >
+                  <option value="INITIATED">Initiated (Inspection Scheduled / In Progress)</option>
+                  <option value="RESOLVED">Resolved (Technical Verification Completed)</option>
+                  <option value="REJECTED">Rejected (Property Criteria Not Met)</option>
+                </select>
+              </div>
+
+              {/* Remark */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 6 }}>
+                  Remark / Notes <span style={{ color: "#64748b", fontWeight: 400, fontSize: 12 }}>(Optional)</span>
+                </label>
+                <textarea
+                  rows={3}
+                  value={technicalRemarkInput}
+                  onChange={(e) => setTechnicalRemarkInput(e.target.value)}
+                  placeholder="e.g. Valuation done at 45L / Site visit verified successfully"
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    fontSize: 13,
+                    color: "#0f172a",
+                    boxSizing: "border-box",
+                    outline: "none",
+                    resize: "vertical",
+                  }}
+                />
+              </div>
+
+              {/* Meta Info */}
+              <div style={{ background: "#f1f5f9", borderRadius: 8, padding: "8px 12px", marginBottom: 20, fontSize: 11.5, color: "#64748b", display: "flex", justifyContent: "space-between" }}>
+                <span><strong>Updated By:</strong> {localStorage.getItem("name") || "Operations User"}</span>
+                <span><strong>Date:</strong> {new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true })}</span>
+              </div>
+
+              {/* Actions */}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                <button
+                  type="button"
+                  disabled={technicalSubmitting}
+                  onClick={() => setTechnicalModalApp(null)}
+                  style={{
+                    padding: "9px 16px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    background: "#f8fafc",
+                    color: "#475569",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={technicalSubmitting}
+                  style={{
+                    padding: "9px 20px",
+                    borderRadius: 8,
+                    border: "none",
+                    background: "#0891b2",
+                    color: "#fff",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  {technicalSubmitting ? <RefreshCw size={14} className="cc-spin" /> : <CheckCircle2 size={14} />} Save Technical Status
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: PDD STATUS */}
+      {pddModalApp && (
+        <div className="cc-disburse-backdrop" onClick={() => !pddSubmitting && setPddModalApp(null)}>
+          <div className="cc-disburse-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
+            <div className="cc-disburse-header" style={{ background: "linear-gradient(135deg, #7c3aed 0%, #8b5cf6 100%)" }}>
+              <div className="cc-disburse-title-wrap">
+                <div className="cc-disburse-icon-badge" style={{ background: "rgba(255, 255, 255, 0.2)" }}>
+                  📄
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#fff" }}>
+                    PDD Status (Post-Disbursement Documents)
+                  </h3>
+                  <small style={{ color: "#ede9fe", fontSize: 12 }}>
+                    App #{pddModalApp.applicationNumber} • {pddModalApp.customer?.name}
+                  </small>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="cc-disburse-close-btn"
+                onClick={() => !pddSubmitting && setPddModalApp(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handlePddSubmit} style={{ padding: "20px 24px" }}>
+              {/* Current Status Box */}
+              <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12 }}>
+                  <span style={{ color: "#64748b" }}>Current PDD Status:</span>
+                  <strong style={{
+                    padding: "3px 10px",
+                    borderRadius: 12,
+                    fontSize: 12,
+                    background: pddModalApp.pddStatus === "RESOLVED" ? "#d1fae5" : "#fef3c7",
+                    color: pddModalApp.pddStatus === "RESOLVED" ? "#047857" : "#b45309",
+                  }}>
+                    {pddModalApp.pddStatus === "RESOLVED" ? "RESOLVED" : "PENDING"}
+                  </strong>
+                </div>
+                {pddModalApp.pddRemark && (
+                  <div style={{ marginTop: 8, fontSize: 11.5, color: "#475569", borderTop: "1px dashed #cbd5e1", paddingTop: 6 }}>
+                    <strong>Last Remark:</strong> "{pddModalApp.pddRemark}"
+                  </div>
+                )}
+              </div>
+
+              {/* Status Select */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 6 }}>
+                  Update PDD Status <span style={{ color: "#ef4444" }}>*</span>
+                </label>
+                <select
+                  value={pddStatusInput}
+                  onChange={(e) => setPddStatusInput(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    border: "1.5px solid #cbd5e1",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: "#0f172a",
+                    background: "#fff",
+                    outline: "none",
+                  }}
+                >
+                  <option value="PENDING">Pending (PDD Documents Awaited)</option>
+                  <option value="RESOLVED">Resolved (PDD Documents Verified Successfully)</option>
+                </select>
+              </div>
+
+              {/* Remark */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 6 }}>
+                  PDD Remark / Notes <span style={{ color: "#64748b", fontWeight: 400, fontSize: 12 }}>(Optional)</span>
+                </label>
+                <textarea
+                  rows={3}
+                  value={pddRemarkInput}
+                  onChange={(e) => setPddRemarkInput(e.target.value)}
+                  placeholder="e.g. Original RC / Property Title / PDD documents collected and verified"
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    fontSize: 13,
+                    color: "#0f172a",
+                    boxSizing: "border-box",
+                    outline: "none",
+                    resize: "vertical",
+                  }}
+                />
+              </div>
+
+              {/* Meta Info */}
+              <div style={{ background: "#f1f5f9", borderRadius: 8, padding: "8px 12px", marginBottom: 20, fontSize: 11.5, color: "#64748b", display: "flex", justifyContent: "space-between" }}>
+                <span><strong>Updated By:</strong> {localStorage.getItem("name") || "Operations User"}</span>
+                <span><strong>Date:</strong> {new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true })}</span>
+              </div>
+
+              {/* Actions */}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                <button
+                  type="button"
+                  disabled={pddSubmitting}
+                  onClick={() => setPddModalApp(null)}
+                  style={{
+                    padding: "9px 16px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    background: "#f8fafc",
+                    color: "#475569",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={pddSubmitting}
+                  style={{
+                    padding: "9px 20px",
+                    borderRadius: 8,
+                    border: "none",
+                    background: "#7c3aed",
+                    color: "#fff",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  {pddSubmitting ? <RefreshCw size={14} className="cc-spin" /> : <CheckCircle2 size={14} />} Save PDD Status
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: OTC STATUS */}
+      {otcModalApp && (
+        <div className="cc-disburse-backdrop" onClick={() => !otcSubmitting && setOtcModalApp(null)}>
+          <div className="cc-disburse-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
+            <div className="cc-disburse-header" style={{ background: "linear-gradient(135deg, #d97706 0%, #f59e0b 100%)" }}>
+              <div className="cc-disburse-title-wrap">
+                <div className="cc-disburse-icon-badge" style={{ background: "rgba(255, 255, 255, 0.2)" }}>
+                  📑
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#fff" }}>
+                    OTC Status (One-Time Clearance)
+                  </h3>
+                  <small style={{ color: "#fef3c7", fontSize: 12 }}>
+                    App #{otcModalApp.applicationNumber} • {otcModalApp.customer?.name}
+                  </small>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="cc-disburse-close-btn"
+                onClick={() => !otcSubmitting && setOtcModalApp(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleOtcSubmit} style={{ padding: "20px 24px" }}>
+              {/* Current Status Box */}
+              <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12 }}>
+                  <span style={{ color: "#64748b" }}>Current OTC Status:</span>
+                  <strong style={{
+                    padding: "3px 10px",
+                    borderRadius: 12,
+                    fontSize: 12,
+                    background: otcModalApp.otcStatus === "RESOLVED" ? "#d1fae5" : "#fef3c7",
+                    color: otcModalApp.otcStatus === "RESOLVED" ? "#047857" : "#b45309",
+                  }}>
+                    {otcModalApp.otcStatus === "RESOLVED" ? "RESOLVED" : "PENDING"}
+                  </strong>
+                </div>
+                {otcModalApp.otcRemark && (
+                  <div style={{ marginTop: 8, fontSize: 11.5, color: "#475569", borderTop: "1px dashed #cbd5e1", paddingTop: 6 }}>
+                    <strong>Last Remark:</strong> "{otcModalApp.otcRemark}"
+                  </div>
+                )}
+              </div>
+
+              {/* Status Select */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 6 }}>
+                  Update OTC Status <span style={{ color: "#ef4444" }}>*</span>
+                </label>
+                <select
+                  value={otcStatusInput}
+                  onChange={(e) => setOtcStatusInput(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    border: "1.5px solid #cbd5e1",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: "#0f172a",
+                    background: "#fff",
+                    outline: "none",
+                  }}
+                >
+                  <option value="PENDING">Pending (OTC Confirmation Awaited)</option>
+                  <option value="RESOLVED">Resolved (OTC Successfully Completed)</option>
+                </select>
+              </div>
+
+              {/* Remark */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 6 }}>
+                  OTC Remark / Notes <span style={{ color: "#64748b", fontWeight: 400, fontSize: 12 }}>(Optional)</span>
+                </label>
+                <textarea
+                  rows={3}
+                  value={otcRemarkInput}
+                  onChange={(e) => setOtcRemarkInput(e.target.value)}
+                  placeholder="e.g. OTC approval received from credit manager"
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    fontSize: 13,
+                    color: "#0f172a",
+                    boxSizing: "border-box",
+                    outline: "none",
+                    resize: "vertical",
+                  }}
+                />
+              </div>
+
+              {/* Meta Info */}
+              <div style={{ background: "#f1f5f9", borderRadius: 8, padding: "8px 12px", marginBottom: 20, fontSize: 11.5, color: "#64748b", display: "flex", justifyContent: "space-between" }}>
+                <span><strong>Updated By:</strong> {localStorage.getItem("name") || "Operations User"}</span>
+                <span><strong>Date:</strong> {new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true })}</span>
+              </div>
+
+              {/* Actions */}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                <button
+                  type="button"
+                  disabled={otcSubmitting}
+                  onClick={() => setOtcModalApp(null)}
+                  style={{
+                    padding: "9px 16px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    background: "#f8fafc",
+                    color: "#475569",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={otcSubmitting}
+                  style={{
+                    padding: "9px 20px",
+                    borderRadius: 8,
+                    border: "none",
+                    background: "#d97706",
+                    color: "#fff",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  {otcSubmitting ? <RefreshCw size={14} className="cc-spin" /> : <CheckCircle2 size={14} />} Save OTC Status
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: GENERAL WORKFLOW STAGE TRANSITION */}
+      {stageModalApp && (
+        <div className="cc-disburse-backdrop" onClick={() => !stageSubmitting && setStageModalApp(null)}>
+          <div className="cc-disburse-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 540 }}>
+            <div className="cc-disburse-header">
+              <div className="cc-disburse-title-wrap">
+                <div className="cc-disburse-icon-badge" style={{ background: "#4f46e5" }}>
+                  <Layers size={18} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#fff" }}>
+                    Update Workflow Stage
+                  </h3>
+                  <small style={{ color: "#94a3b8", fontSize: 12 }}>
+                    App #{stageModalApp.applicationNumber} • {stageModalApp.customer?.name}
+                  </small>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="cc-disburse-close-btn"
+                onClick={() => !stageSubmitting && setStageModalApp(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleStageSubmit} style={{ padding: "20px 24px" }}>
+              {/* Current Status Box */}
+              <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12 }}>
+                  <span style={{ color: "#64748b" }}>Current Status:</span>
+                  <strong style={{ color: "#0f172a", fontSize: 13 }}>
+                    {stageModalApp.status}
+                  </strong>
+                </div>
+              </div>
+
+              {/* Target Stage Select */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 6 }}>
+                  Select New Stage <span style={{ color: "#ef4444" }}>*</span>
+                </label>
+                <select
+                  value={stageTargetInput}
+                  onChange={(e) => setStageTargetInput(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    border: "1.5px solid #cbd5e1",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: "#0f172a",
+                    background: "#fff",
+                    outline: "none",
+                  }}
+                >
+                  <option value="DOCS_PENDING">1. Documents Pending</option>
+                  <option value="READY_TO_SEND">2. Ready to Send / Logged In</option>
+                  <option value="SUBMITTED_TO_BANK">3. Submitted to Bank</option>
+                  <option value="PD">4. PD Status</option>
+                  <option value="QUERY">5. Banker Query</option>
+                  <option value="LEGAL">6. Legal</option>
+                  <option value="TECHNICAL">7. Technical</option>
+                  <option value="SANCTIONED">8. Sanctioned</option>
+                  <option value="PDD">9. PDD (Pending / Resolved)</option>
+                  <option value="OTC">10. OTC (Pending / Resolved)</option>
+                  <option value="DISBURSED">11. Final Disbursed</option>
+                  <option value="REJECTED">❌ Rejected</option>
+                </select>
+              </div>
+
+              {stageTargetInput === "SANCTIONED" && (
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 6 }}>
+                    Sanctioned Amount (₹)
+                  </label>
+                  <input
+                    type="number"
+                    value={stageSanctionedAmtInput}
+                    onChange={(e) => setStageSanctionedAmtInput(e.target.value)}
+                    placeholder="e.g. 2500000"
+                    style={{
+                      width: "100%",
+                      padding: "9px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #cbd5e1",
+                      fontSize: 13,
+                      boxSizing: "border-box",
+                    }}
+                  />
+                </div>
+              )}
+
+              {stageTargetInput === "DISBURSED" && (
+                <div style={{
+                  marginBottom: 16,
+                  padding: "10px 14px",
+                  borderRadius: 8,
+                  background: ((stageModalApp.pddStatus || "").toUpperCase() === "RESOLVED" && (stageModalApp.otcStatus || "").toUpperCase() === "RESOLVED") ? "#ecfdf5" : "#fef2f2",
+                  border: ((stageModalApp.pddStatus || "").toUpperCase() === "RESOLVED" && (stageModalApp.otcStatus || "").toUpperCase() === "RESOLVED") ? "1px solid #6ee7b7" : "1px solid #fecaca",
+                  fontSize: 12,
+                  color: ((stageModalApp.pddStatus || "").toUpperCase() === "RESOLVED" && (stageModalApp.otcStatus || "").toUpperCase() === "RESOLVED") ? "#065f46" : "#991b1b",
+                }}>
+                  {((stageModalApp.pddStatus || "").toUpperCase() === "RESOLVED" && (stageModalApp.otcStatus || "").toUpperCase() === "RESOLVED") ? (
+                    <span>✓ Both PDD and OTC are Resolved. You may mark this case as Disbursed.</span>
+                  ) : (
+                    <span>⚠️ <strong>Notice:</strong> Final Disbursed status is blocked because PDD or OTC is still Pending. Please resolve PDD and OTC first!</span>
+                  )}
+                </div>
+              )}
+
+              {/* Remark */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 6 }}>
+                  Stage Remark <span style={{ color: "#64748b", fontWeight: 400, fontSize: 12 }}>(Optional)</span>
+                </label>
+                <textarea
+                  rows={3}
+                  value={stageRemarkInput}
+                  onChange={(e) => setStageRemarkInput(e.target.value)}
+                  placeholder="Enter a remark explaining this workflow update (optional)..."
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    fontSize: 13,
+                    color: "#0f172a",
+                    boxSizing: "border-box",
+                    outline: "none",
+                    resize: "vertical",
+                  }}
+                />
+              </div>
+
+              {/* Actions */}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                <button
+                  type="button"
+                  disabled={stageSubmitting}
+                  onClick={() => setStageModalApp(null)}
+                  style={{
+                    padding: "9px 16px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    background: "#f8fafc",
+                    color: "#475569",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={stageSubmitting}
+                  style={{
+                    padding: "9px 20px",
+                    borderRadius: 8,
+                    border: "none",
+                    background: "#4f46e5",
+                    color: "#fff",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  {stageSubmitting ? <RefreshCw size={14} className="cc-spin" /> : <CheckCircle2 size={14} />} Update Stage
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: STATUS HISTORY / AUDIT TIMELINE */}
+      {historyModalApp && (
+        <div className="cc-disburse-backdrop" onClick={() => setHistoryModalApp(null)}>
+          <div className="cc-disburse-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 640, maxHeight: "85vh", display: "flex", flexDirection: "column" }}>
+            <div className="cc-disburse-header" style={{ background: "linear-gradient(135deg, #1e293b 0%, #334155 100%)", flexShrink: 0 }}>
+              <div className="cc-disburse-title-wrap">
+                <div className="cc-disburse-icon-badge" style={{ background: "rgba(255, 255, 255, 0.15)" }}>
+                  <Clock size={18} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#fff" }}>
+                    Status History &amp; Audit Trail
+                  </h3>
+                  <small style={{ color: "#cbd5e1", fontSize: 12 }}>
+                    App #{historyModalApp.applicationNumber} • {historyModalApp.customer?.name}
+                  </small>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="cc-disburse-close-btn"
+                onClick={() => setHistoryModalApp(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ padding: "20px 24px", overflowY: "auto", flex: 1 }}>
+              {historyLoading ? (
+                <div style={{ textAlign: "center", padding: "40px 0", color: "#64748b" }}>
+                  <RefreshCw size={24} className="cc-spin" style={{ marginBottom: 10 }} />
+                  <p style={{ margin: 0, fontSize: 13 }}>Loading audit timeline...</p>
+                </div>
+              ) : historyTimeline.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "40px 0", color: "#94a3b8" }}>
+                  <Clock size={32} style={{ marginBottom: 8, opacity: 0.5 }} />
+                  <p style={{ margin: 0, fontSize: 13, fontWeight: 500 }}>No status history logged yet.</p>
+                  <small style={{ fontSize: 11.5, color: "#94a3b8" }}>Status updates and operational remarks will be tracked here in real-time.</small>
+                </div>
+              ) : (
+                <div className="cc-history-timeline-list">
+                  {historyTimeline.map((item, idx) => (
+                    <div key={item.id || idx} className="cc-history-timeline-item">
+                      <div className="cc-timeline-dot" />
+                      <div className="cc-timeline-card">
+                        <div className="cc-timeline-card-header">
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                            <span className={`cc-timeline-type-badge ${(item.status_type || "").toLowerCase()}`}>
+                              {item.status_type || "STAGE"}
+                            </span>
+                            <strong style={{ fontSize: 13, color: "#0f172a" }}>
+                              {item.old_status && item.old_status !== item.new_status
+                                ? `${item.old_status.replace(/_/g, " ")} → ${item.new_status.replace(/_/g, " ")}`
+                                : item.new_status?.replace(/_/g, " ") || "Status Updated"}
+                            </strong>
+                          </div>
+                          <span className="cc-timeline-time">
+                            {new Date(item.createdAt).toLocaleDateString("en-IN", {
+                              day: "2-digit",
+                              month: "short",
+                              year: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                              hour12: true,
+                            })}
+                          </span>
+                        </div>
+
+                        {item.remark && (
+                          <div className="cc-timeline-remark">
+                            "{item.remark}"
+                          </div>
+                        )}
+
+                        <div className="cc-timeline-footer">
+                          <span>
+                            Updated by: <strong>{item.updater?.name || item.updaterName || (item.updated_by ? `User #${item.updated_by}` : "Operations Team")}</strong>
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div style={{ padding: "12px 24px", borderTop: "1px solid #e2e8f0", background: "#f8fafc", display: "flex", justifyContent: "flex-end", flexShrink: 0 }}>
+              <button
+                type="button"
+                onClick={() => setHistoryModalApp(null)}
+                style={{
+                  padding: "8px 18px",
+                  borderRadius: 8,
+                  border: "1px solid #cbd5e1",
+                  background: "#fff",
+                  color: "#334155",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -3227,6 +5901,66 @@ const opsStyles = `
   .cc-kcard-banker { display: inline-flex; align-items: center; gap: 4px; color: #047857; }
 
   /* Table styling */
+  .cc-ops-table-container {
+    overflow: auto;
+    max-height: calc(100vh - 270px);
+    min-height: 420px;
+    border: 1px solid #cbd5e1;
+    border-radius: 12px;
+    background: #ffffff;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+    position: relative;
+  }
+  .cc-ops-table-container table {
+    width: 100%;
+    min-width: 1100px;
+    border-collapse: separate;
+    border-spacing: 0;
+    border: none;
+  }
+  .cc-ops-table-container thead {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+  }
+  .cc-ops-table-container thead th {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: #f1f5f9 !important;
+    color: #334155;
+    font-size: 11.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 12px 14px;
+    border-bottom: 2px solid #cbd5e1;
+    border-right: 1px solid #e2e8f0;
+    white-space: nowrap;
+    box-shadow: 0 2px 4px rgba(15, 23, 42, 0.04);
+  }
+  .cc-ops-table-container thead th:last-child {
+    border-right: none;
+  }
+  .cc-ops-table-container tbody td {
+    padding: 12px 14px;
+    font-size: 13px;
+    color: #1e293b;
+    border-bottom: 1px solid #e2e8f0;
+    border-right: 1px solid #edf2f7;
+    background: #ffffff;
+    vertical-align: middle;
+    transition: background-color 0.12s ease;
+  }
+  .cc-ops-table-container tbody td:last-child {
+    border-right: none;
+  }
+  .cc-ops-table-container tbody tr:nth-child(even) td {
+    background: #fafbfc;
+  }
+  .cc-ops-table-container tbody tr:hover td {
+    background: #f0fdf4 !important;
+  }
   .cc-ops-table-row { cursor: pointer; }
   .cc-ops-table-row:hover { background: #f8fafc; }
   .cc-ops-badge {
@@ -3423,7 +6157,11 @@ const opsStyles = `
   .cc-doc-act-btn.verify { background: #f0fdf4; color: #15803d; border-color: #bbf7d0; }
   .cc-doc-act-btn.verify.active { background: #15803d; color: #fff; }
   .cc-doc-act-btn.reupload { background: #fffbeb; color: #b45309; border-color: #fde68a; }
+  .cc-doc-act-btn.reupload.active { background: #b45309; color: #fff; }
   .cc-doc-act-btn.reject { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
+  .cc-doc-act-btn.reject.active { background: #b91c1c; color: #fff; }
+  .cc-doc-act-btn.reset { background: #f8fafc; color: #64748b; border-color: #cbd5e1; }
+  .cc-doc-act-btn.reset:hover { background: #f1f5f9; color: #1e293b; border-color: #94a3b8; }
 
   .cc-ops-upload-box { background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
   .cc-upload-box-title { font-size: 12px; font-weight: 700; color: #334155; display: flex; align-items: center; gap: 6px; }
@@ -3964,4 +6702,454 @@ const opsStyles = `
     flex-direction: column;
     gap: 12px;
   }
+
+  /* =========================================================
+     OPERATIONS ENHANCEMENTS: MULTI-SELECT FILTERS & WORKFLOW
+     ========================================================= */
+
+  /* Multi-Select Dropdown Container */
+  .cc-ops-multiselect {
+    position: relative;
+    display: inline-block;
+  }
+  .cc-ops-multiselect-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 11px;
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    font-size: 12.5px;
+    color: #334155;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+    max-width: 175px;
+  }
+  .cc-ops-multiselect-btn:hover {
+    border-color: #94a3b8;
+    background: #f8fafc;
+  }
+  .cc-ops-multiselect-btn.active {
+    border-color: #047857;
+    background: #f0fdf4;
+    color: #065f46;
+    font-weight: 600;
+  }
+  .cc-ops-multiselect-badge {
+    background: #047857;
+    color: #ffffff;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 10px;
+  }
+  .cc-ops-multiselect-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    width: 260px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+    z-index: 9999;
+    padding: 8px;
+    animation: ccDisburseFadeIn 0.15s ease-out;
+  }
+  .cc-ops-multiselect-search {
+    position: relative;
+    margin-bottom: 6px;
+  }
+  .cc-ops-multiselect-search input {
+    width: 100%;
+    padding: 6px 8px 6px 28px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    font-size: 12px;
+    box-sizing: border-box;
+    outline: none;
+  }
+  .cc-ops-multiselect-search input:focus {
+    border-color: #047857;
+  }
+  .cc-ops-multiselect-actions {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 2px 6px 2px;
+    border-bottom: 1px solid #f1f5f9;
+    margin-bottom: 4px;
+  }
+  .cc-ops-multiselect-actions button {
+    background: none;
+    border: none;
+    font-size: 11px;
+    color: #047857;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 4px;
+  }
+  .cc-ops-multiselect-actions button:hover {
+    background: #f0fdf4;
+  }
+  .cc-ops-multiselect-list {
+    max-height: 200px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .cc-ops-multiselect-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    color: #1e293b;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.1s ease;
+  }
+  .cc-ops-multiselect-item:hover {
+    background: #f8fafc;
+  }
+  .cc-ops-multiselect-item.selected {
+    background: #ecfdf5;
+    color: #065f46;
+    font-weight: 600;
+  }
+  .cc-ops-multiselect-checkbox {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    border: 1.5px solid #cbd5e1;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    background: #fff;
+  }
+  .cc-ops-multiselect-item.selected .cc-ops-multiselect-checkbox {
+    background: #047857;
+    border-color: #047857;
+    color: #fff;
+  }
+
+  /* Sourcing & Employee Badges */
+  .cc-ops-source-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: #f1f5f9;
+    color: #475569;
+    font-size: 10.5px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 6px;
+    border: 1px solid #e2e8f0;
+    white-space: nowrap;
+  }
+  .cc-ops-dsa-tag {
+    display: inline-flex;
+    align-items: center;
+    background: #eff6ff;
+    color: #1d4ed8;
+    font-size: 10.5px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 6px;
+    border: 1px solid #bfdbfe;
+    white-space: nowrap;
+  }
+  .cc-ops-badge.employee {
+    background: #fdf4ff;
+    color: #86198f;
+    border: 1px solid #f0abfc;
+  }
+
+  /* Sub-status interactive pills */
+  .cc-substatus-pills-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 6px;
+  }
+  .cc-substatus-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 7px;
+    border-radius: 6px;
+    font-size: 11px;
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+  }
+  .cc-substatus-pill:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
+  }
+  .cc-substatus-pill.resolved {
+    background: #ecfdf5;
+    border-color: #a7f3d0;
+    color: #047857;
+  }
+  .cc-substatus-pill.initiated {
+    background: #eff6ff;
+    border-color: #bfdbfe;
+    color: #1d4ed8;
+  }
+  .cc-substatus-pill.pending {
+    background: #fffbeb;
+    border-color: #fde68a;
+    color: #b45309;
+  }
+  .cc-substatus-pill.rejected {
+    background: #fef2f2;
+    border-color: #fecaca;
+    color: #dc2626;
+  }
+  .cc-substatus-pill.not-started {
+    background: #f8fafc;
+    border-color: #e2e8f0;
+    color: #64748b;
+  }
+
+  /* Operations Table interactive status cells */
+  .cc-ops-clickable-status-td {
+    cursor: pointer;
+    transition: background 0.15s ease;
+    vertical-align: top;
+    padding: 10px 10px !important;
+  }
+  .cc-ops-clickable-status-td:hover {
+    background: #f8fafc;
+  }
+  .cc-ops-status-cell-inner {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    align-items: flex-start;
+  }
+  .cc-status-cell-time {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10.5px;
+    color: #64748b;
+    font-weight: 500;
+  }
+  .cc-status-cell-remark {
+    font-size: 11px;
+    color: #334155;
+    background: #f1f5f9;
+    border-left: 2px solid #94a3b8;
+    padding: 2px 6px;
+    border-radius: 0 4px 4px 0;
+    line-height: 1.3;
+    max-width: 130px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .cc-ops-clickable-status-td:hover .cc-status-cell-remark {
+    border-left-color: #2563eb;
+    background: #eff6ff;
+  }
+
+  /* Drawer Operations Sub-Status Cards Grid */
+  .cc-ops-drawer-status-grid-box {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 20px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  }
+  .cc-drawer-status-cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+    gap: 10px;
+  }
+  .cc-drawer-status-card {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 10px 12px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .cc-drawer-status-card:hover {
+    background: #f1f5f9;
+    border-color: #cbd5e1;
+    transform: translateY(-1px);
+    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.06);
+  }
+  .cc-dsc-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 2px;
+  }
+  .cc-dsc-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: #1e293b;
+  }
+
+  /* Stuck / Pending notification badge */
+  .cc-stage-stuck-notice {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 7px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-top: 4px;
+    line-height: 1.3;
+  }
+  .cc-stage-stuck-notice.warning {
+    background: #fffbeb;
+    color: #b45309;
+    border: 1px solid #fde68a;
+  }
+  .cc-stage-stuck-notice.info {
+    background: #eff6ff;
+    color: #1d4ed8;
+    border: 1px solid #bfdbfe;
+  }
+  .cc-stage-stuck-notice.success {
+    background: #ecfdf5;
+    color: #047857;
+    border: 1px solid #a7f3d0;
+  }
+  .cc-stage-stuck-notice.neutral {
+    background: #f8fafc;
+    color: #475569;
+    border: 1px solid #e2e8f0;
+  }
+
+  /* Action Buttons */
+  .cc-ops-action-btn.cc-btn-disburse-locked {
+    background: #f1f5f9;
+    color: #94a3b8;
+    border: 1px dashed #cbd5e1;
+    font-weight: 600;
+    cursor: not-allowed;
+  }
+  .cc-ops-action-btn.cc-btn-history {
+    background: #f8fafc;
+    color: #334155;
+    border: 1px solid #cbd5e1;
+    font-weight: 600;
+  }
+  .cc-ops-action-btn.cc-btn-history:hover {
+    background: #1e293b;
+    color: #ffffff;
+    border-color: #1e293b;
+  }
+  .cc-disbursed-done-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 10px;
+    background: #dcfce7;
+    color: #15803d;
+    font-size: 12px;
+    font-weight: 700;
+    border-radius: 8px;
+    border: 1px solid #86efac;
+  }
+
+  /* History Timeline Popup */
+  .cc-history-timeline-list {
+    position: relative;
+    padding-left: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .cc-history-timeline-list::before {
+    content: "";
+    position: absolute;
+    top: 6px;
+    bottom: 6px;
+    left: 6px;
+    width: 2px;
+    background: #e2e8f0;
+  }
+  .cc-history-timeline-item {
+    position: relative;
+  }
+  .cc-timeline-dot {
+    position: absolute;
+    left: -20px;
+    top: 10px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #047857;
+    border: 2px solid #ffffff;
+    box-shadow: 0 0 0 2px #a7f3d0;
+  }
+  .cc-timeline-card {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 12px 14px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  }
+  .cc-timeline-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .cc-timeline-type-badge {
+    padding: 2px 7px;
+    border-radius: 6px;
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    background: #f1f5f9;
+    color: #475569;
+  }
+  .cc-timeline-type-badge.pd { background: #ede9fe; color: #6d28d9; }
+  .cc-timeline-type-badge.query { background: #fef3c7; color: #b45309; }
+  .cc-timeline-type-badge.legal { background: #eff6ff; color: #1d4ed8; }
+  .cc-timeline-type-badge.technical { background: #ecfeff; color: #0e7490; }
+  .cc-timeline-type-badge.pdd { background: #f5f3ff; color: #7c3aed; }
+  .cc-timeline-type-badge.otc { background: #fffbeb; color: #d97706; }
+  .cc-timeline-type-badge.disbursement { background: #ecfdf5; color: #047857; }
+  .cc-timeline-time {
+    font-size: 11px;
+    color: #94a3b8;
+  }
+  .cc-timeline-remark {
+    font-size: 12.5px;
+    color: #1e293b;
+    background: #f8fafc;
+    border-left: 3px solid #047857;
+    padding: 6px 10px;
+    border-radius: 0 6px 6px 0;
+    margin-bottom: 8px;
+    line-height: 1.4;
+  }
+  .cc-timeline-footer {
+    font-size: 11px;
+    color: #64748b;
+  }
 `;
+

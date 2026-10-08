@@ -9,6 +9,7 @@ const ROLES = {
   EMPLOYEE: "EMPLOYEE",
   OPS: "OPS",
   BANKER: "BANKER",
+  FINANCE: "FINANCE",
 };
 
 const ROLE_VALUES = Object.values(ROLES);
@@ -29,6 +30,7 @@ const ADMIN_PANEL_ROLES = [
   ROLES.OPS,
   ROLES.BANKER,
   ROLES.EMPLOYEE,
+  ROLES.FINANCE,
 ];
 
 module.exports = {

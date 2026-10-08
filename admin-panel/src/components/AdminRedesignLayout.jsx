@@ -28,11 +28,13 @@ import {
   ShieldCheck,
   StickyNote,
   Tags,
+  User,
   UserPlus,
   Users,
   Wallet,
   X,
 } from "lucide-react";
+
 import axios from "axios";
 
 import "../styles/adminRedesign.css";
@@ -52,20 +54,21 @@ const managerNavItems = [
   { path: "/tasks", label: "Tasks", icon: ClipboardList },
   { path: "/template", label: "Template", icon: FileText },
   { path: "/email-templates", label: "Email Templates", icon: Mail },
-  { path: "/lead-statuses", label: "Lead Statuses", icon: Tags },
-  { path: "/loan-products", label: "Loan Types", icon: Coins },
-  { path: "/lead-sources", label: "Lead Sources", icon: Share2 },
+  { path: "/lead-statuses", label: "Lead Statuses", icon: Tags, permission: "manageLeadStatuses" },
+  { path: "/loan-products", label: "Loan Types", icon: Coins, permission: "manageLoanProducts" },
+  { path: "/lead-sources", label: "Lead Sources", icon: Share2, permission: "manageLeadSources" },
   { path: "/document-types", label: "Document Types", icon: Files },
   { path: "/lenders", label: "Lenders & NBFC", icon: Building2 },
   { path: "/operations", label: "Operations", icon: BriefcaseBusiness, permission: "viewOperations" },
   { path: "/party-payouts", label: "Party / Connector Details", icon: Receipt, permission: "viewConnectors" },
   { path: "/case-payouts", label: "Disbursement & Payouts", icon: IndianRupee, permission: "viewPayouts" },
-  { path: "/expenses", label: "Expense Tracker", icon: Wallet, permission: "viewExpenses" },
+  { path: "/expenses", label: "Expense Tracker", icon: Wallet },
   { path: "/banker/queries", label: "Banker Queries", icon: ClipboardList },
   { path: "/performance", label: "Performance Report", icon: BarChart3, permission: "viewReports" },
   { path: "/lead_report", label: "Lead Report", icon: FileBarChart, permission: "viewReports" },
   { path: "/role-permissions", label: "Role Permissions", icon: ShieldCheck, permission: "manageSettings" },
   { path: "/company", label: "Company & Plan", icon: Building2 },
+  { path: "/profile", label: "Profile", icon: User },
   { path: "/settings", label: "Settings", icon: Settings, permission: "manageSettings" },
 ];
 
@@ -74,33 +77,46 @@ const operationsNavItems = [
   { path: "/followup-work", label: "Today Followup / Work", icon: CalendarClock, permission: "viewFollowupWork" },
   { path: "/notes", label: "Quick Notes", icon: StickyNote },
   { path: "/email-templates", label: "Email Templates", icon: Mail },
-  { path: "/lead-statuses", label: "Lead Statuses", icon: Tags },
-  { path: "/loan-products", label: "Loan Types", icon: Coins },
-  { path: "/lead-sources", label: "Lead Sources", icon: Share2 },
+  { path: "/lead-statuses", label: "Lead Statuses", icon: Tags, permission: "manageLeadStatuses" },
+  { path: "/loan-products", label: "Loan Types", icon: Coins, permission: "manageLoanProducts" },
+  { path: "/lead-sources", label: "Lead Sources", icon: Share2, permission: "manageLeadSources" },
   { path: "/lenders", label: "Lenders & NBFC", icon: Building2 },
   { path: "/operations", label: "Operations", icon: BriefcaseBusiness, permission: "viewOperations" },
   { path: "/party-payouts", label: "Party / Connector Details", icon: Receipt, permission: "viewConnectors" },
   { path: "/case-payouts", label: "Disbursement & Payouts", icon: IndianRupee, permission: "viewPayouts" },
-  { path: "/expenses", label: "Expenses", icon: Wallet, permission: "viewExpenses" },
+  { path: "/expenses", label: "Expenses", icon: Wallet },
   { path: "/banker/queries", label: "Banker Queries", icon: ClipboardList },
+  { path: "/profile", label: "Profile", icon: User },
 ];
 
 const bankerNavItems = [
   { path: "/banker", label: "Assigned Applications", icon: BriefcaseBusiness },
   { path: "/banker/queries", label: "Clarification Queries", icon: ClipboardList },
-  { path: "/company", label: "Company Profile", icon: Building2 },
+  { path: "/profile", label: "Profile", icon: User },
+];
+
+const financeNavItems = [
+  { path: "/case-payouts", label: "Disbursement & Payouts", icon: IndianRupee, permission: "viewPayouts" },
+  { path: "/expenses", label: "Expense Tracker", icon: Wallet },
+  { path: "/party-payouts", label: "Party / Connector Details", icon: Receipt, permission: "viewConnectors" },
+  { path: "/lead_report", label: "Lead Report", icon: FileBarChart, permission: "viewReports" },
+  { path: "/performance", label: "Performance Report", icon: BarChart3, permission: "viewReports" },
+  { path: "/notes", label: "Quick Notes", icon: StickyNote },
+  { path: "/profile", label: "Profile", icon: User },
 ];
 
 const employeeNavItems = [
-  { path: "/leads", label: "Leads", icon: FileText },
+  { path: "/leads", label: "Leads", icon: FileText, permission: "viewLeads" },
   { path: "/followup-work", label: "Today Followup / Work", icon: CalendarClock, permission: "viewFollowupWork" },
   { path: "/notes", label: "Quick Notes", icon: StickyNote },
   { path: "/operations", label: "Operations", icon: BriefcaseBusiness, permission: "viewOperations" },
-  { path: "/lead-statuses", label: "Lead Statuses", icon: Tags },
-  { path: "/loan-products", label: "Loan Types", icon: Coins },
-  { path: "/lead-sources", label: "Lead Sources", icon: Share2 },
-  { path: "/expenses", label: "My Expenses", icon: Wallet },
+  { path: "/lead-statuses", label: "Lead Statuses", icon: Tags, permission: "manageLeadStatuses" },
+  { path: "/loan-products", label: "Loan Types", icon: Coins, permission: "manageLoanProducts" },
+  { path: "/lead-sources", label: "Lead Sources", icon: Share2, permission: "manageLeadSources" },
+  { path: "/expenses", label: "Employee Expenses", icon: Wallet },
+  { path: "/profile", label: "Profile", icon: User },
 ];
+
 
 const defaultStatusLabels = [
   "Fresh Lead",
@@ -154,11 +170,24 @@ function AdminRedesignLayout({ children }) {
   const [statuses, setStatuses] = useState(defaultStatusLabels);
   const employeeRole = localStorage.getItem("employeeRole");
   const userRole = localStorage.getItem("userRole") || "";
-  const name = localStorage.getItem("name") || "Guest";
-  const email = localStorage.getItem("email") || "";
+  const [userName, setUserName] = useState(() => localStorage.getItem("name") || "Guest");
+  const [userEmail, setUserEmail] = useState(() => localStorage.getItem("email") || "");
   const [companyLogo, setCompanyLogo] = useState(() => localStorage.getItem("companyLogo") || "");
   const [companyName, setCompanyName] = useState(() => localStorage.getItem("companyName") || "");
   const [logoFailed, setLogoFailed] = useState(false);
+
+  useEffect(() => {
+    const syncUserProfile = () => {
+      setUserName(localStorage.getItem("name") || "Guest");
+      setUserEmail(localStorage.getItem("email") || "");
+    };
+    window.addEventListener("storage", syncUserProfile);
+    window.addEventListener("user_profile_updated", syncUserProfile);
+    return () => {
+      window.removeEventListener("storage", syncUserProfile);
+      window.removeEventListener("user_profile_updated", syncUserProfile);
+    };
+  }, []);
 
   const isCompanyAdmin =
     ["COMPANY_ADMIN", "SUPERADMIN"].includes(userRole.toUpperCase()) ||
@@ -174,6 +203,10 @@ function AdminRedesignLayout({ children }) {
     userRole.toUpperCase() === "BANKER" ||
     employeeRole?.toLowerCase() === "banker";
 
+  const isFinance =
+    userRole.toUpperCase() === "FINANCE" ||
+    employeeRole?.toLowerCase() === "finance";
+
   const isEmployee =
     userRole.toUpperCase() === "EMPLOYEE" ||
     ["calling", "employee"].includes(employeeRole?.toLowerCase());
@@ -186,42 +219,93 @@ function AdminRedesignLayout({ children }) {
     }
   }, []);
 
-  const rawNavItems =
-    isBanker
-      ? bankerNavItems
-      : isOperations
-      ? operationsNavItems
-      : isEmployee
-      ? employeeNavItems
-      : managerNavItems;
+  const rawNavItems = useMemo(() => {
+    if (isBanker) return bankerNavItems;
+    if (isFinance) {
+      const items = [...financeNavItems];
+      if (userPermissions?.viewLeads) {
+        items.unshift({ path: "/leads", label: "Leads", icon: FileText, permission: "viewLeads" });
+      }
+      if (userPermissions?.viewOperations) {
+        items.splice(2, 0, { path: "/operations", label: "Operations", icon: BriefcaseBusiness, permission: "viewOperations" });
+      }
+      if (userPermissions?.viewFollowupWork) {
+        items.splice(1, 0, { path: "/followup-work", label: "Today Followup / Work", icon: CalendarClock, permission: "viewFollowupWork" });
+      }
+      if (userPermissions?.manageUsers) {
+        items.push({ path: "/add-users", label: "Add Employees", icon: UserPlus, permission: "manageUsers" });
+      }
+      return items;
+    }
+    if (isOperations) {
+      const items = [...operationsNavItems];
+      if (userPermissions?.manageUsers) {
+        items.splice(3, 0, { path: "/add-users", label: "Add Employees", icon: UserPlus, permission: "manageUsers" });
+      }
+      return items;
+    }
+    if (isEmployee) {
+      const items = [...employeeNavItems];
+      if (userPermissions?.viewPayouts) {
+        items.push({ path: "/case-payouts", label: "Disbursement & Payouts", icon: IndianRupee, permission: "viewPayouts" });
+      }
+      if (userPermissions?.viewConnectors) {
+        items.push({ path: "/party-payouts", label: "Party / Connector Details", icon: Receipt, permission: "viewConnectors" });
+      }
+      if (userPermissions?.viewReports) {
+        items.push({ path: "/performance", label: "Performance Report", icon: BarChart3, permission: "viewReports" });
+        items.push({ path: "/lead_report", label: "Lead Report", icon: FileBarChart, permission: "viewReports" });
+      }
+      if (userPermissions?.manageUsers) {
+        items.push({ path: "/add-users", label: "Add Employees", icon: UserPlus, permission: "manageUsers" });
+      }
+      if (userPermissions?.manageSettings) {
+        items.push({ path: "/settings", label: "Settings", icon: Settings, permission: "manageSettings" });
+      }
+      return items;
+    }
+    return managerNavItems;
+  }, [isBanker, isFinance, isOperations, isEmployee, userPermissions]);
 
   const navItems = useMemo(() => {
-    if (isCompanyAdmin) return rawNavItems;
-    return rawNavItems.filter((item) => {
+    let items = rawNavItems;
+    // Hide Company & Plan from non-company-admin users so they only see their Profile
+    if (!isCompanyAdmin) {
+      items = items.filter((item) => item.path !== "/company");
+    }
+    return items.filter((item) => {
+      if (isCompanyAdmin) return true;
       if (!item.permission) return true;
-      return userPermissions[item.permission] !== false && Boolean(userPermissions[item.permission]);
+      const hasPermission = Boolean(userPermissions[item.permission] || userPermissions.manageSettings);
+      return userPermissions[item.permission] !== false && hasPermission;
     });
   }, [rawNavItems, isCompanyAdmin, userPermissions]);
 
+
   const homePath =
-    employeeRole === "banker"
+    isFinance
+      ? "/case-payouts"
+      : employeeRole === "banker"
       ? "/banker"
       : employeeRole === "operations"
       ? "/operations"
       : isEmployee
       ? "/leads"
       : "/";
-  const isDashboard = location.pathname === "/" || location.pathname === "/banker";
+  const isDashboard = location.pathname === "/" || location.pathname === "/banker" || (isFinance && location.pathname === "/case-payouts");
 
   const initials = useMemo(() => {
-    return name
-      .split(" ")
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((part) => part[0])
-      .join("")
-      .toUpperCase() || "CC";
-  }, [name]);
+    return (
+      userName
+        .split(" ")
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((part) => part[0])
+        .join("")
+        .toUpperCase() || "CC"
+    );
+  }, [userName]);
+
 
   const isActive = (path) => {
     if (path === "/" || path === "/banker") return location.pathname === path;
@@ -394,14 +478,15 @@ function AdminRedesignLayout({ children }) {
         </nav>
 
         <div className="cc-sidebar-footer">
-          <div className="cc-sidebar-profile">
+          <Link to="/profile" className="cc-sidebar-profile" style={{ textDecoration: "none" }} title="View & Edit Profile">
             <span className="cc-profile-avatar">{initials}</span>
             <span className="cc-profile-text">
-              <strong>{name}</strong>
-              {email && <small>{email}</small>}
+              <strong>{userName}</strong>
+              {userEmail && <small>{userEmail}</small>}
             </span>
-          </div>
+          </Link>
           <button type="button" className="cc-nav-item cc-logout" onClick={handleLogout}>
+
             <LogOut size={19} />
             <span>Logout</span>
           </button>

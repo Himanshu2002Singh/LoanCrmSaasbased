@@ -83,6 +83,18 @@ exports.createCall = async (req, res) => {
       if (!lead || !belongsToScope(req, lead)) {
         return res.status(404).json({ message: "Lead not found" });
       }
+      if (req.user.role === ROLES.EMPLOYEE) {
+        if (
+          !req.permissions?.editAllLeads &&
+          lead.assignedEmployeeId !== req.user.id &&
+          lead.assignedManagerId !== req.user.id
+        ) {
+          return res.status(403).json({
+            code: "WORKED_LEAD_READ_ONLY",
+            message: "This lead is currently assigned to another employee. You have read-only access to this worked lead.",
+          });
+        }
+      }
     }
 
     const callStatus = String(body.call_status || body.callStatus || "").toUpperCase();

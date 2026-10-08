@@ -107,6 +107,8 @@ const LeadsPopup = ({ isOpen, onClose, title, startDate, endDate }) => {
                       <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Lead ID</th>
                       <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Name</th>
                       <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Phone</th>
+                      <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Status</th>
+                      <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Latest Remark</th>
                       <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Assigned To</th>
                     </>
                   )}
@@ -131,9 +133,31 @@ const LeadsPopup = ({ isOpen, onClose, title, startDate, endDate }) => {
                       </>
                     ) : (
                       <>
-                        <td className="px-4 py-2 text-sm text-gray-800">{lead.lead_id}</td>
-                        <td className="px-4 py-2 text-sm text-gray-800">{lead.name || lead.customer_name}</td>
-                        <td className="px-4 py-2 text-sm text-gray-800">{lead.number || lead.customer_number}</td>
+                        <td className="px-4 py-2 text-sm text-gray-800 font-semibold">{lead.lead_id || lead.id}</td>
+                        <td className="px-4 py-2 text-sm text-gray-800">{lead.name || lead.customer_name || "--"}</td>
+                        <td className="px-4 py-2 text-sm text-gray-800">{lead.number || lead.customer_number || "--"}</td>
+                        <td className="px-4 py-2 text-sm text-gray-800">
+                          <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-700">
+                            {lead.status || lead.lead_status || "--"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2 text-sm text-gray-800">
+                          {lead.latest_remark || lead.remarks ? (
+                            <div className="max-w-xs">
+                              <div className="text-xs font-medium text-gray-900">"{lead.latest_remark || lead.remarks}"</div>
+                              <div className="text-[11px] text-gray-500 mt-0.5">
+                                {(lead.latest_remark_date || lead.updatedAt || lead.createdAt)
+                                  ? new Date(lead.latest_remark_date || lead.updatedAt || lead.createdAt).toLocaleString('en-IN', {
+                                      dateStyle: 'medium',
+                                      timeStyle: 'short',
+                                    })
+                                  : ""}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-gray-400 italic">No remark</span>
+                          )}
+                        </td>
                         <td className="px-4 py-2 text-sm text-gray-800">{lead.owner || 'Unassigned'}</td>
                       </>
                     )}

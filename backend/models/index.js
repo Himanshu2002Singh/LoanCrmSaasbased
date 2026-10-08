@@ -15,6 +15,7 @@ const Lead = require("./Lead");
 const CallLog = require("./CallLog");
 const FollowUp = require("./FollowUp");
 const Task = require("./Task");
+const LeadAssignmentHistory = require("./LeadAssignmentHistory");
 
 // Module 4: Operations & Document Management
 const Document = require("./Document");
@@ -25,6 +26,7 @@ const Lender = require("./Lender");
 const Application = require("./Application");
 const BankerQuery = require("./BankerQuery");
 const EmailTemplate = require("./EmailTemplate");
+const OperationStatusHistory = require("./OperationStatusHistory");
 
 // Module 6: Master Configs, Attendance & Audit Engine
 const MasterConfig = require("./MasterConfig");
@@ -73,6 +75,16 @@ User.hasMany(Lead, { foreignKey: "assigned_employee_id", as: "assignedLeads" });
 
 Lead.belongsTo(User, { foreignKey: "assigned_manager_id", as: "assignedManager" });
 User.hasMany(Lead, { foreignKey: "assigned_manager_id", as: "managedLeads" });
+
+// Lead Assignment History & Collaboration Trail
+Lead.hasMany(LeadAssignmentHistory, { foreignKey: "lead_id", as: "assignmentHistories", onDelete: "CASCADE" });
+LeadAssignmentHistory.belongsTo(Lead, { foreignKey: "lead_id", as: "lead" });
+LeadAssignmentHistory.belongsTo(User, { foreignKey: "user_id", as: "assignee" });
+User.hasMany(LeadAssignmentHistory, { foreignKey: "user_id", as: "leadAssignments" });
+LeadAssignmentHistory.belongsTo(User, { foreignKey: "assigned_by_id", as: "assignedBy" });
+User.hasMany(LeadAssignmentHistory, { foreignKey: "assigned_by_id", as: "createdLeadAssignments" });
+LeadAssignmentHistory.belongsTo(Company, { foreignKey: "company_id", as: "company" });
+Company.hasMany(LeadAssignmentHistory, { foreignKey: "company_id", as: "leadAssignmentHistories", onDelete: "CASCADE" });
 
 // Call Logs & Follow-ups
 Lead.hasMany(CallLog, { foreignKey: "lead_id", as: "callLogs", onDelete: "SET NULL" });
@@ -137,6 +149,14 @@ BankerQuery.belongsTo(Application, { foreignKey: "application_id", as: "applicat
 
 BankerQuery.belongsTo(User, { foreignKey: "banker_id", as: "banker" });
 BankerQuery.belongsTo(User, { foreignKey: "resolved_by_ops_id", as: "resolvedByOps" });
+
+// Operation Status History & Audit Trail
+Application.hasMany(OperationStatusHistory, { foreignKey: "application_id", as: "statusHistories", onDelete: "CASCADE" });
+OperationStatusHistory.belongsTo(Application, { foreignKey: "application_id", as: "application" });
+OperationStatusHistory.belongsTo(User, { foreignKey: "updated_by", as: "updater" });
+OperationStatusHistory.belongsTo(Company, { foreignKey: "company_id", as: "company" });
+Lead.hasMany(OperationStatusHistory, { foreignKey: "lead_id", as: "opsHistories", onDelete: "CASCADE" });
+OperationStatusHistory.belongsTo(Lead, { foreignKey: "lead_id", as: "lead" });
 
 Company.hasMany(EmailTemplate, { foreignKey: "company_id", as: "emailTemplates", onDelete: "CASCADE" });
 EmailTemplate.belongsTo(Company, { foreignKey: "company_id", as: "company" });
@@ -225,6 +245,8 @@ const db = {
   EmailTemplate,
   Note,
   LeadDocumentRequest,
+  OperationStatusHistory,
+  LeadAssignmentHistory,
 };
 
 module.exports = db;

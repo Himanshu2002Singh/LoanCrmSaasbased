@@ -54,6 +54,11 @@ const LeadEditScreen = () => {
     ["MANAGER", "OPS", "EMPLOYEE"].includes(userRole.toUpperCase()) ||
     ["manager", "operations", "calling", "employee", "sales"].includes(employeeRole?.toLowerCase());
   const canEditLead = isAllowedRole && userPermissions.editLead !== false;
+  const canAssignLead =
+    isCompanyAdmin ||
+    ["MANAGER", "OPS"].includes(userRole.toUpperCase()) ||
+    ["manager", "operations", "sales"].includes(employeeRole?.toLowerCase()) ||
+    Boolean(userPermissions.assignLead || userPermissions.manageLeads);
   const canViewCommission = !isEmployee && Boolean(userPermissions.viewPayouts || userPermissions.viewConnectors || userRole === "COMPANY_ADMIN" || userRole === "SUPERADMIN");
 
   useEffect(() => {
@@ -72,6 +77,11 @@ const LeadEditScreen = () => {
       const response = await axios.get(`${API_URL}/leads/${id}`);
       const data = response.data?.data;
       if (data) {
+        if (data.is_read_only) {
+          toast.warning(`This lead is currently assigned to ${data.current_owner || data.owner || "another staff member"}. It is in read-only mode for you.`);
+          navigate(`/lead/${id}`, { replace: true });
+          return;
+        }
         setLead({
           name: data.name || "",
           email: data.email || "",
@@ -92,7 +102,7 @@ const LeadEditScreen = () => {
           refrence: data.refrence || "",
           address: data.address || "",
           description: data.description || "",
-          remark: data.remark || "",
+          remark: data.latest_remark || data.last_remark || data.remark || "",
         });
       }
     } catch (error) {
@@ -218,8 +228,8 @@ const LeadEditScreen = () => {
             <select
               value={lead.person_id}
               onChange={handleEmployeeChange}
-              disabled={isEmployee}
-              className={`mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 ${isEmployee ? "bg-gray-100 text-gray-500 cursor-not-allowed" : "bg-white"}`}
+              disabled={!canAssignLead}
+              className={`mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 ${!canAssignLead ? "bg-gray-100 text-gray-500 cursor-not-allowed" : "bg-white"}`}
             >
               <option value="" disabled>Select Employee</option>
               {employees.map((emp) => (

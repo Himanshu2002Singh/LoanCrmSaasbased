@@ -20,6 +20,7 @@
   "license": "ISC",
   "description": "Multi-Tenant SaaS Loan CRM Backend API",
   "dependencies": {
+    "archiver": "^8.0.0",
     "aws-sdk": "^2.1692.0",
     "bcrypt": "^6.0.0",
     "compression": "^1.8.0",

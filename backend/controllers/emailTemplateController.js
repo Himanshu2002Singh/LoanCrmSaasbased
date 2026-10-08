@@ -76,7 +76,42 @@ Thank you,
     category: "QUERY_RESPONSE",
     isDefault: false,
   },
+  {
+    name: "Customer KYC & Document Upload Request Link",
+    subject: "Important: Upload KYC & Verification Documents for Your {{loan_product}} Application",
+    content: `Dear {{customer_name}},
+
+Greetings from {{company_name}}!
+
+To proceed with and fast-track the sanctioning of your {{loan_product}} application, please upload your verification documents using our secure document portal:
+
+{{upload_link}}
+
+Requested Documents:
+{{documents_list}}
+
+If you have any questions or require assistance, please contact your Loan Officer {{officer_name}} ({{officer_phone}}).
+
+Best regards,
+Operations Desk
+{{company_name}}`,
+    category: "CUSTOMER_REQUEST",
+    isDefault: true,
+  },
 ];
+
+/**
+ * Robust company resolver supporting company users and platform superadmins
+ */
+const resolveCompanyId = (req) => {
+  if (req.companyId) return req.companyId;
+  if (req.user?.companyId) return req.user.companyId;
+  if (req.user?.role === "SUPERADMIN") {
+    const q = parseInt(req.query?.companyId || req.headers?.["x-company-id"] || req.body?.companyId, 10);
+    if (!Number.isNaN(q)) return q;
+  }
+  return null;
+};
 
 /**
  * Seed default templates if none exist for company
@@ -100,7 +135,7 @@ const seedDefaultsIfEmpty = async (companyId) => {
  */
 exports.getEmailTemplates = async (req, res, next) => {
   try {
-    const companyId = req.user.companyId;
+    const companyId = resolveCompanyId(req);
     if (companyId) {
       await seedDefaultsIfEmpty(companyId);
     }
@@ -162,7 +197,10 @@ exports.createEmailTemplate = async (req, res, next) => {
       return res.status(400).json({ message: "Email content / body is required" });
     }
 
-    const companyId = req.user.companyId;
+    const companyId = resolveCompanyId(req);
+    if (!companyId) {
+      return res.status(400).json({ message: "No company associated with user" });
+    }
 
     if (isDefault) {
       // Unset previous defaults
@@ -248,7 +286,7 @@ exports.deleteEmailTemplate = async (req, res, next) => {
  */
 exports.getSmtpConfig = async (req, res, next) => {
   try {
-    const companyId = req.user.companyId;
+    const companyId = resolveCompanyId(req);
     if (!companyId) {
       return res.status(400).json({ message: "No company associated with user" });
     }
@@ -286,7 +324,7 @@ exports.getSmtpConfig = async (req, res, next) => {
  */
 exports.updateSmtpConfig = async (req, res, next) => {
   try {
-    const companyId = req.user.companyId;
+    const companyId = resolveCompanyId(req);
     if (!companyId) {
       return res.status(400).json({ message: "No company associated with user" });
     }
@@ -364,7 +402,7 @@ exports.updateSmtpConfig = async (req, res, next) => {
  */
 exports.testSmtpConfig = async (req, res, next) => {
   try {
-    const companyId = req.user.companyId;
+    const companyId = resolveCompanyId(req);
     const company = companyId ? await Company.findByPk(companyId) : null;
     const existingConfig = company?.smtpConfig || {};
 

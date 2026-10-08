@@ -17,6 +17,7 @@ import {
   MessageSquare,
   FileCheck,
   Check,
+  Mail,
 } from "lucide-react";
 import API_URL, { CLIENT_PORTAL_URL } from "../../config";
 
@@ -38,6 +39,16 @@ export default function LeadDocumentRequestModal({
   const [generatedResult, setGeneratedResult] = useState(null);
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedMsg, setCopiedMsg] = useState(false);
+  const [customerEmail, setCustomerEmail] = useState("");
+  const [sendAlsoEmail, setSendAlsoEmail] = useState(true);
+  const [sendingEmail, setSendingEmail] = useState(false);
+  const [emailSentSuccess, setEmailSentSuccess] = useState(false);
+
+  useEffect(() => {
+    if (lead?.customer?.email) {
+      setCustomerEmail(lead.customer.email);
+    }
+  }, [lead]);
 
   // Fetch document config and presets
   const fetchConfigs = async () => {
@@ -235,6 +246,33 @@ export default function LeadDocumentRequestModal({
     window.open(waUrl, "_blank");
   };
 
+  const handleSendEmail = async () => {
+    if (!customerEmail.trim()) {
+      toast.warning("Please enter a customer email address");
+      return;
+    }
+    if (!generatedResult?.id) return;
+
+    setSendingEmail(true);
+    try {
+      const token = localStorage.getItem("token");
+      const res = await axios.post(
+        `${API_URL}/document-requests/${generatedResult.id}/send-email`,
+        { recipientEmail: customerEmail.trim() },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.data?.success) {
+        setEmailSentSuccess(true);
+        toast.success(res.data.message || `Upload link successfully emailed to ${customerEmail}!`);
+      }
+    } catch (err) {
+      console.error("Email send error:", err);
+      toast.error(err.response?.data?.message || "Failed to send email to customer");
+    } finally {
+      setSendingEmail(false);
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -348,6 +386,43 @@ export default function LeadDocumentRequestModal({
                   >
                     {copiedMsg ? <Check size={14} /> : <Copy size={14} />}
                     <span>{copiedMsg ? "Copied" : "Copy Text"}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Instant Email Notification */}
+              <div className="bg-blue-50/60 border border-blue-200 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-blue-900 font-bold text-sm">
+                    <Mail size={16} className="text-blue-600" />
+                    <span>Email Document Request to Customer</span>
+                  </div>
+                  {emailSentSuccess && (
+                    <span className="text-[11px] font-bold text-emerald-700 bg-emerald-100 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                      <Check size={11} /> Sent Successfully
+                    </span>
+                  )}
+                </div>
+
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Sends an official email with company branding, requested document checklist, and a secure 1-click upload link to the customer.
+                </p>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="email"
+                    placeholder="customer@example.com"
+                    value={customerEmail}
+                    onChange={(e) => setCustomerEmail(e.target.value)}
+                    className="flex-1 bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs text-slate-900 focus:outline-none focus:border-blue-500"
+                  />
+                  <button
+                    onClick={handleSendEmail}
+                    disabled={sendingEmail || !customerEmail.trim()}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold rounded-xl text-xs transition-all flex items-center gap-1.5 shrink-0 shadow-sm"
+                  >
+                    <Send size={13} className={sendingEmail ? "animate-spin" : ""} />
+                    <span>{sendingEmail ? "Sending..." : "Send via Email"}</span>
                   </button>
                 </div>
               </div>
@@ -532,15 +607,28 @@ export default function LeadDocumentRequestModal({
                   </select>
                 </div>
 
-                <div className="sm:col-span-2">
+                <div>
                   <label className="text-xs font-bold text-slate-700 block mb-1">
-                    Customer Message (Pre-filled on WhatsApp)
+                    Customer Email
+                  </label>
+                  <input
+                    type="email"
+                    value={customerEmail}
+                    onChange={(e) => setCustomerEmail(e.target.value)}
+                    placeholder="customer@email.com"
+                    className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">
+                    Custom Note for Customer
                   </label>
                   <input
                     type="text"
                     value={customMessage}
                     onChange={(e) => setCustomMessage(e.target.value)}
-                    placeholder="Note for customer..."
+                    placeholder="Pre-filled note..."
                     className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                   />
                 </div>

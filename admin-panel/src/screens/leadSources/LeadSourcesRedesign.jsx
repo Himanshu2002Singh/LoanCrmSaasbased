@@ -70,6 +70,17 @@ export default function LeadSourcesRedesign() {
     userRole.toUpperCase() === "SUPERADMIN" ||
     ["admin", "superadmin"].includes(employeeRole?.toLowerCase());
 
+  const userPermissions = useMemo(() => {
+    try {
+      const stored = localStorage.getItem("userPermissions");
+      return stored ? JSON.parse(stored) : {};
+    } catch {
+      return {};
+    }
+  }, []);
+  const canManage = isAdmin || Boolean(userPermissions.manageLeadSources || userPermissions.manageSettings);
+  const canDelete = isAdmin || Boolean(userPermissions.manageLeadSources || userPermissions.manageSettings || userPermissions.deleteRecords);
+
   const [sources, setSources] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -195,6 +206,10 @@ export default function LeadSourcesRedesign() {
   }, [searchTerm]);
 
   const openCreate = () => {
+    if (!canManage) {
+      toast.error("You do not have permission to add lead sources");
+      return;
+    }
     setEditing(null);
     const nextOrder =
       sources.length > 0
@@ -208,6 +223,10 @@ export default function LeadSourcesRedesign() {
   };
 
   const openEdit = (source) => {
+    if (!canManage) {
+      toast.error("You do not have permission to edit lead sources");
+      return;
+    }
     setEditing(source);
     setForm({
       label: source.label || "",
@@ -269,6 +288,10 @@ export default function LeadSourcesRedesign() {
   };
 
   const handleToggleActive = async (source) => {
+    if (!canManage) {
+      toast.error("You do not have permission to modify lead sources");
+      return;
+    }
     try {
       await axios.put(`${API_URL}/master-configs/${source.id}`, {
         isActive: !source.isActive,
@@ -289,6 +312,10 @@ export default function LeadSourcesRedesign() {
 
   const handleDelete = async (hard = true) => {
     if (!deleteTarget) return;
+    if (!canDelete) {
+      toast.error("You do not have permission to delete lead sources");
+      return;
+    }
     if (deleteTarget.value?.toLowerCase() === "self") {
       toast.error("Default 'Self' source cannot be deleted as it is required by the system.");
       setDeleteTarget(null);

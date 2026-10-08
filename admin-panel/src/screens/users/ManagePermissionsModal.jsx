@@ -121,6 +121,12 @@ const PERMISSION_CATEGORIES = [
         confidential: false,
       },
       {
+        key: "reassignLeads",
+        label: "Reassign Leads to Employees",
+        description: "Permission to reassign leads to other employees within the company.",
+        confidential: false,
+      },
+      {
         key: "followupLead",
         label: "Lead Follow-up & Meeting Scheduling",
         description: "Permission to schedule next meetings, log call notes, and update follow-up dates.",
@@ -161,8 +167,26 @@ const PERMISSION_CATEGORIES = [
       {
         key: "manageSettings",
         label: "Manage Company Master Settings",
-        description: "Configure system templates, loan products, lead sources, and company settings.",
+        description: "Configure system templates, general settings, and company settings.",
         confidential: true,
+      },
+      {
+        key: "manageLeadStatuses",
+        label: "Manage Lead Statuses",
+        description: "Add, edit, reorder, and configure pipeline stages and statuses for leads.",
+        confidential: false,
+      },
+      {
+        key: "manageLoanProducts",
+        label: "Manage Loan Types / Products",
+        description: "Add, edit, and configure available company loan types and financial products.",
+        confidential: false,
+      },
+      {
+        key: "manageLeadSources",
+        label: "Manage Lead Sources",
+        description: "Add, edit, and configure customer acquisition sources and partner channels.",
+        confidential: false,
       },
       {
         key: "deleteRecords",
@@ -250,6 +274,7 @@ export default function ManagePermissionsModal({ open, onClose, user, onUpdated 
         viewAllLeads: false,
         createLead: user.role === "MANAGER" || user.role === "EMPLOYEE",
         editLead: user.role === "MANAGER" || user.role === "EMPLOYEE" || user.role === "OPS",
+        reassignLeads: user.role === "MANAGER" || user.role === "EMPLOYEE" || user.role === "OPS",
         followupLead: user.role === "MANAGER" || user.role === "EMPLOYEE" || user.role === "OPS",
         viewOperations: user.role === "MANAGER" || user.role === "OPS",
         manageOperations: user.role === "MANAGER" || user.role === "OPS",
@@ -258,9 +283,38 @@ export default function ManagePermissionsModal({ open, onClose, user, onUpdated 
         exportData: false,
         manageUsers: false,
         manageSettings: false,
+        manageLeadStatuses: false,
+        manageLoanProducts: false,
+        manageLeadSources: false,
         deleteRecords: false,
       };
       toast.info("Applied 'Confidential / Restricted' preset");
+    } else if (presetType === "finance") {
+      preset = {
+        viewPayouts: true,
+        managePayouts: true,
+        viewConnectors: true,
+        manageConnectors: true,
+        viewExpenses: true,
+        manageExpenses: true,
+        viewReports: true,
+        exportData: true,
+        viewAllLeads: false,
+        createLead: false,
+        editLead: false,
+        reassignLeads: false,
+        followupLead: false,
+        viewOperations: false,
+        manageOperations: false,
+        createLoanApplication: false,
+        manageUsers: false,
+        manageSettings: false,
+        manageLeadStatuses: false,
+        manageLoanProducts: false,
+        manageLeadSources: false,
+        deleteRecords: false,
+      };
+      toast.info("Applied 'Finance & Accounts' preset");
     } else if (presetType === "full") {
       // Grant all permissions
       preset = {
@@ -273,6 +327,7 @@ export default function ManagePermissionsModal({ open, onClose, user, onUpdated 
         viewAllLeads: true,
         createLead: true,
         editLead: true,
+        reassignLeads: true,
         followupLead: true,
         viewOperations: true,
         manageOperations: true,
@@ -281,6 +336,9 @@ export default function ManagePermissionsModal({ open, onClose, user, onUpdated 
         exportData: true,
         manageUsers: true,
         manageSettings: true,
+        manageLeadStatuses: true,
+        manageLoanProducts: true,
+        manageLeadSources: true,
         deleteRecords: true,
       };
       toast.info("Applied 'Full Access' preset");
@@ -375,6 +433,15 @@ export default function ManagePermissionsModal({ open, onClose, user, onUpdated 
                 title="Hide all payouts, connectors, and expense data"
               >
                 🔒 Strict (Hide Confidential Data)
+              </button>
+              <button
+                type="button"
+                className="cc-perm-preset-btn"
+                style={{ background: "#f0fdfa", color: "#0f766e", borderColor: "#99f6e4" }}
+                onClick={() => handleApplyPreset("finance")}
+                title="Only payouts, expenses, and connector parties"
+              >
+                💼 Finance Only
               </button>
               <button
                 type="button"

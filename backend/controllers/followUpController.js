@@ -47,6 +47,7 @@ const serialize = (row) => ({
   status: row.status,
   remarks: row.remarks,
   createdAt: row.createdAt,
+  updatedAt: row.updatedAt,
 });
 
 const followUpScope = async (req) => {
@@ -386,6 +387,17 @@ exports.updateFollowUp = async (req, res) => {
     }
 
     await followUp.update(data);
+
+    if (req.body.remarks) {
+      await logActivity(req, {
+        recordType: "Lead",
+        recordId: followUp.leadId,
+        action: "UPDATED",
+        remarks: req.body.remarks,
+        companyId: followUp.companyId,
+      });
+    }
+
     const updated = await FollowUp.findByPk(followUp.id, { include: FOLLOWUP_INCLUDES });
     return res.status(200).json({ message: "Follow-up updated", data: serialize(updated) });
   } catch (error) {

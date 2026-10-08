@@ -15,6 +15,7 @@ export default function AddLeadModal({ open, onClose, onCreated }) {
   const [contact, setContact] = useState("");
   const [source, setSource] = useState("Self");
   const [commissionPercent, setCommissionPercent] = useState("");
+  const [initialRemark, setInitialRemark] = useState("");
   const [excelDefaultSource, setExcelDefaultSource] = useState("Self");
   const [excelDefaultCommission, setExcelDefaultCommission] = useState("");
   const [sourcesList, setSourcesList] = useState([]);
@@ -90,6 +91,7 @@ export default function AddLeadModal({ open, onClose, onCreated }) {
     setContact("");
     setSource("Self");
     setCommissionPercent("");
+    setInitialRemark("");
     setExcelDefaultSource("Self");
     setExcelDefaultCommission("");
     setFile(null);
@@ -121,6 +123,7 @@ export default function AddLeadModal({ open, onClose, onCreated }) {
           name: name.trim(),
           number: contact.trim(),
           source: (source || "").trim() || "Self",
+          remark: initialRemark.trim() || undefined,
           commission_percent:
             commissionPercent !== "" && !isNaN(parseFloat(commissionPercent))
               ? parseFloat(commissionPercent)
@@ -270,6 +273,17 @@ export default function AddLeadModal({ open, onClose, onCreated }) {
                   </div>
                 </label>
               )}
+
+              <label className="cc-modal-field" style={{ gridColumn: "1 / -1" }}>
+                <span>Initial Remark <span style={{ fontWeight: 400, color: "#94a3b8" }}>(Optional)</span></span>
+                <input
+                  type="text"
+                  value={initialRemark}
+                  onChange={(event) => setInitialRemark(event.target.value)}
+                  placeholder="e.g. Interested in loan, callback requested after 4 PM"
+                  style={{ width: "100%", boxSizing: "border-box" }}
+                />
+              </label>
             </div>
 
             <div className="cc-modal-actions">

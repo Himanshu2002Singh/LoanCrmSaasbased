@@ -49,6 +49,20 @@ router.post(
   controller.sendApplicationToBank
 );
 
+router.get("/:id/history", controller.getApplicationHistory);
+
+router.put(
+  "/:id/stage-status",
+  requireRole(ROLES.COMPANY_ADMIN, ROLES.MANAGER, ROLES.OPS, ROLES.BANKER),
+  controller.updateStageStatus
+);
+
+router.patch(
+  "/:id/stage-status",
+  requireRole(ROLES.COMPANY_ADMIN, ROLES.MANAGER, ROLES.OPS, ROLES.BANKER),
+  controller.updateStageStatus
+);
+
 router.patch(
   "/:id/status",
   requireRole(ROLES.COMPANY_ADMIN, ROLES.MANAGER, ROLES.OPS, ROLES.BANKER),

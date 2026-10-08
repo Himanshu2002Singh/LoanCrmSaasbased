@@ -25,6 +25,7 @@ const PANEL_ROLE = {
   OPS: "operations",
   EMPLOYEE: "calling",
   BANKER: "banker",
+  FINANCE: "finance",
 };
 
 function LoginRedesign() {
@@ -78,6 +79,7 @@ function LoginRedesign() {
 
       // A super admin operates the platform, not a company, so they land on
       // their own console. Bankers land on the banker underwriting portal.
+      // Finance lands on case payouts & disbursals.
       // Sales callers/employees land directly on the leads page.
       if (role === "SUPERADMIN") {
         navigate("/platform");
@@ -85,6 +87,8 @@ function LoginRedesign() {
         navigate("/banker");
       } else if (panelRole === "operations") {
         navigate("/operations");
+      } else if (panelRole === "finance" || role === "FINANCE") {
+        navigate("/case-payouts");
       } else if (panelRole === "calling" || role === "EMPLOYEE") {
         navigate("/leads");
       } else {

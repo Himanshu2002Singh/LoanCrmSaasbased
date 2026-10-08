@@ -54,8 +54,60 @@ const numberFormatter = new Intl.NumberFormat("en-IN", {
 });
 
 export default function CasePayoutsScreen() {
+  const userRole = (localStorage.getItem("userRole") || "").toUpperCase();
+  const employeeRole = (localStorage.getItem("employeeRole") || "").toLowerCase();
+  const isCompanyAdmin =
+    ["COMPANY_ADMIN", "SUPERADMIN"].includes(userRole) ||
+    ["admin", "superadmin"].includes(employeeRole);
+
+  const userPermissions = useMemo(() => {
+    try {
+      return JSON.parse(localStorage.getItem("userPermissions") || "{}");
+    } catch {
+      return {};
+    }
+  }, []);
+
+  const canManagePayouts =
+    isCompanyAdmin ||
+    ["FINANCE", "OPS"].includes(userRole) ||
+    Boolean(userPermissions.managePayouts);
+
   // Main Tab: "cases" (Disbursed Case Payouts) | "journal" (Payment Ledger matching sheet)
   const [activeMainTab, setActiveMainTab] = useState("cases");
+
+  // Add Payout Modal State
+  const [addPayoutModalOpen, setAddPayoutModalOpen] = useState(false);
+  const [savingNewPayout, setSavingNewPayout] = useState(false);
+  const [leadsList, setLeadsList] = useState([]);
+  const [loadingLeads, setLoadingLeads] = useState(false);
+  const [selectedLeadId, setSelectedLeadId] = useState("");
+  const [addForm, setAddForm] = useState({
+    leadId: "",
+    customerName: "",
+    customerMobile: "",
+    customerEmail: "",
+    loanProduct: "Personal Loan",
+    bankName: "HDFC Bank",
+    loanAmount: "",
+    bankCommissionPercent: 2.0,
+    baseAmount: "",
+    bankGstPercent: 18,
+    bankGstAmount: 0,
+    bankTdsPercent: 5,
+    bankTdsAmount: 0,
+    bankNetReceivable: 0,
+    disbursalDate: new Date().toISOString().split("T")[0],
+    payoutType: "VENDOR",
+    partyName: "Direct",
+    partyCode: "",
+    partyCommissionPercent: 50.0,
+    partyCommissionDue: 0,
+    extraCharges: 0,
+    partyNetPayable: 0,
+    netMargin: 0,
+    notes: "",
+  });
 
   // Cases List State
   const [cases, setCases] = useState([]);
@@ -490,6 +542,194 @@ export default function CasePayoutsScreen() {
     }
   };
 
+  // Open Add Payout Modal
+  const openAddPayoutModal = async () => {
+    const today = new Date().toISOString().split("T")[0];
+    const initialForm = {
+      leadId: "",
+      customerName: "",
+      customerMobile: "",
+      customerEmail: "",
+      loanProduct: "Personal Loan",
+      bankName: "HDFC Bank",
+      loanAmount: "",
+      bankCommissionPercent: 2.0,
+      baseAmount: "",
+      bankGstPercent: 18,
+      bankGstAmount: 0,
+      bankTdsPercent: 5,
+      bankTdsAmount: 0,
+      bankNetReceivable: 0,
+      disbursalDate: today,
+      payoutType: "VENDOR",
+      partyName: "Direct",
+      partyCode: "",
+      partyCommissionPercent: 50.0,
+      partyCommissionDue: 0,
+      extraCharges: 0,
+      partyNetPayable: 0,
+      netMargin: 0,
+      notes: "",
+    };
+    setAddForm(initialForm);
+    setSelectedLeadId("");
+    setAddPayoutModalOpen(true);
+
+    try {
+      setLoadingLeads(true);
+      const res = await axios.get(`${API_URL}/leads`, { params: { limit: 150 } });
+      const rawLeads = res.data?.leads || res.data?.data || [];
+      setLeadsList(rawLeads);
+    } catch (err) {
+      console.warn("Could not prefetch leads list:", err);
+    } finally {
+      setLoadingLeads(false);
+    }
+  };
+
+  // Real-time calculation helper for Add Modal
+  const recomputeAddForm = (updates) => {
+    setAddForm((prev) => {
+      const merged = { ...prev, ...updates };
+      const loan = parseFloat(merged.loanAmount) || 0;
+      const bankPct = parseFloat(merged.bankCommissionPercent) || 0;
+
+      let base = 0;
+      if (
+        updates.loanAmount !== undefined ||
+        updates.bankCommissionPercent !== undefined ||
+        merged.baseAmount === "" ||
+        merged.baseAmount === undefined
+      ) {
+        base = Math.round((loan * bankPct) / 100);
+      } else if (updates.baseAmount !== undefined) {
+        base = parseFloat(updates.baseAmount) || 0;
+      } else {
+        base = parseFloat(merged.baseAmount) || Math.round((loan * bankPct) / 100);
+      }
+
+      const bGstPct = parseFloat(merged.bankGstPercent ?? 18) || 0;
+      const bGstAmt = Math.round((base * bGstPct) / 100);
+
+      const bTdsPct = parseFloat(merged.bankTdsPercent ?? 5) || 0;
+      const bTdsAmt = Math.round((base * bTdsPct) / 100);
+
+      const bankNet = Math.max(0, base - bGstAmt - bTdsAmt);
+      const isSelf = merged.payoutType === "SELF";
+      const manpower = parseFloat(merged.extraCharges) || 0;
+
+      let partyCommPct = 0;
+      let partyCommDue = 0;
+      let partyNet = 0;
+      let margin = 0;
+
+      if (isSelf) {
+        partyCommPct = 0;
+        partyCommDue = 0;
+        partyNet = 0;
+        margin = Math.round(bankNet - manpower);
+      } else {
+        partyCommPct = parseFloat(merged.partyCommissionPercent ?? 50) || 0;
+        partyCommDue = Math.round((bankNet * partyCommPct) / 100);
+        partyNet = Math.max(0, partyCommDue - manpower);
+        margin = Math.round(bankNet - partyNet);
+      }
+
+      return {
+        ...merged,
+        baseAmount: base,
+        bankGstAmount: bGstAmt,
+        bankTdsAmount: bTdsAmt,
+        bankNetReceivable: bankNet,
+        partyCommissionPercent: partyCommPct,
+        partyCommissionDue: partyCommDue,
+        partyNetPayable: partyNet,
+        netMargin: margin,
+      };
+    });
+  };
+
+  // Lead selection auto-filler
+  const handleSelectLead = (leadId) => {
+    setSelectedLeadId(leadId);
+    if (!leadId) {
+      recomputeAddForm({ leadId: "" });
+      return;
+    }
+    const lead = leadsList.find((l) => String(l.id) === String(leadId));
+    if (!lead) return;
+
+    const custName = lead.customer?.name || lead.name || "";
+    const custMobile = lead.customer?.mobile || lead.mobile || "";
+    const custEmail = lead.customer?.email || lead.email || "";
+    const lType = lead.loanType || "Personal Loan";
+    const bName = lead.bank_name || lead.applications?.[0]?.lender?.name || "HDFC Bank";
+    const lAmt = parseFloat(lead.sanctioned_amount || lead.requiredAmount || 0) || "";
+    const pName = lead.leadSource || "Direct";
+    const isSelf = pName.toLowerCase() === "self" || pName.toLowerCase() === "direct";
+    const pPct = isSelf ? 0 : (lead.commissionPercent !== null && lead.commissionPercent !== undefined ? parseFloat(lead.commissionPercent) : 50.0);
+
+    recomputeAddForm({
+      leadId: lead.id,
+      customerName: custName,
+      customerMobile: custMobile,
+      customerEmail: custEmail,
+      loanProduct: lType,
+      bankName: bName,
+      loanAmount: lAmt,
+      payoutType: isSelf ? "SELF" : "VENDOR",
+      partyName: pName,
+      partyCommissionPercent: pPct,
+    });
+  };
+
+  // Submit Add Payout
+  const handleAddPayoutSubmit = async (e) => {
+    e.preventDefault();
+    if (!addForm.customerName && !addForm.leadId) {
+      toast.error("Please enter Customer Name or choose an existing Lead");
+      return;
+    }
+    const loanAmt = parseFloat(addForm.loanAmount);
+    if (!loanAmt || loanAmt <= 0) {
+      toast.error("Please enter a valid Loan Disbursed Amount");
+      return;
+    }
+
+    setSavingNewPayout(true);
+    try {
+      const payload = {
+        leadId: addForm.leadId ? parseInt(addForm.leadId, 10) : undefined,
+        customerName: addForm.customerName ? addForm.customerName.trim() : undefined,
+        customerMobile: addForm.customerMobile ? String(addForm.customerMobile).trim() : undefined,
+        customerEmail: addForm.customerEmail ? addForm.customerEmail.trim() : undefined,
+        loanProduct: addForm.loanProduct || "Personal Loan",
+        bankName: addForm.bankName || "Bank",
+        loanAmount: loanAmt,
+        bankCommissionPercent: parseFloat(addForm.bankCommissionPercent) || 2.0,
+        baseAmount: addForm.baseAmount ? parseFloat(addForm.baseAmount) : undefined,
+        bankGstPercent: parseFloat(addForm.bankGstPercent) || 18,
+        bankTdsPercent: parseFloat(addForm.bankTdsPercent) || 5,
+        disbursalDate: addForm.disbursalDate || new Date().toISOString().split("T")[0],
+        partyName: addForm.payoutType === "SELF" ? "Self" : (addForm.partyName || "Direct"),
+        partyCode: addForm.partyCode || undefined,
+        partyCommissionPercent: addForm.payoutType === "SELF" ? 0 : (parseFloat(addForm.partyCommissionPercent) || 0),
+        extraCharges: parseFloat(addForm.extraCharges) || 0,
+        notes: addForm.notes || undefined,
+      };
+
+      const res = await axios.post(`${API_URL}/payouts/cases`, payload);
+      toast.success(res.data?.message || "Case payout recorded successfully!");
+      setAddPayoutModalOpen(false);
+      fetchCasePayouts();
+    } catch (err) {
+      console.error("Failed to record case payout:", err);
+      toast.error(err.response?.data?.message || "Failed to record case payout");
+    } finally {
+      setSavingNewPayout(false);
+    }
+  };
+
   // Open Bank Receipt Modal
   const openBankReceiptModal = (item) => {
     setReceiptTargetCase(item);
@@ -738,10 +978,28 @@ export default function CasePayoutsScreen() {
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {activeMainTab === "cases" ? (
+            {canManagePayouts && activeMainTab === "cases" && (
               <button
                 type="button"
                 className="cc-pbtn primary"
+                onClick={openAddPayoutModal}
+                style={{
+                  background: "linear-gradient(135deg, #059669 0%, #047857 100%)",
+                  color: "#ffffff",
+                  borderColor: "#059669",
+                  fontWeight: 700,
+                  boxShadow: "0 2px 6px rgba(5,150,105,0.25)",
+                }}
+                title="Create / Record a new Case Payout"
+              >
+                <Plus size={16} /> + Record Case Payout
+              </button>
+            )}
+
+            {activeMainTab === "cases" ? (
+              <button
+                type="button"
+                className="cc-pbtn secondary"
                 onClick={handleExportCasesExcel}
                 title="Download Excel Sheet"
               >
@@ -2678,6 +2936,460 @@ export default function CasePayoutsScreen() {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ADD / RECORD CASE PAYOUT MODAL */}
+      {addPayoutModalOpen && (
+        <div className="cc-modal-overlay" onClick={() => setAddPayoutModalOpen(false)}>
+          <div className="cc-modal-box" style={{ maxWidth: 740, maxHeight: "90vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+            <div className="cc-modal-header" style={{ position: "sticky", top: 0, background: "#fff", zIndex: 10, borderBottom: "1px solid #e2e8f0" }}>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#0f172a" }}>Record Case Payout</h3>
+                  <span style={{ background: "#ecfdf5", color: "#047857", fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999, border: "1px solid #a7f3d0" }}>
+                    Disbursement &amp; Billing
+                  </span>
+                </div>
+                <p style={{ margin: "3px 0 0", fontSize: 12.5, color: "#64748b" }}>
+                  Record disbursed loan case, bank commission receivable, party sourcing share &amp; margin
+                </p>
+              </div>
+              <button
+                type="button"
+                className="cc-modal-close"
+                onClick={() => setAddPayoutModalOpen(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddPayoutSubmit} className="cc-modal-form" style={{ padding: "16px 20px" }}>
+              {/* SECTION 0: LINK TO AN EXISTING LEAD (OPTIONAL SHORTCUT) */}
+              <div style={{ background: "#f8fafc", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", marginBottom: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                  <label style={{ fontSize: 12, fontWeight: 700, color: "#334155", display: "flex", alignItems: "center", gap: 6 }}>
+                    <LinkIcon size={14} color="#0284c7" /> ⚡ Link to Existing Lead (Optional Auto-Fill)
+                  </label>
+                  {selectedLeadId && (
+                    <button
+                      type="button"
+                      onClick={() => handleSelectLead("")}
+                      style={{ fontSize: 11, color: "#ef4444", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}
+                    >
+                      Clear Selection
+                    </button>
+                  )}
+                </div>
+                <select
+                  value={selectedLeadId}
+                  onChange={(e) => handleSelectLead(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "8px 10px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    fontSize: 13,
+                    background: "#fff",
+                    color: "#0f172a",
+                  }}
+                  disabled={loadingLeads}
+                >
+                  <option value="">-- Choose from existing leads or create fresh case below --</option>
+                  {leadsList.map((ld) => {
+                    const cName = ld.customer?.name || ld.name || "Customer";
+                    const cAmt = ld.sanctioned_amount || ld.requiredAmount || 0;
+                    const cBank = ld.bank_name || ld.applications?.[0]?.lender?.name || "";
+                    const cType = ld.loanType || "";
+                    return (
+                      <option key={ld.id} value={ld.id}>
+                        Lead #{ld.id} — {cName} ({cType}{cAmt ? ` • ₹${numberFormatter.format(cAmt)}` : ""}{cBank ? ` • ${cBank}` : ""})
+                      </option>
+                    );
+                  })}
+                </select>
+                {loadingLeads && (
+                  <small style={{ color: "#64748b", display: "block", marginTop: 4 }}>
+                    <RefreshCw size={11} className="cc-spin" /> Loading company leads...
+                  </small>
+                )}
+              </div>
+
+              {/* TOP SEGMENTED SWITCHER: SELF / DIRECT VS VENDOR / CONNECTOR */}
+              <div style={{ display: "flex", gap: 10, background: "#f1f5f9", padding: "6px", borderRadius: 10, marginBottom: 14 }}>
+                <button
+                  type="button"
+                  style={{
+                    flex: 1,
+                    padding: "9px 12px",
+                    borderRadius: 8,
+                    fontWeight: 700,
+                    fontSize: 12.5,
+                    border: "1px solid",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                    background: addForm.payoutType === "SELF" ? "#4f46e5" : "transparent",
+                    color: addForm.payoutType === "SELF" ? "#fff" : "#475569",
+                    borderColor: addForm.payoutType === "SELF" ? "#4338ca" : "transparent",
+                    boxShadow: addForm.payoutType === "SELF" ? "0 2px 4px rgba(79,70,229,0.25)" : "none",
+                    transition: "all 0.15s",
+                  }}
+                  onClick={() => recomputeAddForm({ payoutType: "SELF", partyName: "Self" })}
+                >
+                  <Building2 size={15} /> 🏢 Self / Direct Case
+                </button>
+                <button
+                  type="button"
+                  style={{
+                    flex: 1,
+                    padding: "9px 12px",
+                    borderRadius: 8,
+                    fontWeight: 700,
+                    fontSize: 12.5,
+                    border: "1px solid",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                    background: addForm.payoutType === "VENDOR" ? "#7c3aed" : "transparent",
+                    color: addForm.payoutType === "VENDOR" ? "#fff" : "#475569",
+                    borderColor: addForm.payoutType === "VENDOR" ? "#6d28d9" : "transparent",
+                    boxShadow: addForm.payoutType === "VENDOR" ? "0 2px 4px rgba(124,58,237,0.25)" : "none",
+                    transition: "all 0.15s",
+                  }}
+                  onClick={() =>
+                    recomputeAddForm({
+                      payoutType: "VENDOR",
+                      partyName: addForm.partyName && addForm.partyName.toLowerCase() !== "self" ? addForm.partyName : "Direct",
+                    })
+                  }
+                >
+                  <Wallet size={15} /> 🤝 Channel Partner / Connector Case
+                </button>
+              </div>
+
+              {/* SECTION 1: CUSTOMER & DEAL DETAILS */}
+              <div style={{ background: "#f8fafc", padding: "14px", borderRadius: 10, border: "1px solid #e2e8f0", marginBottom: 14 }}>
+                <strong style={{ fontSize: 13, color: "#1e293b", display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+                  <User size={15} color="#2563eb" /> 1. Customer &amp; Loan Disbursal Details
+                </strong>
+
+                <div className="cc-form-row" style={{ gridTemplateColumns: "1.4fr 1.2fr 1fr" }}>
+                  <div className="cc-fgroup">
+                    <label>Customer Full Name *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Ramesh Kumar"
+                      value={addForm.customerName}
+                      onChange={(e) => setAddForm({ ...addForm, customerName: e.target.value })}
+                    />
+                  </div>
+                  <div className="cc-fgroup">
+                    <label>Customer Email</label>
+                    <input
+                      type="email"
+                      placeholder="e.g. ramesh@example.com"
+                      value={addForm.customerEmail}
+                      onChange={(e) => setAddForm({ ...addForm, customerEmail: e.target.value })}
+                    />
+                  </div>
+                  <div className="cc-fgroup">
+                    <label>Customer Mobile</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 9876543210"
+                      value={addForm.customerMobile}
+                      onChange={(e) => setAddForm({ ...addForm, customerMobile: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="cc-form-row" style={{ gridTemplateColumns: "1fr 1fr 1.2fr 1fr", marginTop: 8 }}>
+                  <div className="cc-fgroup">
+                    <label>Loan Product / Type</label>
+                    <input
+                      type="text"
+                      list="loanProductSuggestions"
+                      placeholder="e.g. Personal Loan"
+                      value={addForm.loanProduct}
+                      onChange={(e) => setAddForm({ ...addForm, loanProduct: e.target.value })}
+                    />
+                    <datalist id="loanProductSuggestions">
+                      <option value="Personal Loan" />
+                      <option value="Business Loan" />
+                      <option value="Home Loan" />
+                      <option value="Loan Against Property (LAP)" />
+                      <option value="Car Loan" />
+                      <option value="Gold Loan" />
+                      <option value="Education Loan" />
+                      <option value="Professional Loan" />
+                    </datalist>
+                  </div>
+
+                  <div className="cc-fgroup">
+                    <label>Bank / Lender Name *</label>
+                    <input
+                      type="text"
+                      list="bankSuggestions"
+                      required
+                      placeholder="e.g. HDFC Bank"
+                      value={addForm.bankName}
+                      onChange={(e) => setAddForm({ ...addForm, bankName: e.target.value })}
+                    />
+                    <datalist id="bankSuggestions">
+                      <option value="HDFC Bank" />
+                      <option value="ICICI Bank" />
+                      <option value="Axis Bank" />
+                      <option value="State Bank of India (SBI)" />
+                      <option value="Kotak Mahindra Bank" />
+                      <option value="Bajaj Finserv" />
+                      <option value="Tata Capital" />
+                      <option value="IDFC First Bank" />
+                      <option value="Punjab National Bank" />
+                      <option value="Bank of Baroda" />
+                    </datalist>
+                  </div>
+
+                  <div className="cc-fgroup">
+                    <label>Loan Amount Disbursed (₹) *</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="1"
+                      required
+                      placeholder="e.g. 500000"
+                      value={addForm.loanAmount}
+                      onChange={(e) => recomputeAddForm({ loanAmount: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="cc-fgroup">
+                    <label>Disbursal Date</label>
+                    <input
+                      type="date"
+                      value={addForm.disbursalDate}
+                      onChange={(e) => setAddForm({ ...addForm, disbursalDate: e.target.value })}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* SECTION 2: BANK COMMISSION & DEDUCTIONS */}
+              <div style={{ background: "#f0fdf4", padding: "14px", borderRadius: 10, border: "1px solid #bbf7d0", marginBottom: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                  <strong style={{ fontSize: 13, color: "#166534", display: "flex", alignItems: "center", gap: 6 }}>
+                    <Building2 size={15} color="#166534" /> 2. Bank Commission &amp; Net Receivable Inflow
+                  </strong>
+                  <span style={{ fontSize: 11, color: "#15803d", fontWeight: 600 }}>
+                    GST (18%) &amp; TDS (5%) will be deducted from Bank Commission
+                  </span>
+                </div>
+
+                <div className="cc-form-row" style={{ gridTemplateColumns: "1fr 1.2fr 0.8fr 0.8fr 1.2fr" }}>
+                  <div className="cc-fgroup">
+                    <label>Bank Comm (%)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="100"
+                      value={addForm.bankCommissionPercent}
+                      onChange={(e) => recomputeAddForm({ bankCommissionPercent: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="cc-fgroup">
+                    <label>Bank Gross Base (₹)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={addForm.baseAmount}
+                      onChange={(e) => recomputeAddForm({ baseAmount: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="cc-fgroup">
+                    <label>GST (18%)</label>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: "#dc2626", padding: "8px 0" }}>
+                      -{currencyFormatter.format(addForm.bankGstAmount || 0)}
+                    </div>
+                  </div>
+
+                  <div className="cc-fgroup">
+                    <label>TDS (5%)</label>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: "#dc2626", padding: "8px 0" }}>
+                      -{currencyFormatter.format(addForm.bankTdsAmount || 0)}
+                    </div>
+                  </div>
+
+                  <div className="cc-fgroup">
+                    <label>Bank Net Receivable</label>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: "#166534", padding: "7px 0" }}>
+                      {currencyFormatter.format(addForm.bankNetReceivable || 0)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* SECTION 3: SOURCING CHANNEL / CONNECTOR PAYOUT */}
+              {addForm.payoutType === "VENDOR" ? (
+                <div style={{ background: "#faf5ff", padding: "14px", borderRadius: 10, border: "1px solid #e9d5ff", marginBottom: 14 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                    <strong style={{ fontSize: 13, color: "#6b21a8", display: "flex", alignItems: "center", gap: 6 }}>
+                      <Wallet size={15} color="#6b21a8" /> 3. Sourcing Partner / Connector Share
+                    </strong>
+                    <span style={{ fontSize: 11, color: "#7e22ce", fontWeight: 600 }}>
+                      Calculated on Bank Net Receivable ({currencyFormatter.format(addForm.bankNetReceivable || 0)})
+                    </span>
+                  </div>
+
+                  <div className="cc-form-row" style={{ gridTemplateColumns: "1.4fr 1fr 1fr 1.2fr" }}>
+                    <div className="cc-fgroup">
+                      <label>Party / Connector Name *</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Direct / DSA Partner Name"
+                        value={addForm.partyName}
+                        onChange={(e) => setAddForm({ ...addForm, partyName: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="cc-fgroup">
+                      <label>Party Code (Optional)</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. PTY-001"
+                        value={addForm.partyCode}
+                        onChange={(e) => setAddForm({ ...addForm, partyCode: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="cc-fgroup">
+                      <label>Party Share (%)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        max="100"
+                        value={addForm.partyCommissionPercent}
+                        onChange={(e) => recomputeAddForm({ partyCommissionPercent: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="cc-fgroup">
+                      <label>Party Net Payable</label>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: "#7c3aed", padding: "7px 0" }}>
+                        {currencyFormatter.format(addForm.partyNetPayable || 0)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ background: "#eef2ff", padding: "14px", borderRadius: 10, border: "1px solid #c7d2fe", marginBottom: 14 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div>
+                      <strong style={{ fontSize: 13, color: "#3730a3", display: "flex", alignItems: "center", gap: 6 }}>
+                        <Building2 size={15} color="#3730a3" /> In-House Deal (Self Sourced)
+                      </strong>
+                      <p style={{ margin: "4px 0 0", fontSize: 11.5, color: "#4f46e5" }}>
+                        No connector commission is payable. Entire bank net receivable is retained as company earnings.
+                      </p>
+                    </div>
+                    <span style={{ fontSize: 13, fontWeight: 800, color: "#3730a3" }}>
+                      Vendor Share: ₹0
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* SECTION 4: REAL-TIME SUMMARY BREAKDOWN CARD */}
+              <div style={{ background: "#f8fafc", padding: "14px 18px", borderRadius: 10, border: "1px solid #e2e8f0", marginBottom: 14 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+                  <div>
+                    <span style={{ fontSize: 11, color: "#64748b", textTransform: "uppercase", fontWeight: 700 }}>
+                      Loan Disbursed
+                    </span>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: "#0f172a" }}>
+                      {currencyFormatter.format(parseFloat(addForm.loanAmount) || 0)}
+                    </div>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: 11, color: "#64748b", textTransform: "uppercase", fontWeight: 700 }}>
+                      Bank Inflow (Net)
+                    </span>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: "#059669" }}>
+                      {currencyFormatter.format(addForm.bankNetReceivable || 0)}
+                    </div>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: 11, color: "#64748b", textTransform: "uppercase", fontWeight: 700 }}>
+                      Party Payout
+                    </span>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: "#7c3aed" }}>
+                      {currencyFormatter.format(addForm.partyNetPayable || 0)}
+                    </div>
+                  </div>
+                  <div style={{ borderLeft: "2px solid #cbd5e1", paddingLeft: 16 }}>
+                    <span style={{ fontSize: 11, color: "#047857", textTransform: "uppercase", fontWeight: 800 }}>
+                      Net Company Margin
+                    </span>
+                    <div style={{ fontSize: 18, fontWeight: 900, color: "#047857" }}>
+                      {currencyFormatter.format(addForm.netMargin || 0)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* NOTES */}
+              <div className="cc-fgroup" style={{ marginBottom: 14 }}>
+                <label>Notes / Internal Remarks</label>
+                <textarea
+                  rows={2}
+                  placeholder="Optional internal remarks about this case payout..."
+                  value={addForm.notes}
+                  onChange={(e) => setAddForm({ ...addForm, notes: e.target.value })}
+                />
+              </div>
+
+              {/* ACTIONS */}
+              <div className="cc-modal-actions" style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                <button
+                  type="button"
+                  className="cc-pbtn secondary"
+                  onClick={() => setAddPayoutModalOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="cc-pbtn primary"
+                  disabled={savingNewPayout}
+                  style={{
+                    background: "linear-gradient(135deg, #059669 0%, #047857 100%)",
+                    color: "#fff",
+                    borderColor: "#059669",
+                    fontWeight: 700,
+                    minWidth: 160,
+                  }}
+                >
+                  {savingNewPayout ? (
+                    <>
+                      <RefreshCw size={14} className="cc-spin" /> Recording Payout...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 size={15} /> Save &amp; Record Case Payout
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

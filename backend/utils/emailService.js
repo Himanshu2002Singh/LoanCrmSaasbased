@@ -2,6 +2,7 @@ const nodemailer = require("nodemailer");
 const path = require("path");
 const fs = require("fs");
 const { Company } = require("../models");
+const { resolveDiskFilePath } = require("./documentHelper");
 
 /**
  * Global fallback transporter (from env vars or Ethereal)
@@ -254,30 +255,27 @@ const sendMail = async ({
     }
   }
 
-  // Process attachments
+  // Process attachments using robust resolver
   const processedAttachments = [];
   for (const item of attachments) {
     if (typeof item === "string") {
-      let filePath = item;
-      if (filePath.startsWith("/uploads/")) {
-        filePath = path.join(__dirname, "..", filePath);
-      }
-      if (fs.existsSync(filePath)) {
+      const diskPath = resolveDiskFilePath(item);
+      if (diskPath) {
         processedAttachments.push({
-          filename: path.basename(filePath),
-          path: filePath,
+          filename: path.basename(diskPath),
+          path: diskPath,
         });
+      } else {
+        console.warn(`[EmailService] Attachment string path not found on disk: ${item}`);
       }
     } else if (item && typeof item === "object") {
-      let filePath = item.path || item.fileUrl;
-      if (filePath && filePath.startsWith("/uploads/")) {
-        filePath = path.join(__dirname, "..", filePath);
-      }
+      const targetPath = item.path || item.fileUrl;
+      const diskPath = targetPath ? resolveDiskFilePath(targetPath) : null;
 
-      if (filePath && fs.existsSync(filePath)) {
+      if (diskPath) {
         processedAttachments.push({
-          filename: item.filename || item.fileName || path.basename(filePath),
-          path: filePath,
+          filename: item.filename || item.fileName || path.basename(diskPath),
+          path: diskPath,
           contentType: item.contentType,
         });
       } else if (item.content) {
@@ -286,6 +284,8 @@ const sendMail = async ({
           content: item.content,
           contentType: item.contentType,
         });
+      } else {
+        console.warn(`[EmailService] Attachment object file not found on disk:`, item);
       }
     }
   }
@@ -301,26 +301,40 @@ const sendMail = async ({
     attachments: processedAttachments,
   };
 
-  const info = await activeTransporter.sendMail(mailOptions);
-
-  let previewUrl = null;
   try {
-    previewUrl = nodemailer.getTestMessageUrl(info);
-    if (previewUrl) {
-      console.log("[EmailService] Test Message Preview URL:", previewUrl);
-    }
-  } catch {
-    // Ignore
-  }
+    const info = await activeTransporter.sendMail(mailOptions);
 
-  return {
-    success: true,
-    messageId: info.messageId,
-    previewUrl,
-    accepted: info.accepted,
-    rejected: info.rejected,
-    sentFrom: activeFrom,
-  };
+    let previewUrl = null;
+    try {
+      previewUrl = nodemailer.getTestMessageUrl(info);
+      if (previewUrl) {
+        console.log("[EmailService] Test Message Preview URL:", previewUrl);
+      }
+    } catch {
+      // Ignore
+    }
+
+    return {
+      success: true,
+      messageId: info.messageId,
+      previewUrl,
+      accepted: info.accepted,
+      rejected: info.rejected,
+      sentFrom: activeFrom,
+    };
+  } catch (err) {
+    if (resolvedConfig && resolvedConfig.user) {
+      console.error(`[EmailService] Failed to send email using company SMTP (${resolvedConfig.user}):`, err.message);
+      let friendlyError = err.message || "Failed to send email via company SMTP.";
+      if (err.code === "EAUTH" || err.responseCode === 535 || err.message.includes("Invalid login")) {
+        friendlyError = `Authentication failed for ${resolvedConfig.user}. Please check your Gmail App Password / SMTP credentials in Settings > Email Templates.`;
+      }
+      const customErr = new Error(friendlyError);
+      customErr.originalError = err;
+      throw customErr;
+    }
+    throw err;
+  }
 };
 
 module.exports = {

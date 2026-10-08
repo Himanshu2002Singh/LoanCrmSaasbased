@@ -31,6 +31,7 @@ const ROLE_LABELS = {
   OPS: "Operations",
   COMPANY_ADMIN: "Company Admin",
   BANKER: "Banker",
+  FINANCE: "Finance & Accounts",
 };
 const ROLE_CLASS = {
   EMPLOYEE: "role-sales",
@@ -38,6 +39,7 @@ const ROLE_CLASS = {
   OPS: "role-ops",
   COMPANY_ADMIN: "role-manager",
   BANKER: "role-ops",
+  FINANCE: "role-finance",
 };
 
 // Fields the update endpoint accepts.
@@ -400,6 +402,26 @@ export default function UserListRedesign() {
                       </td>
                       <td>
                         <span className={`cc-role-pill ${roleClass}`}>{roleLabel}</span>
+                        {user.permissions && Object.keys(user.permissions).length > 0 && (
+                          <span
+                            title="Custom permissions configured for this employee"
+                            style={{
+                              marginLeft: 6,
+                              display: "inline-flex",
+                              alignItems: "center",
+                              verticalAlign: "middle",
+                              background: "#eff6ff",
+                              color: "#2563eb",
+                              padding: "2px 6px",
+                              borderRadius: 999,
+                              fontSize: 10,
+                              fontWeight: 700,
+                              gap: 3,
+                            }}
+                          >
+                            <Shield size={10} /> Custom
+                          </span>
+                        )}
                       </td>
                       <td>
                         <span className={`cc-status-dot cc-status-${statusKey}`}>
@@ -409,6 +431,21 @@ export default function UserListRedesign() {
                       </td>
                       <td onClick={stop}>
                         <div className="cc-user-actions">
+                          <button
+                            type="button"
+                            className="cc-icon-btn"
+                            title="Manage Custom Role Permissions"
+                            style={{
+                              color: user.permissions && Object.keys(user.permissions).length > 0 ? "#2563eb" : "#475569",
+                              background: user.permissions && Object.keys(user.permissions).length > 0 ? "#eff6ff" : "transparent",
+                            }}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setPermissionUser(user);
+                            }}
+                          >
+                            <Shield size={15} />
+                          </button>
                           <button
                             type="button"
                             className="cc-icon-btn"
@@ -504,6 +541,15 @@ export default function UserListRedesign() {
         user={resetPasswordUser}
       />
 
+      <ManagePermissionsModal
+        open={Boolean(permissionUser)}
+        onClose={() => setPermissionUser(null)}
+        user={permissionUser}
+        onUpdated={(updatedUser) => {
+          fetchPage(currentPage, debouncedSearchTerm);
+        }}
+      />
+
       {deleteUser ? (
         <ConfirmModal
           title={`Deactivate employee ${deleteUser.id}?`}
@@ -597,6 +643,7 @@ export default function UserListRedesign() {
                     <option value="EMPLOYEE">Sales Manager</option>
                     <option value="MANAGER">Manager</option>
                     <option value="OPS">Operations</option>
+                    <option value="FINANCE">Finance & Accounts</option>
                     <option value="BANKER">Banker</option>
                   </select>
                 </label>
@@ -756,6 +803,8 @@ const styles = `
   .cc-role-pill.role-sales { background:#eef7f2; color:#047857; }
   .cc-role-pill.role-manager { background:#eef2ff; color:#4338ca; }
   .cc-role-pill.role-ops { background:#fff7ed; color:#c2410c; }
+  .cc-role-pill.role-finance { background:#f0fdfa; color:#0f766e; }
+  .cc-role-pill.role-banker { background:#f0f9ff; color:#0369a1; }
 
   .cc-branch-pill { display:inline-flex; align-items:center; gap:4px; font-size:12px; font-weight:500; color:#334155; background:#f1f5f9; padding:3px 8px; border-radius:6px; }
   .cc-mgr-badge { display:inline-flex; align-items:center; gap:4px; font-size:12px; font-weight:600; color:#4338ca; background:#eef2ff; padding:3px 8px; border-radius:6px; }

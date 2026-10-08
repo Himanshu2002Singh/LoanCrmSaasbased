@@ -20,6 +20,7 @@ import {
   Check,
   Copy,
   Link,
+  Lock,
   MessageSquare,
   FileText,
   Files,
@@ -36,7 +37,9 @@ import {
   Upload,
   User,
   UserCheck,
+  UserCog,
   X,
+  RotateCcw,
 } from "lucide-react";
 import API_URL, { CLIENT_PORTAL_URL } from "../../../config";
 import LeadDocumentRequestModal from "../LeadDocumentRequestModal";
@@ -96,6 +99,11 @@ export default function LeadDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [docRequests, setDocRequests] = useState([]);
   const [docReqModalOpen, setDocReqModalOpen] = useState(false);
+  const [allEmployeesList, setAllEmployeesList] = useState([]);
+  const [reassignModalOpen, setReassignModalOpen] = useState(false);
+  const [reassignTargetEmpId, setReassignTargetEmpId] = useState("");
+  const [reassignReason, setReassignReason] = useState("");
+  const [submittingReassign, setSubmittingReassign] = useState(false);
 
   const userRole = localStorage.getItem("userRole") || "";
   const employeeRole = localStorage.getItem("employeeRole") || "";
@@ -111,22 +119,32 @@ export default function LeadDetailScreen() {
     }
   })();
 
+  const isReadOnly = Boolean(lead?.is_read_only);
   const canExport = !isEmployee && userPermissions.exportData !== false;
   const canViewCommission = !isEmployee && Boolean(userPermissions.viewPayouts || userPermissions.viewConnectors || userRole === "COMPANY_ADMIN" || userRole === "SUPERADMIN");
   const isCompanyAdmin = userRole === "COMPANY_ADMIN" || userRole === "SUPERADMIN";
   const canEditLead =
-    isCompanyAdmin ||
-    ["MANAGER", "OPS", "EMPLOYEE"].includes(userRole.toUpperCase()) ||
-    ["manager", "operations", "calling", "employee", "sales"].includes(employeeRole?.toLowerCase()) ||
-    userPermissions.editLead !== false;
-  const canFollowupLead = isCompanyAdmin || (userPermissions.followupLead !== undefined ? Boolean(userPermissions.followupLead) : Boolean(userPermissions.manageLeads !== false));
+    !isReadOnly &&
+    (isCompanyAdmin ||
+      ["MANAGER", "OPS", "EMPLOYEE"].includes(userRole.toUpperCase()) ||
+      ["manager", "operations", "calling", "employee", "sales"].includes(employeeRole?.toLowerCase()) ||
+      userPermissions.editLead !== false);
+  const canAssignLead =
+    !isReadOnly &&
+    (isCompanyAdmin ||
+      (userPermissions.reassignLeads !== false &&
+        (["MANAGER", "OPS", "EMPLOYEE"].includes(userRole.toUpperCase()) ||
+          ["manager", "operations", "calling", "employee", "sales"].includes(employeeRole?.toLowerCase()) ||
+          Boolean(userPermissions.reassignLeads || userPermissions.assignLead || userPermissions.manageLeads))));
+  const canFollowupLead = !isReadOnly && (isCompanyAdmin || (userPermissions.followupLead !== undefined ? Boolean(userPermissions.followupLead) : Boolean(userPermissions.manageLeads !== false)));
   const canCreateLoanApplication =
-    isCompanyAdmin ||
-    Boolean(
-      userPermissions.createLoanApplication ||
-      userPermissions.createApplication ||
-      userPermissions.manageOperations
-    );
+    !isReadOnly &&
+    (isCompanyAdmin ||
+      Boolean(
+        userPermissions.createLoanApplication ||
+        userPermissions.createApplication ||
+        userPermissions.manageOperations
+      ));
 
   // Upload Doc Modal state
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
@@ -141,12 +159,89 @@ export default function LeadDetailScreen() {
     appliedAmount: "",
     lenderId: "",
   });
-  const [submittingApp, setSubmittingApp] = useState(false);
+  const [remarkModalOpen, setRemarkModalOpen] = useState(false);
+  const [newRemarkText, setNewRemarkText] = useState("");
+  const [newFollowupDate, setNewFollowupDate] = useState("");
+  const [submittingRemark, setSubmittingRemark] = useState(false);
+
+  const formatDateTime = (isoStr) => {
+    if (!isoStr) return "--";
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return "--";
+    return d.toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    });
+  };
+
+  const getLeadFunnelMilestones = (status) => {
+    const s = String(status || "").toUpperCase();
+    const steps = [
+      { key: "NEW", label: "Lead Ingestion", desc: "Fresh lead received" },
+      { key: "CONTACTED", label: "Telecalling & Follow-up", desc: "Customer pitch & follow-up" },
+      { key: "DOCS", label: "Documentation", desc: "KYC & income docs collection" },
+      { key: "BANK_LOGIN", label: "Bank Processing", desc: "File logged in bank system" },
+      { key: "SANCTIONED", label: "Sanctioned", desc: "Credit approval & offer issued" },
+      { key: "DISBURSED", label: "Disbursed", desc: "Loan disbursed to account" },
+    ];
+
+    let currentStep = 0;
+    if (s === "DISBURSED" || s === "LOAN DISBURSEMENT" || s === "CLOSED") {
+      currentStep = 5;
+    } else if (s === "SANCTIONED" || s === "LOAN SECTION" || s === "APPROVED") {
+      currentStep = 4;
+    } else if (s.includes("LOGIN") || s.includes("SUBMITTED") || s.includes("BANK") || s.includes("UNDERWRITING")) {
+      currentStep = 3;
+    } else if (s.includes("DOCUMENT") || s.includes("DOC") || s.includes("VERIFICATION") || s.includes("KYC")) {
+      currentStep = 2;
+    } else if (s.includes("FOLLOW") || s.includes("CALL") || s.includes("INTERESTED") || s.includes("MEETING")) {
+      currentStep = 1;
+    } else if (s === "REJECTED" || s === "CANCELLED") {
+      currentStep = -1;
+    } else {
+      currentStep = 0;
+    }
+
+    return { steps, currentStep, isRejected: currentStep === -1 };
+  };
+
+  const handleSaveLeadRemark = async (e) => {
+    e?.preventDefault();
+    if (!newRemarkText.trim()) {
+      toast.error("Please enter a remark");
+      return;
+    }
+    setSubmittingRemark(true);
+    try {
+      const payload = {
+        remark: newRemarkText.trim(),
+      };
+      if (newFollowupDate) {
+        payload.nextFollowupDate = new Date(newFollowupDate).toISOString();
+      }
+      await axios.post(`${API_URL}/leads/${id}/remarks`, payload);
+      toast.success("Remark added successfully");
+      setRemarkModalOpen(false);
+      setNewRemarkText("");
+      setNewFollowupDate("");
+      await Promise.all([fetchLeadDetails(), fetchHistoryDetails()]);
+    } catch (err) {
+      console.error("Failed to add remark:", err);
+      toast.error(err.response?.data?.message || "Failed to add remark");
+    } finally {
+      setSubmittingRemark(false);
+    }
+  };
 
   const fetchEmployees = async () => {
     try {
       const response = await axios.get(`${API_URL}/users`, { params: { limit: 200 } });
       const employeesList = response.data?.data || [];
+      setAllEmployeesList(employeesList);
       const namesMap = {};
       employeesList.forEach((emp) => {
         namesMap[emp.id] = emp.name;
@@ -154,6 +249,31 @@ export default function LeadDetailScreen() {
       setPersonNames(namesMap);
     } catch (error) {
       console.error("Error fetching employees: ", error);
+    }
+  };
+
+  const handleExecuteReassign = async (e) => {
+    e.preventDefault();
+    if (!reassignTargetEmpId) {
+      toast.error("Please select an employee to reassign to");
+      return;
+    }
+    setSubmittingReassign(true);
+    try {
+      const targetEmp = allEmployeesList.find((u) => String(u.id) === String(reassignTargetEmpId));
+      await axios.put(`${API_URL}/leads/${id}`, {
+        person_id: reassignTargetEmpId,
+        reason: reassignReason || (targetEmp ? `Reassigned to ${targetEmp.name}` : undefined),
+      });
+      toast.success(targetEmp ? `Lead reassigned to ${targetEmp.name}!` : "Lead reassigned successfully!");
+      setReassignModalOpen(false);
+      setReassignReason("");
+      await Promise.all([fetchLeadDetails(), fetchHistoryDetails()]);
+    } catch (err) {
+      console.error("Failed to reassign lead:", err);
+      toast.error(err.response?.data?.message || "Failed to reassign lead");
+    } finally {
+      setSubmittingReassign(false);
     }
   };
 
@@ -546,16 +666,34 @@ export default function LeadDetailScreen() {
         </div>
 
         <div className="cc-lead-header-right">
-          <button
-            type="button"
-            className="cc-header-action-btn primary"
-            style={{ backgroundColor: "#2563eb", color: "#ffffff", borderColor: "#1d4ed8" }}
-            onClick={() => setDocReqModalOpen(true)}
-            title="Generate secure document upload link for customer"
-          >
-            <Link size={15} />
-            <span>Customer Doc Link</span>
-          </button>
+          {!isReadOnly && (
+            <button
+              type="button"
+              className="cc-header-action-btn primary"
+              style={{ backgroundColor: "#2563eb", color: "#ffffff", borderColor: "#1d4ed8" }}
+              onClick={() => setDocReqModalOpen(true)}
+              title="Generate secure document upload link for customer"
+            >
+              <Link size={15} />
+              <span>Customer Doc Link</span>
+            </button>
+          )}
+          {canAssignLead && (
+            <button
+              type="button"
+              className="cc-header-action-btn"
+              style={{ background: "#eff6ff", color: "#1d4ed8", borderColor: "#bfdbfe" }}
+              onClick={() => {
+                setReassignTargetEmpId(lead.person_id ? String(lead.person_id) : "");
+                setReassignReason("");
+                setReassignModalOpen(true);
+              }}
+              title="Reassign this lead to another company employee"
+            >
+              <UserCog size={15} />
+              <span>Reassign Lead</span>
+            </button>
+          )}
           {canEditLead && (
             <button
               type="button"
@@ -579,14 +717,92 @@ export default function LeadDetailScreen() {
         </div>
       </div>
 
+      {/* Worked Lead Read-Only Alert Banner */}
+      {isReadOnly && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: "14px",
+            background: "linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)",
+            border: "1px solid #fcd34d",
+            borderRadius: "12px",
+            padding: "16px 20px",
+            marginBottom: "20px",
+            boxShadow: "0 2px 4px rgba(217, 119, 6, 0.08)",
+          }}
+        >
+          <div
+            style={{
+              background: "#f59e0b",
+              color: "#ffffff",
+              padding: "8px",
+              borderRadius: "10px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            <Lock size={18} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+              <strong style={{ fontSize: "15px", color: "#92400e" }}>
+                Worked Lead (Strict Read-Only Mode)
+              </strong>
+              <span
+                style={{
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  padding: "2px 10px",
+                  borderRadius: "9999px",
+                  background: "#fde68a",
+                  color: "#78350f",
+                  border: "1px solid #f59e0b",
+                }}
+              >
+                Currently Handled By: {lead.current_owner || lead.owner || "Another Staff"}
+              </span>
+            </div>
+            <p style={{ margin: "6px 0 0", fontSize: "13px", lineHeight: "1.5", color: "#b45309" }}>
+              You previously worked on this lead. You can review all details, documents, live loan status, latest remarks, call recordings, and full activity trail. However, modifications are locked while this lead is assigned to another team member.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Key Info Banner Grid */}
       <div className="cc-lead-summary-grid">
         <div className="cc-summary-card">
           <span className="cc-card-icon caller">
             <UserCheck size={18} />
           </span>
-          <div className="cc-card-info">
-            <span className="label">Assigned Owner</span>
+          <div className="cc-card-info" style={{ width: "100%" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span className="label">Assigned Owner</span>
+              {canAssignLead && (
+                <button
+                  type="button"
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    color: "#2563eb",
+                    fontSize: "11px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
+                  onClick={() => {
+                    setReassignTargetEmpId(lead.person_id ? String(lead.person_id) : "");
+                    setReassignReason("");
+                    setReassignModalOpen(true);
+                  }}
+                >
+                  Change ❯
+                </button>
+              )}
+            </div>
             <span className="value">{lead.owner || "Unassigned"}</span>
             <small>ID: {lead.person_id || "--"}</small>
           </div>
@@ -655,6 +871,139 @@ export default function LeadDetailScreen() {
         </div>
       </div>
 
+      {/* 1. LEAD FUNNEL PROGRESSION / STAGE TRACKER (Kha tak pahucha hai) */}
+      {(() => {
+        const { steps, currentStep, isRejected } = getLeadFunnelMilestones(lead.status || lead.status_value);
+        return (
+          <div className="cc-lead-stage-journey-card">
+            <div className="cc-stage-header">
+              <div className="cc-stage-title-wrap">
+                <span className="cc-stage-badge-pill" style={{
+                  background: isRejected ? "#fef2f2" : "#ecfdf5",
+                  color: isRejected ? "#b91c1c" : "#047857",
+                  border: isRejected ? "1px solid #fecaca" : "1px solid #a7f3d0",
+                }}>
+                  {isRejected ? "❌ STATUS: REJECTED / CANCELLED" : `STAGE ${currentStep + 1} OF ${steps.length} • ${(steps[currentStep] || steps[0]).label.toUpperCase()}`}
+                </span>
+                <span className="cc-stage-status-text">
+                  Lead Status: <strong style={{ color: "#0f172a" }}>{lead.status}</strong>
+                </span>
+              </div>
+              <div className="cc-stage-progress-percentage">
+                {isRejected ? "Dropped" : `${Math.round(((currentStep + 1) / steps.length) * 100)}% Completed`}
+              </div>
+            </div>
+
+            <div className="cc-stage-stepper">
+              {steps.map((st, idx) => {
+                const isCompleted = !isRejected && idx < currentStep;
+                const isCurrent = !isRejected && idx === currentStep;
+                return (
+                  <div key={st.key} className={`cc-step-item ${isCompleted ? "completed" : ""} ${isCurrent ? "current" : ""} ${isRejected ? "rejected" : ""}`}>
+                    <div className="cc-step-indicator">
+                      {isCompleted ? <Check size={14} /> : <span>{idx + 1}</span>}
+                    </div>
+                    <div className="cc-step-info">
+                      <div className="cc-step-name">{st.label}</div>
+                      <div className="cc-step-desc">{st.desc}</div>
+                    </div>
+                    {idx < steps.length - 1 && <div className={`cc-step-connector ${isCompleted ? "completed" : ""}`} />}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* 2. LATEST REMARK BANNER (PROMINENT AT TOP WITH DATE & TIME) */}
+      {(() => {
+        const latestText =
+          lead.latest_remark ||
+          lead.last_remark ||
+          lead.remarks ||
+          histories?.find((h) => h.remarks)?.remarks;
+        const latestDate =
+          lead.latest_remark_date ||
+          histories?.find((h) => h.remarks)?.createdAt ||
+          lead.updatedAt;
+        const latestBy =
+          lead.latest_remark_by ||
+          histories?.find((h) => h.remarks)?.actor ||
+          lead.owner ||
+          "Staff";
+
+        return (
+          <div className="cc-lead-latest-remark-card">
+            <div className="cc-remark-card-left">
+              <div className="cc-remark-icon-circle">
+                <MessageSquare size={22} />
+              </div>
+              <div className="cc-remark-content">
+                <div className="cc-remark-top-meta">
+                  <span className="cc-remark-tag">💬 LATEST REMARK</span>
+                  {latestText && (
+                    <>
+                      <span className="cc-remark-meta-item">
+                        <Clock size={12} />
+                        {formatDateTime(latestDate)}
+                      </span>
+                      <span className="cc-remark-meta-item user">
+                        <User size={12} />
+                        By {latestBy}
+                      </span>
+                    </>
+                  )}
+                </div>
+                <div className="cc-remark-body-text">
+                  {latestText ? (
+                    `"${latestText}"`
+                  ) : (
+                    <span style={{ color: "#94a3b8", fontStyle: "italic", fontWeight: 400 }}>
+                      No remarks recorded for this lead yet. Click button to log the first remark.
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="cc-remark-card-right">
+              {isReadOnly ? (
+                <div
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    padding: "7px 14px",
+                    borderRadius: "8px",
+                    background: "#f1f5f9",
+                    color: "#64748b",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    border: "1px solid #e2e8f0",
+                  }}
+                  title="Lead is currently assigned to another employee"
+                >
+                  <Lock size={13} />
+                  <span>Read Only Mode</span>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="cc-add-remark-btn"
+                  onClick={() => {
+                    setNewRemarkText("");
+                    setRemarkModalOpen(true);
+                  }}
+                >
+                  <Plus size={15} />
+                  <span>{latestText ? "Add / Update Remark" : "Add Remark"}</span>
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Tab Navigation */}
       <div className="cc-lead-tabs-nav">
         <button
@@ -683,6 +1032,15 @@ export default function LeadDetailScreen() {
           <Clock size={16} />
           <span>Activity &amp; Timeline</span>
           <span className="count-badge">{histories.length}</span>
+        </button>
+        <button
+          type="button"
+          className={`cc-lead-tab ${activeTab === "assignment" ? "active" : ""}`}
+          onClick={() => setActiveTab("assignment")}
+        >
+          <UserCheck size={16} />
+          <span>Assignment History</span>
+          <span className="count-badge">{(lead?.assignment_history || []).length}</span>
         </button>
       </div>
 
@@ -830,26 +1188,56 @@ export default function LeadDetailScreen() {
                     {/* App Documents List */}
                     {app.documents && app.documents.length > 0 ? (
                       <div className="cc-app-documents-section">
-                        <span className="section-title">
-                          <Files size={13} /> Documents attached to this application ({app.documents.length}):
-                        </span>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px", marginBottom: "6px" }}>
+                          <span className="section-title" style={{ margin: 0 }}>
+                            <Files size={13} /> Documents attached to this application ({app.documents.length}):
+                          </span>
+                          <a
+                            href={`${API_URL}/documents/application/${app.id}/download-all?token=${localStorage.getItem("token")}`}
+                            style={{
+                              fontSize: "11px",
+                              fontWeight: 700,
+                              color: "#059669",
+                              textDecoration: "none",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              background: "#ecfdf5",
+                              border: "1px solid #a7f3d0",
+                              borderRadius: "6px",
+                              padding: "2px 8px",
+                            }}
+                            title="Download all attached documents as ZIP"
+                          >
+                            <Download size={11} /> Download ZIP
+                          </a>
+                        </div>
                         <div className="cc-app-docs-chips">
                           {app.documents.map((doc) => (
-                            <a
-                              key={doc.id}
-                              href={doc.fileUrl ? `${API_URL.replace(/\/api\/?$/, "")}${doc.fileUrl}` : "#"}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="cc-doc-chip"
-                              title={`View ${doc.fileName || doc.docType}`}
-                            >
-                              <FileText size={13} />
-                              <span className="name">{doc.docType}</span>
-                              <span className={`status ${String(doc.verificationStatus || doc.status).toLowerCase()}`}>
-                                {doc.verificationStatus || doc.status || "PENDING"}
-                              </span>
-                              <ExternalLink size={12} />
-                            </a>
+                            <span key={doc.id} className="cc-doc-chip" style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                              <a
+                                href={doc.fileUrl ? `${API_URL.replace(/\/api\/?$/, "")}${doc.fileUrl}` : "#"}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{ display: "inline-flex", alignItems: "center", gap: "5px", textDecoration: "none", color: "inherit" }}
+                                title={`View ${doc.fileName || doc.docType}`}
+                              >
+                                <FileText size={13} />
+                                <span className="name">{doc.docType}</span>
+                                <span className={`status ${String(doc.verificationStatus || doc.status).toLowerCase()}`}>
+                                  {doc.verificationStatus || doc.status || "PENDING"}
+                                </span>
+                                <ExternalLink size={12} />
+                              </a>
+                              <a
+                                href={`${API_URL}/documents/${doc.id}/download?token=${localStorage.getItem("token")}`}
+                                download={doc.fileName || `${doc.docType}.pdf`}
+                                title={`Download ${doc.fileName || doc.docType}`}
+                                style={{ color: "#2563eb", padding: "1px 4px", display: "inline-flex", alignItems: "center" }}
+                              >
+                                <Download size={12} />
+                              </a>
+                            </span>
                           ))}
                         </div>
                       </div>
@@ -866,25 +1254,46 @@ export default function LeadDetailScreen() {
               <h3>All Documents for this Lead ({documents.length})</h3>
               <p>KYC documents (PAN, Aadhaar, Bank Statement, Salary Slips, ITR, etc.)</p>
             </div>
-            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-              <button
-                type="button"
-                className="cc-action-btn primary"
-                style={{ backgroundColor: "#2563eb", color: "#ffffff" }}
-                onClick={() => setDocReqModalOpen(true)}
-              >
-                <Link size={14} />
-                <span>Customer Upload Link</span>
-              </button>
-              <button
-                type="button"
-                className="cc-action-btn secondary"
-                onClick={() => setUploadModalOpen(true)}
-              >
-                <Upload size={14} />
-                <span>Staff Upload</span>
-              </button>
-            </div>
+            {!isReadOnly && (
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                {documents.length > 0 && (
+                  <a
+                    href={`${API_URL}/documents/lead/${id}/download-all?token=${localStorage.getItem("token")}`}
+                    className="cc-action-btn secondary"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      backgroundColor: "#ecfdf5",
+                      color: "#059669",
+                      borderColor: "#a7f3d0",
+                      fontWeight: 700,
+                    }}
+                    title="Download all documents for this lead in a single ZIP file"
+                  >
+                    <Download size={14} />
+                    <span>Download All ({documents.length} Docs ZIP)</span>
+                  </a>
+                )}
+                <button
+                  type="button"
+                  className="cc-action-btn primary"
+                  style={{ backgroundColor: "#2563eb", color: "#ffffff" }}
+                  onClick={() => setDocReqModalOpen(true)}
+                >
+                  <Link size={14} />
+                  <span>Customer Upload Link</span>
+                </button>
+                <button
+                  type="button"
+                  className="cc-action-btn secondary"
+                  onClick={() => setUploadModalOpen(true)}
+                >
+                  <Upload size={14} />
+                  <span>Staff Upload</span>
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Active Customer Upload Links Card */}
@@ -1011,7 +1420,7 @@ export default function LeadDetailScreen() {
                           <Eye size={11} /> Preview
                         </a>
 
-                        {!isCancelled && !isCompleted && (
+                        {!isReadOnly && !isCancelled && !isCompleted && (
                           <button
                             type="button"
                             onClick={() => handleCancelDocRequest(req.id)}
@@ -1041,14 +1450,16 @@ export default function LeadDetailScreen() {
             <div className="cc-empty-state-box small">
               <Files size={30} />
               <p>No KYC documents uploaded for this lead yet.</p>
-              <button
-                type="button"
-                className="cc-action-btn secondary"
-                onClick={() => setUploadModalOpen(true)}
-              >
-                <Upload size={14} />
-                <span>Upload First Document</span>
-              </button>
+              {!isReadOnly && (
+                <button
+                  type="button"
+                  className="cc-action-btn secondary"
+                  onClick={() => setUploadModalOpen(true)}
+                >
+                  <Upload size={14} />
+                  <span>Upload First Document</span>
+                </button>
+              )}
             </div>
           ) : (
             <div className="cc-documents-table-shell">
@@ -1143,46 +1554,136 @@ export default function LeadDetailScreen() {
                               <Eye size={13} />
                               <span>View</span>
                             </a>
-                            {!isVerified && (
-                              <button
-                                type="button"
-                                onClick={() => handleVerifyDocument(doc.id, "VERIFIED")}
-                                style={{
-                                  padding: "4px 8px",
-                                  fontSize: "11px",
-                                  fontWeight: 600,
-                                  borderRadius: "6px",
-                                  background: "#ecfdf5",
-                                  color: "#059669",
-                                  border: "1px solid #a7f3d0",
-                                  cursor: "pointer",
-                                }}
-                                title="Approve and mark document verified"
-                              >
-                                Approve
-                              </button>
-                            )}
-                            {!isRejected && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const reason = window.prompt("Enter rejection reason for this document:");
-                                  if (reason) handleVerifyDocument(doc.id, "REJECTED", reason);
-                                }}
-                                style={{
-                                  padding: "4px 8px",
-                                  fontSize: "11px",
-                                  fontWeight: 600,
-                                  borderRadius: "6px",
-                                  background: "#fef2f2",
-                                  color: "#dc2626",
-                                  border: "1px solid #fecaca",
-                                  cursor: "pointer",
-                                }}
-                                title="Reject document"
-                              >
-                                Reject
-                              </button>
+                            <a
+                              href={`${API_URL}/documents/${doc.id}/download?token=${localStorage.getItem("token")}`}
+                              download={doc.fileName || `${doc.docType}.pdf`}
+                              className="cc-view-doc-btn"
+                              style={{ background: "#eff6ff", color: "#1d4ed8", borderColor: "#bfdbfe" }}
+                              title={`Download ${doc.fileName || doc.docType}`}
+                            >
+                              <Download size={13} />
+                              <span>Download</span>
+                            </a>
+                            {!isReadOnly && (
+                              <>
+                                {isVerified ? (
+                                  <>
+                                    <span
+                                      style={{
+                                        padding: "4px 8px",
+                                        fontSize: "11px",
+                                        fontWeight: 700,
+                                        borderRadius: "6px",
+                                        background: "#ecfdf5",
+                                        color: "#059669",
+                                        border: "1px solid #a7f3d0",
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        gap: "4px",
+                                      }}
+                                      title="Document Approved & Verified"
+                                    >
+                                      <CheckCircle2 size={12} /> Approved
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleVerifyDocument(doc.id, "PENDING")}
+                                      style={{
+                                        padding: "4px 6px",
+                                        fontSize: "11px",
+                                        borderRadius: "6px",
+                                        background: "#f8fafc",
+                                        color: "#64748b",
+                                        border: "1px solid #e2e8f0",
+                                        cursor: "pointer",
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                      }}
+                                      title="Reset status back to Pending"
+                                    >
+                                      <RotateCcw size={11} />
+                                    </button>
+                                  </>
+                                ) : isRejected ? (
+                                  <>
+                                    <span
+                                      style={{
+                                        padding: "4px 8px",
+                                        fontSize: "11px",
+                                        fontWeight: 700,
+                                        borderRadius: "6px",
+                                        background: "#fef2f2",
+                                        color: "#dc2626",
+                                        border: "1px solid #fecaca",
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        gap: "4px",
+                                      }}
+                                      title={`Document Rejected: ${doc.rejectionReason || "Issue with document"}`}
+                                    >
+                                      <X size={12} /> Rejected
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleVerifyDocument(doc.id, "PENDING")}
+                                      style={{
+                                        padding: "4px 6px",
+                                        fontSize: "11px",
+                                        borderRadius: "6px",
+                                        background: "#f8fafc",
+                                        color: "#64748b",
+                                        border: "1px solid #e2e8f0",
+                                        cursor: "pointer",
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                      }}
+                                      title="Reset status back to Pending"
+                                    >
+                                      <RotateCcw size={11} />
+                                    </button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleVerifyDocument(doc.id, "VERIFIED")}
+                                      style={{
+                                        padding: "4px 8px",
+                                        fontSize: "11px",
+                                        fontWeight: 600,
+                                        borderRadius: "6px",
+                                        background: "#ecfdf5",
+                                        color: "#059669",
+                                        border: "1px solid #a7f3d0",
+                                        cursor: "pointer",
+                                      }}
+                                      title="Approve and mark document verified"
+                                    >
+                                      Approve
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const reason = window.prompt("Enter rejection reason for this document:");
+                                        if (reason) handleVerifyDocument(doc.id, "REJECTED", reason);
+                                      }}
+                                      style={{
+                                        padding: "4px 8px",
+                                        fontSize: "11px",
+                                        fontWeight: 600,
+                                        borderRadius: "6px",
+                                        background: "#fef2f2",
+                                        color: "#dc2626",
+                                        border: "1px solid #fecaca",
+                                        cursor: "pointer",
+                                      }}
+                                      title="Reject document"
+                                    >
+                                      Reject
+                                    </button>
+                                  </>
+                                )}
+                              </>
                             )}
                           </div>
                         </td>
@@ -1300,6 +1801,160 @@ export default function LeadDetailScreen() {
                   </div>
                 );
               })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB CONTENT: ASSIGNMENT HISTORY */}
+      {activeTab === "assignment" && (
+        <div className="cc-tab-panel">
+          <div className="cc-panel-section-header">
+            <div>
+              <h3>Lead Assignment &amp; Ownership Trail ({(lead?.assignment_history || []).length})</h3>
+              <p>Complete track record of employees who handled this lead, handovers, and active ownership</p>
+            </div>
+          </div>
+
+          {(!lead?.assignment_history || lead.assignment_history.length === 0) ? (
+            <div className="cc-empty-state-box">
+              <UserCheck size={36} />
+              <h4>No reassignment history recorded</h4>
+              <p>This lead is currently with its initial assigned owner ({lead?.owner || "Unassigned"}).</p>
+            </div>
+          ) : (
+            <div className="cc-documents-table-shell">
+              <table className="cc-data-table">
+                <thead>
+                  <tr>
+                    <th>Assigned Employee</th>
+                    <th>Role</th>
+                    <th>Assignment Status</th>
+                    <th>Assigned By</th>
+                    <th>Assigned On</th>
+                    <th>Handed Off On</th>
+                    <th>Notes / Handover Reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lead.assignment_history.map((record, index) => {
+                    const isActive = record.is_active;
+                    return (
+                      <tr key={record.id || index} style={{ backgroundColor: isActive ? "#f0fdf4" : undefined }}>
+                        <td>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            <div
+                              style={{
+                                width: "32px",
+                                height: "32px",
+                                borderRadius: "50%",
+                                backgroundColor: isActive ? "#dcfce7" : "#f1f5f9",
+                                color: isActive ? "#15803d" : "#475569",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                fontWeight: 700,
+                                fontSize: "13px",
+                              }}
+                            >
+                              {(record.assignee_name || "E").charAt(0).toUpperCase()}
+                            </div>
+                            <div>
+                              <strong style={{ color: isActive ? "#15803d" : "#1e293b", fontSize: "14px" }}>
+                                {record.assignee_name || "Employee"}
+                              </strong>
+                              {isActive && (
+                                <span
+                                  style={{
+                                    display: "inline-block",
+                                    marginLeft: "6px",
+                                    fontSize: "11px",
+                                    padding: "1px 6px",
+                                    borderRadius: "4px",
+                                    backgroundColor: "#16a34a",
+                                    color: "#ffffff",
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  Current Owner
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td>
+                          <span style={{ fontSize: "13px", color: "#64748b" }}>
+                            {record.assignee_role || "--"}
+                          </span>
+                        </td>
+                        <td>
+                          {isActive ? (
+                            <span
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "4px",
+                                padding: "3px 8px",
+                                borderRadius: "6px",
+                                fontSize: "12px",
+                                fontWeight: 600,
+                                backgroundColor: "#dcfce7",
+                                color: "#166534",
+                                border: "1px solid #bbf7d0",
+                              }}
+                            >
+                              <CheckCircle2 size={12} /> Active Handler
+                            </span>
+                          ) : (
+                            <span
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "4px",
+                                padding: "3px 8px",
+                                borderRadius: "6px",
+                                fontSize: "12px",
+                                fontWeight: 600,
+                                backgroundColor: "#f1f5f9",
+                                color: "#475569",
+                                border: "1px solid #e2e8f0",
+                              }}
+                            >
+                              <Clock size={12} /> Past Handler
+                            </span>
+                          )}
+                        </td>
+                        <td>
+                          <span style={{ fontSize: "13px", color: "#334155" }}>
+                            {record.assigned_by_name || "System"}
+                          </span>
+                        </td>
+                        <td>
+                          <span style={{ fontSize: "13px", color: "#334155" }}>
+                            {formatDateTime(record.assigned_at)}
+                          </span>
+                        </td>
+                        <td>
+                          <span
+                            style={{
+                              fontSize: "13px",
+                              color: isActive ? "#16a34a" : "#64748b",
+                              fontWeight: isActive ? 600 : 400,
+                            }}
+                          >
+                            {isActive ? "Currently Working" : formatDateTime(record.unassigned_at)}
+                          </span>
+                        </td>
+                        <td>
+                          <span style={{ fontSize: "13px", color: "#475569" }}>
+                            {record.notes || "--"}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
@@ -1463,9 +2118,91 @@ export default function LeadDetailScreen() {
         </div>
       )}
 
+      {/* MODAL: ADD / UPDATE REMARK */}
+      {remarkModalOpen && (
+        <div className="cc-modal-backdrop" onClick={() => setRemarkModalOpen(false)}>
+          <div className="cc-modal-box" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+            <div className="cc-modal-head">
+              <h3>
+                <MessageSquare size={18} style={{ color: "#047857" }} />
+                Add Remark for Lead #{lead.lead_id || lead.id}
+              </h3>
+              <button
+                type="button"
+                className="cc-modal-close"
+                onClick={() => setRemarkModalOpen(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveLeadRemark} className="cc-modal-form">
+              <div className="cc-form-group">
+                <label>
+                  Remark Notes <span style={{ color: "#dc2626" }}>*</span>
+                </label>
+                <textarea
+                  rows={4}
+                  required
+                  placeholder="Enter detailed observation, customer requirement, follow-up conversation notes..."
+                  value={newRemarkText}
+                  onChange={(e) => setNewRemarkText(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "10px",
+                    borderRadius: "10px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "13px",
+                    fontFamily: "inherit",
+                    resize: "vertical",
+                    boxSizing: "border-box",
+                  }}
+                  autoFocus
+                />
+              </div>
+
+              <div className="cc-form-group">
+                <label>Next Follow-up Date &amp; Time (Optional)</label>
+                <input
+                  type="datetime-local"
+                  value={newFollowupDate}
+                  onChange={(e) => setNewFollowupDate(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "8px 10px",
+                    borderRadius: "8px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "13px",
+                    boxSizing: "border-box",
+                  }}
+                />
+              </div>
+
+              <div className="cc-modal-actions" style={{ marginTop: 12 }}>
+                <button
+                  type="button"
+                  className="cc-btn ghost"
+                  onClick={() => setRemarkModalOpen(false)}
+                  disabled={submittingRemark}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="cc-btn primary"
+                  disabled={submittingRemark}
+                >
+                  {submittingRemark ? "Saving..." : "Save Remark"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* MODAL: LEAD DOCUMENT REQUEST */}
       <LeadDocumentRequestModal
-        isOpen={docReqModalOpen}
+        isOpen={docReqModalOpen && !isReadOnly}
         onClose={() => setDocReqModalOpen(false)}
         lead={lead}
         onSuccess={() => {
@@ -1473,6 +2210,103 @@ export default function LeadDetailScreen() {
           fetchDocRequests();
         }}
       />
+
+      {/* MODAL: REASSIGN LEAD */}
+      {reassignModalOpen && (
+        <div className="cc-modal-overlay" onClick={() => setReassignModalOpen(false)}>
+          <div className="cc-modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
+            <div className="cc-modal-header">
+              <div>
+                <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: "#0f172a" }}>Reassign Lead Ownership</h3>
+                <p style={{ margin: "4px 0 0", fontSize: 12.5, color: "#64748b" }}>
+                  Transfer lead #{lead?.lead_id || lead?.id} ({lead?.name || "Customer"}) to another company employee
+                </p>
+              </div>
+              <button
+                type="button"
+                className="cc-modal-close-btn"
+                onClick={() => setReassignModalOpen(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleExecuteReassign} style={{ padding: "16px 20px" }}>
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#475569", marginBottom: 6 }}>
+                  Current Owner
+                </label>
+                <div style={{ padding: "8px 12px", background: "#f8fafc", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, fontWeight: 600, color: "#334155" }}>
+                  👤 {lead?.owner || "Unassigned"} {lead?.person_id ? `(ID: ${lead.person_id})` : ""}
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#475569", marginBottom: 6 }}>
+                  Select New Employee *
+                </label>
+                <select
+                  required
+                  value={reassignTargetEmpId}
+                  onChange={(e) => setReassignTargetEmpId(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "9px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    fontSize: 13,
+                    background: "#fff",
+                  }}
+                >
+                  <option value="" disabled>-- Select an active employee --</option>
+                  {allEmployeesList.map((emp) => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.name} ({emp.role || "Staff"}{emp.branch?.name ? ` • ${emp.branch.name}` : ""})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#475569", marginBottom: 6 }}>
+                  Reassignment Reason / Remark (Optional)
+                </label>
+                <textarea
+                  rows={2}
+                  value={reassignReason}
+                  onChange={(e) => setReassignReason(e.target.value)}
+                  placeholder="e.g. Workload balancing, language preference, or branch reassignment"
+                  style={{
+                    width: "100%",
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    fontSize: 12.5,
+                  }}
+                />
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                <button
+                  type="button"
+                  className="cc-modal-btn cancel"
+                  onClick={() => setReassignModalOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingReassign || !reassignTargetEmpId}
+                  className="cc-modal-btn submit"
+                  style={{ background: "#2563eb", color: "#fff" }}
+                >
+                  {submittingReassign ? "Reassigning..." : "Confirm Reassign"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2006,36 +2840,82 @@ const detailStyles = `
 .cc-doc-chip .status.pending { background: #fef9c3; color: #854d0e; }
 .cc-doc-chip .status.rejected { background: #fee2e2; color: #b91c1c; }
 
-/* Documents Table */
+/* Documents Table & Details Tables */
 .cc-documents-table-shell {
   background: #ffffff;
   border-radius: 12px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid #cbd5e1;
   overflow-x: auto;
+  overflow-y: auto;
+  max-height: 480px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+  position: relative;
+}
+
+.cc-documents-table-shell::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+.cc-documents-table-shell::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+.cc-documents-table-shell::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+.cc-documents-table-shell::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }
 
 .cc-data-table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   text-align: left;
 }
 
 .cc-data-table th {
-  background: #f8fafc;
-  padding: 12px 18px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #475569;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: #f1f5f9 !important;
+  padding: 12px 16px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #334155;
   text-transform: uppercase;
-  border-bottom: 1px solid #e2e8f0;
+  letter-spacing: 0.05em;
+  border-bottom: 2px solid #cbd5e1;
+  border-right: 1px solid #e2e8f0;
+  white-space: nowrap;
+  box-shadow: 0 2px 4px rgba(15, 23, 42, 0.04);
+}
+
+.cc-data-table th:last-child {
+  border-right: none;
 }
 
 .cc-data-table td {
-  padding: 14px 18px;
-  font-size: 13.5px;
+  padding: 13px 16px;
+  font-size: 13px;
   color: #1e293b;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid #e2e8f0;
+  border-right: 1px solid #edf2f7;
   vertical-align: middle;
+  background: #ffffff;
+  transition: background-color 0.12s ease;
+}
+
+.cc-data-table td:last-child {
+  border-right: none;
+}
+
+.cc-data-table tbody tr:nth-child(even) td {
+  background: #fafbfc;
+}
+
+.cc-data-table tbody tr:hover td {
+  background: #f0fdf4 !important;
 }
 
 .cc-doc-type-cell {
@@ -2281,5 +3161,260 @@ const detailStyles = `
 .cc-btn.ghost:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Funnel Stage Stepper Styling */
+.cc-lead-stage-journey-card {
+  background: #ffffff;
+  border-radius: 16px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.cc-stage-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.cc-stage-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.cc-stage-badge-pill {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+.cc-stage-status-text {
+  font-size: 13px;
+  color: #64748b;
+}
+
+.cc-stage-progress-percentage {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #047857;
+  background: #ecfdf5;
+  padding: 3px 10px;
+  border-radius: 8px;
+  border: 1px solid #a7f3d0;
+}
+
+.cc-stage-stepper {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.cc-step-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  flex: 1;
+  min-width: 110px;
+  position: relative;
+}
+
+.cc-step-indicator {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  background: #f1f5f9;
+  color: #64748b;
+  border: 2px solid #cbd5e1;
+  z-index: 2;
+  transition: all 0.2s ease;
+}
+
+.cc-step-item.completed .cc-step-indicator {
+  background: #047857;
+  color: #ffffff;
+  border-color: #047857;
+}
+
+.cc-step-item.current .cc-step-indicator {
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.18);
+  transform: scale(1.08);
+}
+
+.cc-step-item.rejected .cc-step-indicator {
+  background: #dc2626;
+  color: #ffffff;
+  border-color: #dc2626;
+}
+
+.cc-step-info {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cc-step-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.cc-step-item.completed .cc-step-name {
+  color: #0f172a;
+}
+
+.cc-step-item.current .cc-step-name {
+  color: #2563eb;
+}
+
+.cc-step-desc {
+  font-size: 10px;
+  color: #94a3b8;
+  line-height: 1.3;
+}
+
+.cc-step-connector {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  width: 100%;
+  height: 2px;
+  background: #e2e8f0;
+  z-index: 1;
+}
+
+.cc-step-connector.completed {
+  background: #047857;
+}
+
+/* Latest Remark Card Styling */
+.cc-lead-latest-remark-card {
+  background: linear-gradient(135deg, #f0fdf4 0%, #ffffff 60%, #eff6ff 100%);
+  border-radius: 16px;
+  border: 1px solid #bbf7d0;
+  box-shadow: 0 4px 16px rgba(4, 120, 87, 0.06);
+  padding: 16px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.cc-remark-card-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  flex: 1;
+  min-width: 260px;
+}
+
+.cc-remark-icon-circle {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: #dcfce7;
+  color: #047857;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 1px solid #86efac;
+}
+
+.cc-remark-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+
+.cc-remark-top-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.cc-remark-tag {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  color: #047857;
+}
+
+.cc-remark-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #475569;
+  background: rgba(255, 255, 255, 0.8);
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  font-weight: 600;
+}
+
+.cc-remark-meta-item.user {
+  color: #1d4ed8;
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.cc-remark-body-text {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.cc-remark-card-right {
+  display: flex;
+  align-items: center;
+}
+
+.cc-add-remark-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 16px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  background: #047857;
+  color: #ffffff;
+  border: 0;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(4, 120, 87, 0.2);
+  transition: all 0.2s ease;
+}
+
+.cc-add-remark-btn:hover {
+  background: #065f46;
+  transform: translateY(-1px);
 }
 `;

@@ -17,6 +17,11 @@ import {
   Trash2,
   UserCog,
   Link,
+  Clock,
+  MessageSquare,
+  Filter,
+  CheckCircle2,
+  X,
 } from "lucide-react";
 import API_URL from "../../../config";
 import AddLeadModal from "../AddLeadModal";
@@ -50,7 +55,14 @@ export default function LeadsListRedesign() {
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [dateRange, setDateRange] = useState(defaults);
-  const [statusCategory, setStatusCategory] = useState("ALL"); // "ALL" | "PENDING" | "COMPLETED"
+  const [statusCategory, setStatusCategory] = useState("ALL"); // "ALL" | "PENDING" | "COMPLETED" | "WORKED"
+  const [workedCount, setWorkedCount] = useState(0);
+  const [selectedStatus, setSelectedStatus] = useState("ALL");
+  const [statusesList, setStatusesList] = useState([]);
+  const [remarkModalLead, setRemarkModalLead] = useState(null);
+  const [remarkText, setRemarkText] = useState("");
+  const [remarkNextDate, setRemarkNextDate] = useState("");
+  const [submittingRemark, setSubmittingRemark] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [assignFor, setAssignFor] = useState(null); // { leadId, anchorRect }
@@ -72,16 +84,115 @@ export default function LeadsListRedesign() {
     }
   }, []);
 
-  const canExport = !isEmployee && userPermissions.exportData !== false;
-  const canDelete = !isEmployee && Boolean(userPermissions.deleteRecords);
-  const canViewCommission = !isEmployee && Boolean(userPermissions.viewPayouts || userPermissions.viewConnectors || userRole === "COMPANY_ADMIN" || userRole === "SUPERADMIN");
-  const isCompanyAdmin = userRole === "COMPANY_ADMIN" || userRole === "SUPERADMIN";
+  const isCompanyAdmin =
+    userRole.toUpperCase() === "COMPANY_ADMIN" ||
+    userRole.toUpperCase() === "SUPERADMIN" ||
+    ["admin", "superadmin"].includes(employeeRole?.toLowerCase());
+  const canExport = isCompanyAdmin || Boolean(userPermissions.exportData) || (!isEmployee && userPermissions.exportData !== false);
+  const canDelete = isCompanyAdmin || Boolean(userPermissions.deleteRecords) || (userRole.toUpperCase() === "MANAGER" && userPermissions.deleteRecords !== false);
+  const canViewCommission = !isEmployee && Boolean(userPermissions.viewPayouts || userPermissions.viewConnectors || isCompanyAdmin);
+
   const canAddLead = isCompanyAdmin || (userPermissions.createLead !== undefined ? Boolean(userPermissions.createLead) : Boolean(userPermissions.manageLeads !== false));
   const canEditLead =
     isCompanyAdmin ||
     ["MANAGER", "OPS", "EMPLOYEE"].includes(userRole.toUpperCase()) ||
     ["manager", "operations", "calling", "employee", "sales"].includes(employeeRole?.toLowerCase()) ||
     userPermissions.editLead !== false;
+  const canAssignLead =
+    isCompanyAdmin ||
+    (userPermissions.reassignLeads !== false &&
+      (["MANAGER", "OPS", "EMPLOYEE"].includes(userRole.toUpperCase()) ||
+        ["manager", "operations", "calling", "employee", "sales"].includes(employeeRole?.toLowerCase()) ||
+        Boolean(userPermissions.reassignLeads || userPermissions.assignLead || userPermissions.manageLeads)));
+
+  const formatDateTime = (isoStr) => {
+    if (!isoStr) return "--";
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return "--";
+    return d.toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    });
+  };
+
+  const getStatusStageInfo = (status) => {
+    const s = String(status || "").toUpperCase();
+    if (s === "DISBURSED" || s === "LOAN DISBURSEMENT" || s === "CLOSED") {
+      return {
+        stage: "Stage 6/6 • Disbursed",
+        color: "#047857",
+        bg: "#ecfdf5",
+        border: "#a7f3d0",
+        icon: "🎉",
+      };
+    }
+    if (s === "SANCTIONED" || s === "LOAN SECTION" || s === "APPROVED") {
+      return {
+        stage: "Stage 5/6 • Sanctioned",
+        color: "#0f766e",
+        bg: "#f0fdfa",
+        border: "#99f6e4",
+        icon: "✅",
+      };
+    }
+    if (s.includes("LOGIN") || s.includes("SUBMITTED") || s.includes("BANK") || s.includes("UNDERWRITING")) {
+      return {
+        stage: "Stage 4/6 • Bank Login & Ops",
+        color: "#4338ca",
+        bg: "#eef2ff",
+        border: "#c7d2fe",
+        icon: "🏦",
+      };
+    }
+    if (s.includes("DOCUMENT") || s.includes("DOC") || s.includes("VERIFICATION") || s.includes("KYC")) {
+      return {
+        stage: "Stage 3/6 • Documentation",
+        color: "#d97706",
+        bg: "#fffbeb",
+        border: "#fde68a",
+        icon: "📄",
+      };
+    }
+    if (s.includes("FOLLOW") || s.includes("CALL") || s.includes("INTERESTED") || s.includes("MEETING")) {
+      return {
+        stage: "Stage 2/6 • Telecalling",
+        color: "#2563eb",
+        bg: "#eff6ff",
+        border: "#bfdbfe",
+        icon: "📞",
+      };
+    }
+    if (s === "REJECTED" || s === "CANCELLED") {
+      return {
+        stage: "Closed / Rejected",
+        color: "#b91c1c",
+        bg: "#fef2f2",
+        border: "#fecaca",
+        icon: "❌",
+      };
+    }
+    return {
+      stage: "Stage 1/6 • New Lead",
+      color: "#475569",
+      bg: "#f8fafc",
+      border: "#e2e8f0",
+      icon: "🌱",
+    };
+  };
+
+  const fetchStatuses = () => {
+    axios
+      .get(`${API_URL}/master-configs/LEAD_STATUS`, { params: { includeInactive: false } })
+      .then((res) => {
+        const list = res.data?.data || [];
+        setStatusesList(list);
+      })
+      .catch(() => setStatusesList([]));
+  };
 
   const fetchEmployees = () => {
     axios
@@ -90,9 +201,19 @@ export default function LeadsListRedesign() {
       .catch(() => setEmployees([]));
   };
 
+  const fetchCounts = () => {
+    axios
+      .get(`${API_URL}/leads/counts`)
+      .then((res) => {
+        setWorkedCount(res.data?.data?.workedCount || 0);
+      })
+      .catch(() => {});
+  };
+
   const fetchLeads = async (pageOverride, search = debouncedSearchTerm) => {
     setLoading(true);
     const page = pageOverride || currentPage;
+    const isWorked = statusCategory === "WORKED";
     try {
       const res = await axios.get(`${API_URL}/leads`, {
         params: {
@@ -101,7 +222,12 @@ export default function LeadsListRedesign() {
           search: search || "",
           fromDate: dateRange.from || "",
           toDate: dateRange.to || "",
-          statusCategory: statusCategory !== "ALL" ? statusCategory : undefined,
+          ...(isWorked
+            ? { scope: "worked" }
+            : {
+                statusCategory: statusCategory !== "ALL" ? statusCategory : undefined,
+              }),
+          status: selectedStatus !== "ALL" ? selectedStatus : undefined,
         },
       });
       const pagination = res.data?.pagination || {};
@@ -119,8 +245,71 @@ export default function LeadsListRedesign() {
     }
   };
 
+  const openRemarkModal = (lead) => {
+    setRemarkModalLead(lead);
+    setRemarkText("");
+    if (lead.next_meeting) {
+      const dt = new Date(lead.next_meeting);
+      const formatted = new Date(dt.getTime() - dt.getTimezoneOffset() * 60000)
+        .toISOString()
+        .slice(0, 16);
+      setRemarkNextDate(formatted);
+    } else {
+      setRemarkNextDate("");
+    }
+  };
+
+  const handleSaveRemark = async (e) => {
+    e?.preventDefault();
+    if (!remarkModalLead) return;
+    if (!remarkText.trim()) {
+      toast.error("Please enter remark text");
+      return;
+    }
+    setSubmittingRemark(true);
+    try {
+      const payload = {
+        remark: remarkText.trim(),
+      };
+      if (remarkNextDate) {
+        payload.nextFollowupDate = new Date(remarkNextDate).toISOString();
+      }
+      const res = await axios.post(`${API_URL}/leads/${remarkModalLead.lead_id}/remarks`, payload);
+      toast.success("Remark added successfully");
+
+      const nowIso = new Date().toISOString();
+      const currentUserName = localStorage.getItem("userName") || "User";
+
+      // Update in local state rows immediately
+      setRows((prev) =>
+        prev.map((r) =>
+          r.lead_id === remarkModalLead.lead_id
+            ? {
+                ...r,
+                latest_remark: remarkText.trim(),
+                latest_remark_date: nowIso,
+                latest_remark_by: currentUserName,
+                next_meeting: remarkNextDate || r.next_meeting,
+              }
+            : r
+        )
+      );
+
+      setRemarkModalLead(null);
+      setRemarkText("");
+      setRemarkNextDate("");
+    } catch (err) {
+      console.error("Failed to add remark:", err);
+      toast.error(err.response?.data?.message || "Failed to add remark");
+    } finally {
+      setSubmittingRemark(false);
+    }
+  };
+
   useEffect(() => {
     fetchEmployees();
+    fetchStatuses();
+    fetchCounts();
   }, []);
 
   useEffect(() => {
@@ -139,7 +328,7 @@ export default function LeadsListRedesign() {
   useEffect(() => {
     fetchLeads(currentPage, debouncedSearchTerm);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, debouncedSearchTerm, dateRange.from, dateRange.to, statusCategory]);
+  }, [currentPage, debouncedSearchTerm, dateRange.from, dateRange.to, statusCategory, selectedStatus]);
 
   useEffect(() => {
     if (!assignFor) return;
@@ -159,13 +348,17 @@ export default function LeadsListRedesign() {
       });
       setRows((prev) =>
         prev.map((row) =>
-          row.lead_id === leadId ? { ...row, person_id: emp.id, owner: emp.name } : row
+          row.lead_id === leadId ? { ...row, person_id: emp.id, owner: emp.name, current_owner: emp.name } : row
         )
       );
-      toast.success("Assigned");
+      toast.success("Assigned successfully");
       setAssignFor(null);
       setAssignQuery("");
       setDebouncedAssignQuery("");
+      fetchCounts();
+      if (statusCategory === "WORKED") {
+        fetchLeads(currentPage, debouncedSearchTerm);
+      }
     } catch (error) {
       console.error(error);
       toast.error("Failed to assign");
@@ -333,11 +526,73 @@ export default function LeadsListRedesign() {
         .cc-leads-category-tabs button { border:0; background:transparent; padding:6px 14px; border-radius:7px; font-size:12.5px; font-weight:600; color:#475569; cursor:pointer; transition:all .15s ease; }
         .cc-leads-category-tabs button:hover { color:#0f172a; }
         .cc-leads-category-tabs button.active { background:#fff; color:#047857; box-shadow:0 1px 3px rgba(0,0,0,0.08); font-weight:700; }
+
+        /* Leads Table Refinement: Crisp Borders & Sticky Header */
+        .cc-leads-table-container {
+          overflow: auto;
+          max-height: calc(100vh - 270px);
+          min-height: 420px;
+          border: 1px solid #cbd5e1;
+          border-radius: 12px;
+          background: #ffffff;
+          box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+          position: relative;
+        }
+        .cc-leads-table-container table {
+          width: 100%;
+          min-width: 980px;
+          border-collapse: separate;
+          border-spacing: 0;
+          border: none;
+        }
+        .cc-leads-table-container thead {
+          position: sticky;
+          top: 0;
+          z-index: 20;
+        }
+        .cc-leads-table-container thead th {
+          position: sticky;
+          top: 0;
+          z-index: 20;
+          background: #f1f5f9 !important;
+          color: #334155;
+          font-size: 11.5px;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          padding: 12px 14px;
+          border-bottom: 2px solid #cbd5e1;
+          border-right: 1px solid #e2e8f0;
+          white-space: nowrap;
+          box-shadow: 0 2px 4px rgba(15, 23, 42, 0.04);
+        }
+        .cc-leads-table-container thead th:last-child {
+          border-right: none;
+        }
+        .cc-leads-table-container tbody td {
+          padding: 12px 14px;
+          font-size: 13px;
+          color: #1e293b;
+          border-bottom: 1px solid #e2e8f0;
+          border-right: 1px solid #edf2f7;
+          background: #ffffff;
+          vertical-align: middle;
+          transition: background-color 0.12s ease;
+        }
+        .cc-leads-table-container tbody td:last-child {
+          border-right: none;
+        }
+        .cc-leads-table-container tbody tr:nth-child(even) td {
+          background: #fafbfc;
+        }
+        .cc-leads-table-container tbody tr:hover td {
+          background: #f0fdf4 !important;
+        }
       `}</style>
 
       <section className="cc-report-panel">
         <div className="cc-leads-toolbar">
-          <label className="cc-report-search" style={{ flex: "1 1 260px" }}>
+          <label className="cc-report-search" style={{ flex: "1 1 240px" }}>
             <Search size={18} />
             <input
               type="search"
@@ -346,6 +601,38 @@ export default function LeadsListRedesign() {
               onChange={(event) => setSearchTerm(event.target.value)}
             />
           </label>
+
+          {/* Status Filter Dropdown */}
+          <label className="cc-leads-date" style={{ minWidth: 160 }}>
+            Status filter
+            <select
+              value={selectedStatus}
+              onChange={(e) => {
+                setSelectedStatus(e.target.value);
+                setCurrentPage(1);
+              }}
+              style={{
+                height: 38,
+                padding: "8px 12px",
+                border: "1px solid #d5ded7",
+                borderRadius: 10,
+                fontSize: 13,
+                background: "#fff",
+                fontWeight: 600,
+                color: selectedStatus !== "ALL" ? "#047857" : "#0f172a",
+                outline: "none",
+                cursor: "pointer",
+              }}
+            >
+              <option value="ALL">All Statuses</option>
+              {statusesList.map((st) => (
+                <option key={st.id || st.value} value={st.value}>
+                  {st.label || st.value}
+                </option>
+              ))}
+            </select>
+          </label>
+
           <label className="cc-leads-date">
             From date
             <input
@@ -419,10 +706,66 @@ export default function LeadsListRedesign() {
             >
               ✅ Completed Leads
             </button>
+            <button
+              type="button"
+              className={statusCategory === "WORKED" ? "active" : ""}
+              onClick={() => {
+                setStatusCategory("WORKED");
+                setCurrentPage(1);
+              }}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontWeight: 600,
+                ...(statusCategory === "WORKED"
+                  ? { color: "#2563eb", borderColor: "#2563eb" }
+                  : {}),
+              }}
+            >
+              <span>📂 Worked Leads</span>
+              {workedCount > 0 && (
+                <span
+                  style={{
+                    fontSize: "11px",
+                    fontWeight: 700,
+                    padding: "1px 6px",
+                    borderRadius: "10px",
+                    background: statusCategory === "WORKED" ? "#2563eb" : "#e2e8f0",
+                    color: statusCategory === "WORKED" ? "#ffffff" : "#475569",
+                  }}
+                >
+                  {workedCount}
+                </span>
+              )}
+            </button>
           </div>
         </div>
 
-        <div className="cc-report-table-scroll">
+        {statusCategory === "WORKED" && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              padding: "12px 18px",
+              margin: "0 16px 14px 16px",
+              background: "#eff6ff",
+              border: "1px solid #bfdbfe",
+              borderRadius: "8px",
+              color: "#1e40af",
+              fontSize: "13px",
+              lineHeight: 1.4,
+            }}
+          >
+            <span style={{ fontSize: "20px" }}>ℹ️</span>
+            <div>
+              <strong>Worked Leads (Past Handled):</strong> These are leads you previously worked on that have been transferred to another employee. You have <strong>Read-Only access</strong> to monitor their live stage progress and remarks until the lead is reassigned back to you.
+            </div>
+          </div>
+        )}
+
+        <div className="cc-report-table-scroll cc-leads-table-container">
           <table>
             <thead>
               <tr>
@@ -431,7 +774,8 @@ export default function LeadsListRedesign() {
                 <th>Phone</th>
                 <th>Source / Party</th>
                 {canViewCommission && <th>Party Commission</th>}
-                <th>Status</th>
+                <th style={{ minWidth: 165 }}>Status &amp; Stage</th>
+                <th style={{ minWidth: 260 }}>Latest Remark</th>
                 <th>Assigned to</th>
                 <th>Actions</th>
               </tr>
@@ -439,17 +783,35 @@ export default function LeadsListRedesign() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={canViewCommission ? 8 : 7} className="cc-report-empty">Loading leads...</td>
+                  <td colSpan={canViewCommission ? 9 : 8} className="cc-report-empty">Loading leads...</td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={canViewCommission ? 8 : 7} className="cc-report-empty">No leads match the filters</td>
+                  <td colSpan={canViewCommission ? 9 : 8} className="cc-report-empty">No leads match the filters</td>
                 </tr>
               ) : (
                 rows.map((row) => (
                   <tr key={row.lead_id}>
                     <td onClick={() => navigate(`/lead-details/${row.lead_id}`)} style={{ cursor: "pointer", fontWeight: 600 }}>
-                      {row.lead_id}
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span>{row.lead_id}</span>
+                        {row.is_read_only && (
+                          <span
+                            style={{
+                              padding: "1px 5px",
+                              borderRadius: 4,
+                              background: "#fef3c7",
+                              color: "#92400e",
+                              border: "1px solid #fde68a",
+                              fontSize: 10,
+                              fontWeight: 700,
+                            }}
+                            title="Worked Lead (Read-Only Mode)"
+                          >
+                            Worked
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td onClick={() => navigate(`/lead-details/${row.lead_id}`)} style={{ cursor: "pointer" }}>
                       {row.name || "--"}
@@ -496,10 +858,169 @@ export default function LeadsListRedesign() {
                       </td>
                     )}
                     <td>
-                      <span className="cc-report-status">{row.status || "Unassigned"}</span>
+                      {(() => {
+                        const stageInfo = getStatusStageInfo(row.status || row.status_value);
+                        return (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                            <span
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 5,
+                                padding: "3px 9px",
+                                borderRadius: "12px",
+                                fontSize: "12px",
+                                fontWeight: 700,
+                                background: stageInfo.bg,
+                                color: stageInfo.color,
+                                border: `1px solid ${stageInfo.border}`,
+                                width: "fit-content",
+                              }}
+                            >
+                              <span>{stageInfo.icon}</span>
+                              <span>{row.status || "Unassigned"}</span>
+                            </span>
+                            <span
+                              style={{
+                                fontSize: "10.5px",
+                                fontWeight: 600,
+                                color: "#64748b",
+                                letterSpacing: "0.2px",
+                              }}
+                            >
+                              {stageInfo.stage}
+                            </span>
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td>
-                      {isEmployee ? (
+                      {row.is_read_only ? (
+                        <div
+                          style={{
+                            padding: "6px 10px",
+                            background: "#f8fafc",
+                            border: "1px solid #e2e8f0",
+                            borderRadius: "10px",
+                            maxWidth: "320px",
+                          }}
+                        >
+                          <div style={{ fontSize: "12px", color: "#1e293b", fontWeight: 500, lineHeight: 1.35, wordBreak: "break-word" }}>
+                            {row.latest_remark ? `"${row.latest_remark}"` : <span style={{ color: "#94a3b8", fontStyle: "italic" }}>No remark logged</span>}
+                          </div>
+                          {row.latest_remark_date && (
+                            <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: "10.5px", color: "#64748b", marginTop: 4 }}>
+                              <Clock size={11} color="#94a3b8" />
+                              <span>{formatDateTime(row.latest_remark_date)}</span>
+                              {row.latest_remark_by && <span style={{ fontWeight: 600 }}>• {row.latest_remark_by}</span>}
+                            </div>
+                          )}
+                        </div>
+                      ) : row.latest_remark ? (
+                        <div
+                          style={{
+                            padding: "6px 10px",
+                            background: "#f8fafc",
+                            border: "1px solid #e2e8f0",
+                            borderRadius: "10px",
+                            maxWidth: "320px",
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize: "12.5px",
+                              color: "#1e293b",
+                              fontWeight: 500,
+                              lineHeight: 1.4,
+                              wordBreak: "break-word",
+                            }}
+                          >
+                            "{row.latest_remark}"
+                          </div>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              gap: 6,
+                              marginTop: "4px",
+                              fontSize: "10.5px",
+                              color: "#64748b",
+                            }}
+                          >
+                            <span style={{ display: "flex", alignItems: "center", gap: 3, fontWeight: 600 }}>
+                              <Clock size={11} color="#64748b" />
+                              {formatDateTime(row.latest_remark_date)}
+                            </span>
+                            {row.latest_remark_by && (
+                              <span style={{ color: "#047857", fontWeight: 600 }}>
+                                by {row.latest_remark_by}
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openRemarkModal(row);
+                              }}
+                              style={{
+                                border: 0,
+                                background: "transparent",
+                                color: "#2563eb",
+                                cursor: "pointer",
+                                fontSize: "11px",
+                                fontWeight: 600,
+                                textDecoration: "underline",
+                                padding: 0,
+                              }}
+                              title="Update or add new remark"
+                            >
+                              + Update
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <span style={{ fontSize: "12px", color: "#94a3b8", fontStyle: "italic" }}>
+                            No remark logged
+                          </span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openRemarkModal(row);
+                            }}
+                            style={{
+                              padding: "2px 8px",
+                              borderRadius: "6px",
+                              border: "1px solid #cbd5e1",
+                              background: "#fff",
+                              color: "#047857",
+                              fontSize: "11px",
+                              fontWeight: 600,
+                              cursor: "pointer",
+                            }}
+                            title="Add remark"
+                          >
+                            + Add
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                    <td>
+                      {row.is_read_only ? (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                          <span style={{ fontSize: "10px", color: "#64748b", fontWeight: 600 }}>Currently with:</span>
+                          <span
+                            className="cc-leads-assign-btn assigned"
+                            style={{ cursor: "default", background: "#f8fafc", color: "#1e293b", borderColor: "#cbd5e1" }}
+                            title={`Currently handled by ${row.current_owner || row.owner || "Unassigned"}`}
+                          >
+                            <UserCog size={13} color="#2563eb" />
+                            {row.current_owner || row.owner || "Unassigned"}
+                          </span>
+                        </div>
+                      ) : !canAssignLead ? (
                         <span
                           className={`cc-leads-assign-btn ${row.owner ? "assigned" : ""}`}
                           style={{ cursor: "default" }}
@@ -520,50 +1041,80 @@ export default function LeadsListRedesign() {
                       )}
                     </td>
                     <td>
-                      <div className="cc-leads-row-actions">
-                        <button
-                          type="button"
-                          className="cc-leads-icon-btn"
-                          title="Generate/Share Customer Document Upload Link"
-                          onClick={() => setDocReqLead({
-                            id: row.lead_id,
-                            customer: { name: row.name, mobile: row.number },
-                            loanType: row.loan_type,
-                            requiredAmount: row.est_budget,
-                          })}
-                          style={{ color: "#2563eb" }}
-                        >
-                          <Link size={16} />
-                        </button>
-                        <button
-                          type="button"
-                          className="cc-leads-icon-btn"
-                          title="View lead details"
-                          onClick={() => navigate(`/lead-details/${row.lead_id}`)}
-                        >
-                          <Eye size={16} />
-                        </button>
-                        {canEditLead && (
+                      {row.is_read_only ? (
+                        <div className="cc-leads-row-actions">
                           <button
                             type="button"
-                            className="cc-leads-icon-btn edit"
-                            title="Edit lead"
-                            onClick={() => navigate(`/lead-edit/${row.lead_id}`)}
+                            className="cc-leads-icon-btn"
+                            title="View lead details & history (Read-only)"
+                            onClick={() => navigate(`/lead-details/${row.lead_id}`)}
+                            style={{ color: "#2563eb", background: "#eff6ff", borderRadius: 6 }}
                           >
-                            <Pencil size={15} />
+                            <Eye size={16} />
                           </button>
-                        )}
-                        {canDelete && (
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              padding: "3px 6px",
+                              borderRadius: 4,
+                              background: "#fef3c7",
+                              color: "#92400e",
+                              fontSize: 10,
+                              fontWeight: 700,
+                              border: "1px solid #fde68a",
+                            }}
+                            title="Read-Only: Lead is handled by another employee"
+                          >
+                            🔒 Read Only
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="cc-leads-row-actions">
                           <button
                             type="button"
-                            className="cc-leads-icon-btn danger"
-                            title="Delete lead"
-                            onClick={() => setDeleteTarget(row)}
+                            className="cc-leads-icon-btn"
+                            title="Generate/Share Customer Document Upload Link"
+                            onClick={() => setDocReqLead({
+                              id: row.lead_id,
+                              customer: { name: row.name, mobile: row.number },
+                              loanType: row.loan_type,
+                              requiredAmount: row.est_budget,
+                            })}
+                            style={{ color: "#2563eb" }}
                           >
-                            <Trash2 size={16} />
+                            <Link size={16} />
                           </button>
-                        )}
-                      </div>
+                          <button
+                            type="button"
+                            className="cc-leads-icon-btn"
+                            title="View lead details"
+                            onClick={() => navigate(`/lead-details/${row.lead_id}`)}
+                          >
+                            <Eye size={16} />
+                          </button>
+                          {canEditLead && (
+                            <button
+                              type="button"
+                              className="cc-leads-icon-btn edit"
+                              title="Edit lead"
+                              onClick={() => navigate(`/lead-edit/${row.lead_id}`)}
+                            >
+                              <Pencil size={15} />
+                            </button>
+                          )}
+                          {canDelete && (
+                            <button
+                              type="button"
+                              className="cc-leads-icon-btn danger"
+                              title="Delete lead"
+                              onClick={() => setDeleteTarget(row)}
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))
@@ -630,6 +1181,99 @@ export default function LeadsListRedesign() {
                 Delete
               </button>
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Quick Remark Modal */}
+      {remarkModalLead ? (
+        <div className="cc-leads-modal-overlay" onClick={() => setRemarkModalLead(null)}>
+          <div className="cc-leads-modal" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <h3 style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                <MessageSquare size={18} color="#047857" />
+                Add Remark: {remarkModalLead.name || `#${remarkModalLead.lead_id}`}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setRemarkModalLead(null)}
+                style={{ border: 0, background: "transparent", cursor: "pointer", color: "#64748b" }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {remarkModalLead.latest_remark && (
+              <div style={{ padding: "8px 12px", background: "#f8fafc", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12 }}>
+                <span style={{ color: "#64748b", fontWeight: 600 }}>Previous Remark:</span>
+                <p style={{ margin: "2px 0 0 0", color: "#1e293b" }}>"{remarkModalLead.latest_remark}"</p>
+                <small style={{ color: "#94a3b8" }}>{formatDateTime(remarkModalLead.latest_remark_date)}</small>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveRemark} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, color: "#334155", display: "block", marginBottom: 4 }}>
+                  New Remark <span style={{ color: "#dc2626" }}>*</span>
+                </label>
+                <textarea
+                  rows={4}
+                  required
+                  placeholder="Enter call notes, customer response, next steps..."
+                  value={remarkText}
+                  onChange={(e) => setRemarkText(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "10px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    fontSize: 13,
+                    outline: "none",
+                    fontFamily: "inherit",
+                    resize: "vertical",
+                    boxSizing: "border-box",
+                  }}
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, color: "#334155", display: "block", marginBottom: 4 }}>
+                  Next Follow-up Date &amp; Time (Optional)
+                </label>
+                <input
+                  type="datetime-local"
+                  value={remarkNextDate}
+                  onChange={(e) => setRemarkNextDate(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "8px 10px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    fontSize: 13,
+                    boxSizing: "border-box",
+                  }}
+                />
+              </div>
+
+              <div className="cc-leads-modal-actions" style={{ marginTop: 6 }}>
+                <button
+                  type="button"
+                  className="cc-leads-btn ghost"
+                  onClick={() => setRemarkModalLead(null)}
+                  disabled={submittingRemark}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="cc-leads-btn primary"
+                  disabled={submittingRemark}
+                >
+                  {submittingRemark ? "Saving..." : "Save Remark"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       ) : null}

@@ -1,7 +1,11 @@
+const path = require("path");
+const fs = require("fs");
+const archiver = require("archiver");
 const { Document, Customer, Lead, Application, User } = require("../models");
 const { buildQuery, paginated } = require("../utils/query");
 const { logActivity, diffFields } = require("../utils/activity");
 const { companyScope, belongsToScope } = require("../middlewares/auth");
+const { resolveDiskFilePath, getPublicDocumentUrls } = require("../utils/documentHelper");
 
 /**
  * @desc    Upload a new KYC / Loan document
@@ -202,10 +206,217 @@ const deleteDocument = async (req, res, next) => {
   }
 };
 
+/**
+ * @desc    Download a document directly with original filename
+ * @route   GET /api/documents/:id/download
+ */
+const downloadDocument = async (req, res, next) => {
+  try {
+    const document = await Document.findByPk(req.params.id);
+    if (!document) {
+      return res.status(404).json({ message: "Document not found" });
+    }
+
+    if (!document.fileUrl) {
+      return res.status(404).json({ message: "No file associated with this document" });
+    }
+
+    const filePath = resolveDiskFilePath(document.fileUrl);
+    if (!filePath || !fs.existsSync(filePath)) {
+      return res.status(404).json({
+        message: `File does not exist on server storage: ${document.fileName || document.fileUrl}`,
+      });
+    }
+
+    const ext = path.extname(filePath) || ".pdf";
+    const downloadFileName =
+      document.fileName ||
+      `${(document.docType || "document").replace(/\s+/g, "_")}${ext}`;
+
+    return res.download(filePath, downloadFileName);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * @desc    View a document inline in browser
+ * @route   GET /api/documents/:id/view
+ */
+const viewDocument = async (req, res, next) => {
+  try {
+    const document = await Document.findByPk(req.params.id);
+    if (!document) {
+      return res.status(404).json({ message: "Document not found" });
+    }
+
+    if (!document.fileUrl) {
+      return res.status(404).json({ message: "No file associated with this document" });
+    }
+
+    const filePath = resolveDiskFilePath(document.fileUrl);
+    if (!filePath || !fs.existsSync(filePath)) {
+      return res.status(404).json({
+        message: `File does not exist on server storage: ${document.fileName || document.fileUrl}`,
+      });
+    }
+
+    return res.sendFile(filePath);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * @desc    Download all documents for a Lead as a single ZIP archive
+ * @route   GET /api/documents/lead/:leadId/download-all
+ */
+const downloadAllLeadDocuments = async (req, res, next) => {
+  try {
+    const { leadId } = req.params;
+    const lead = await Lead.findByPk(leadId, {
+      include: [{ model: Customer, as: "customer" }],
+    });
+
+    if (!lead) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
+    const docs = await Document.findAll({
+      where: { leadId: parseInt(leadId, 10) },
+    });
+
+    if (!docs || docs.length === 0) {
+      return res.status(404).json({ message: "No documents found for this lead" });
+    }
+
+    const customerName = (lead.customer?.name || "Customer").replace(/[^a-zA-Z0-9_-]/g, "_");
+    const zipFileName = `Lead_${lead.id}_${customerName}_Documents.zip`;
+
+    res.attachment(zipFileName);
+    const archive = archiver("zip", { zlib: { level: 9 } });
+
+    archive.on("error", (err) => {
+      console.error("[archive error]", err);
+      if (!res.headersSent) res.status(500).send({ message: err.message });
+    });
+
+    archive.pipe(res);
+
+    let addedCount = 0;
+    const addedNames = new Set();
+
+    for (const doc of docs) {
+      const diskPath = resolveDiskFilePath(doc.fileUrl);
+      if (diskPath && fs.existsSync(diskPath)) {
+        const ext = path.extname(diskPath) || ".pdf";
+        let entryName = doc.fileName || `${doc.docType}${ext}`;
+        // Prevent duplicate file name collisions in the zip
+        if (addedNames.has(entryName)) {
+          entryName = `${doc.docType}_${doc.id}_${entryName}`;
+        }
+        addedNames.add(entryName);
+        archive.file(diskPath, { name: entryName });
+        addedCount++;
+      }
+    }
+
+    if (addedCount === 0) {
+      archive.append("No readable document files found on disk.", { name: "README.txt" });
+    }
+
+    await archive.finalize();
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * @desc    Download all documents for an Application as a single ZIP archive
+ * @route   GET /api/documents/application/:applicationId/download-all
+ */
+const downloadAllApplicationDocuments = async (req, res, next) => {
+  try {
+    const { applicationId } = req.params;
+    const application = await Application.findByPk(applicationId, {
+      include: [
+        { model: Customer, as: "customer" },
+        { model: Document, as: "documents" },
+      ],
+    });
+
+    if (!application) {
+      return res.status(404).json({ message: "Application not found" });
+    }
+
+    let docs = application.documents || [];
+    if (docs.length === 0) {
+      // Fallback: check documents linked by applicationId
+      docs = await Document.findAll({
+        where: { applicationId: parseInt(applicationId, 10) },
+      });
+    }
+
+    if (docs.length === 0 && application.leadId) {
+      // Fallback: check documents linked by leadId
+      docs = await Document.findAll({
+        where: { leadId: application.leadId },
+      });
+    }
+
+    if (!docs || docs.length === 0) {
+      return res.status(404).json({ message: "No documents attached to this loan application" });
+    }
+
+    const appRef = (application.applicationNumber || `APP_${application.id}`).replace(/[^a-zA-Z0-9_-]/g, "_");
+    const zipFileName = `${appRef}_Docket_Documents.zip`;
+
+    res.attachment(zipFileName);
+    const archive = archiver("zip", { zlib: { level: 9 } });
+
+    archive.on("error", (err) => {
+      console.error("[archive error]", err);
+      if (!res.headersSent) res.status(500).send({ message: err.message });
+    });
+
+    archive.pipe(res);
+
+    let addedCount = 0;
+    const addedNames = new Set();
+
+    for (const doc of docs) {
+      const diskPath = resolveDiskFilePath(doc.fileUrl);
+      if (diskPath && fs.existsSync(diskPath)) {
+        const ext = path.extname(diskPath) || ".pdf";
+        let entryName = doc.fileName || `${doc.docType}${ext}`;
+        if (addedNames.has(entryName)) {
+          entryName = `${doc.docType}_${doc.id}_${entryName}`;
+        }
+        addedNames.add(entryName);
+        archive.file(diskPath, { name: entryName });
+        addedCount++;
+      }
+    }
+
+    if (addedCount === 0) {
+      archive.append("No readable document files found on disk.", { name: "README.txt" });
+    }
+
+    await archive.finalize();
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   uploadDocument,
   listDocuments,
   getDocumentById,
   verifyDocument,
   deleteDocument,
+  downloadDocument,
+  viewDocument,
+  downloadAllLeadDocuments,
+  downloadAllApplicationDocuments,
 };
+

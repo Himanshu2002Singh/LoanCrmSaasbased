@@ -1,21 +1,36 @@
 const express = require("express");
 const router = express.Router();
-const controller = require("../controllers/documentRequestController");
+const docReqController = require("../controllers/documentRequestController");
+const docController = require("../controllers/documentController");
 const upload = require("../middlewares/upload_middleware");
 
 /**
  * Public Routes - No JWT Authentication Required
- * Allows customers to securely view requested documents and upload files
+ * Allows customers, banks, and applicants to securely view and download documents
  */
-router.get("/document-requests/:token", controller.getPublicRequest);
+router.get("/document-requests/:token", docReqController.getPublicRequest);
 router.post(
   "/document-requests/:token/upload",
   upload.single("file"),
-  controller.publicUploadDocument
+  docReqController.publicUploadDocument
 );
 router.post(
   "/document-requests/:token/submit-notes",
-  controller.publicSubmitNotes
+  docReqController.publicSubmitNotes
 );
+router.get(
+  "/document-requests/:token/download-all",
+  docReqController.publicDownloadRequestZip
+);
+router.get(
+  "/document-requests/:token/documents/:docId/download",
+  docReqController.publicDownloadRequestedDoc
+);
+
+// Public document download & view endpoints (Used in Bank RM emails and public portals)
+router.get("/documents/:id/download", docController.downloadDocument);
+router.get("/documents/:id/view", docController.viewDocument);
+router.get("/documents/lead/:leadId/download-all", docController.downloadAllLeadDocuments);
+router.get("/documents/application/:applicationId/download-all", docController.downloadAllApplicationDocuments);
 
 module.exports = router;

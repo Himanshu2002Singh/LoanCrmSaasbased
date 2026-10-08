@@ -1,4 +1,7 @@
 const crypto = require("crypto");
+const path = require("path");
+const fs = require("fs");
+const archiver = require("archiver");
 const { Op } = require("sequelize");
 const {
   LeadDocumentRequest,
@@ -10,10 +13,13 @@ const {
   MasterConfig,
   ActivityLog,
   Notification,
+  EmailTemplate,
 } = require("../models");
 const { companyScope, belongsToScope } = require("../middlewares/auth");
 const { ROLES } = require("../constants/roles");
 const { logActivity } = require("../utils/activity");
+const { sendMail, interpolate } = require("../utils/emailService");
+const { resolveDiskFilePath, getPublicApiBaseUrl } = require("../utils/documentHelper");
 
 // Standard popular loan document templates for Indian NBFC / Bank loans
 const STANDARD_DOC_PRESETS = {
@@ -616,6 +622,310 @@ const publicSubmitNotes = async (req, res, next) => {
   }
 };
 
+/**
+ * @desc    Send document collection link to customer via email
+ * @route   POST /api/document-requests/:id/send-email
+ */
+const sendDocumentRequestEmail = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { recipientEmail, customNote } = req.body || {};
+
+    const request = await LeadDocumentRequest.findByPk(id, {
+      include: [
+        {
+          model: Lead,
+          as: "lead",
+          include: [
+            { model: Customer, as: "customer" },
+            { model: User, as: "assignedEmployee", attributes: ["name", "phone", "email"] },
+            { model: Company, as: "company", attributes: ["id", "name", "phone", "email", "logoUrl"] },
+          ],
+        },
+        { model: Company, as: "company" },
+      ],
+    });
+
+    if (!request || !belongsToScope(req, request)) {
+      return res.status(404).json({ message: "Document request not found" });
+    }
+
+    const lead = request.lead;
+    const customer = lead?.customer;
+    const company = request.company || lead?.company;
+
+    const toEmail = recipientEmail?.trim() || customer?.email;
+    if (!toEmail) {
+      return res.status(400).json({
+        message: "Customer does not have an email address registered. Please provide an email recipient.",
+      });
+    }
+
+    const clientPortalUrl = process.env.CLIENT_PORTAL_URL || "https://loan-crm-saasbased.vercel.app";
+    const uploadUrl = `${clientPortalUrl.replace(/\/+$/, "")}/upload-docs/${request.token}`;
+    const customerName = customer?.name || "Valued Applicant";
+    const companyName = company?.name || "CapitalCare Financial";
+    const loanProduct = lead?.loanType || "Loan";
+
+    const docsListHtml = (request.requiredDocs || [])
+      .map(
+        (d) => `
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding: 10px 14px; font-weight: 600; color: #1e293b; font-size: 13.5px;">
+            ${d.title}
+          </td>
+          <td style="padding: 10px 14px; color: #64748b; font-size: 12px;">
+            ${d.category || "KYC"}
+          </td>
+          <td style="padding: 10px 14px; text-align: right;">
+            <span style="display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: 700; background: ${d.isRequired ? "#fef2f2" : "#f1f5f9"}; color: ${d.isRequired ? "#b91c1c" : "#475569"}; border: 1px solid ${d.isRequired ? "#fecaca" : "#e2e8f0"};">
+              ${d.isRequired ? "Required *" : "Optional"}
+            </span>
+          </td>
+        </tr>`
+      )
+      .join("");
+
+    const expiryNotice = request.expiresAt
+      ? `<div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 12px 16px; margin: 20px 0; font-size: 12.5px; color: #92400e;">
+          ⏳ <strong>Link Validity:</strong> This secure link expires on <strong>${new Date(request.expiresAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</strong>. Please upload documents before expiry.
+        </div>`
+      : "";
+
+    const userNoteHtml = (customNote || request.customMessage)
+      ? `<div style="background: #f8fafc; border-left: 4px solid #2563eb; padding: 12px 16px; margin: 16px 0; font-size: 13px; color: #334155;">
+          <strong>Message from Loan Officer:</strong><br/>
+          ${(customNote || request.customMessage).replace(/\n/g, "<br/>")}
+        </div>`
+      : "";
+
+    let emailSubject = `Important: Required KYC & Verification Documents for Your ${loanProduct} Application`;
+    let mainIntroText = `Greetings from <strong>${companyName}</strong>! To fast-track the underwriting and sanctioning of your <strong>${loanProduct}</strong>, please submit the requested KYC and income verification documents using our secure document portal.`;
+
+    try {
+      const customTpl = await EmailTemplate.findOne({
+        where: {
+          companyId: request.companyId,
+          category: "CUSTOMER_REQUEST",
+          isActive: true,
+        },
+        order: [["isDefault", "DESC"], ["updatedAt", "DESC"]],
+      });
+
+      if (customTpl) {
+        const varMap = {
+          customer_name: customerName,
+          company_name: companyName,
+          loan_product: loanProduct,
+          upload_link: uploadUrl,
+          lead_id: lead?.id,
+          officer_name: lead?.assignedEmployee?.name || "Loan Officer",
+          officer_phone: lead?.assignedEmployee?.phone || company?.phone || "",
+          documents_list: (request.requiredDocs || []).map((d) => `• ${d.title}${d.isRequired ? " (Required)" : ""}`).join("\n"),
+        };
+        if (customTpl.subject) {
+          emailSubject = interpolate(customTpl.subject, varMap);
+        }
+        if (customTpl.content) {
+          mainIntroText = interpolate(customTpl.content, varMap).replace(/\n/g, "<br/>");
+        }
+      }
+    } catch (tplErr) {
+      console.warn("[DocumentRequest] Could not load company email template:", tplErr.message);
+    }
+
+    const htmlContent = `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #1e293b; max-width: 620px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; background: #ffffff;">
+        <div style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); color: #ffffff; padding: 26px 30px;">
+          <div style="font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.1em; color: #93c5fd; font-weight: 700; margin-bottom: 4px;">Document Verification Portal</div>
+          <h2 style="margin: 0; font-size: 22px; font-weight: 700; color: #ffffff;">${companyName}</h2>
+          <p style="margin: 6px 0 0; font-size: 13px; color: #dbeafe;">Application Ref: <strong>Lead #${lead?.id}</strong> • ${loanProduct}</p>
+        </div>
+
+        <div style="padding: 28px 30px;">
+          <p style="font-size: 15px; color: #1e293b; margin-top: 0;">
+            Dear <strong>${customerName}</strong>,
+          </p>
+          <p style="font-size: 13.5px; color: #475569; line-height: 1.65;">
+            ${mainIntroText}
+          </p>
+
+          ${userNoteHtml}
+
+          <div style="margin: 24px 0 12px 0;">
+            <div style="font-size: 13px; font-weight: 700; color: #0f172a; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px;">
+              📋 Requested Documents (${(request.requiredDocs || []).length}):
+            </div>
+            <table style="width: 100%; border-collapse: collapse; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
+              <thead>
+                <tr style="background: #f1f5f9; text-align: left; font-size: 11px; text-transform: uppercase; color: #64748b; letter-spacing: 0.05em;">
+                  <th style="padding: 8px 14px;">Document Name</th>
+                  <th style="padding: 8px 14px;">Type</th>
+                  <th style="padding: 8px 14px; text-align: right;">Requirement</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${docsListHtml}
+              </tbody>
+            </table>
+          </div>
+
+          ${expiryNotice}
+
+          <div style="text-align: center; margin: 32px 0 24px 0;">
+            <a href="${uploadUrl}" target="_blank" style="display: inline-block; padding: 14px 32px; background: #2563eb; color: #ffffff; text-decoration: none; font-size: 14.5px; font-weight: 700; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);">
+              📤 Click Here to Upload Documents
+            </a>
+            <div style="margin-top: 8px; font-size: 11.5px; color: #64748b;">
+              No username or password required. You can take photos directly from your smartphone.
+            </div>
+          </div>
+
+          <div style="border-top: 1px solid #f1f5f9; padding-top: 20px; margin-top: 28px; font-size: 12px; color: #64748b; line-height: 1.6;">
+            If you face any issues while uploading, please feel free to contact your Relationship Manager: <strong>${lead?.assignedEmployee?.name || "Loan Operations Desk"}</strong> (${lead?.assignedEmployee?.phone || company?.phone || "Support"}).
+          </div>
+        </div>
+
+        <div style="background: #f8fafc; padding: 16px 30px; font-size: 11.5px; color: #94a3b8; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between;">
+          <span>© ${new Date().getFullYear()} ${companyName}</span>
+          <span>Automated Secure Document Link</span>
+        </div>
+      </div>
+    `;
+
+    const plainText = `Dear ${customerName},\n\nGreetings from ${companyName}!\n\nTo proceed with your ${loanProduct} application, please upload the required documents using our secure portal:\n${uploadUrl}\n\nRequested Documents:\n${(request.requiredDocs || []).map((d) => `• ${d.title}${d.isRequired ? " (Required)" : ""}`).join("\n")}\n\nThank you,\n${companyName}`;
+
+    const mailResult = await sendMail({
+      companyId: request.companyId,
+      to: toEmail,
+      subject: emailSubject,
+      text: plainText,
+      html: htmlContent,
+    });
+
+    await logActivity(req, {
+      recordType: "Lead",
+      recordId: lead.id,
+      action: "UPDATED",
+      remarks: `Sent document collection email link to customer at ${toEmail}`,
+    });
+
+    return res.json({
+      success: true,
+      message: `Document collection link emailed successfully to ${toEmail}!`,
+      recipientEmail: toEmail,
+      mailResult,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * @desc    Customer or Staff downloads all uploaded documents in a request as a ZIP
+ * @route   GET /api/public/document-requests/:token/download-all
+ */
+const publicDownloadRequestZip = async (req, res, next) => {
+  try {
+    const { token } = req.params;
+    const request = await LeadDocumentRequest.findOne({
+      where: { token },
+      include: [
+        {
+          model: Lead,
+          as: "lead",
+          include: [{ model: Customer, as: "customer" }],
+        },
+      ],
+    });
+
+    if (!request) {
+      return res.status(404).json({ message: "Document upload request not found" });
+    }
+
+    const uploadedDocs = (request.requiredDocs || []).filter(
+      (d) => d.status === "UPLOADED" && d.fileUrl
+    );
+
+    if (uploadedDocs.length === 0) {
+      return res.status(404).json({ message: "No documents have been uploaded for this request yet" });
+    }
+
+    const customerName = (request.lead?.customer?.name || "Customer").replace(/[^a-zA-Z0-9_-]/g, "_");
+    const zipFileName = `${customerName}_Uploaded_Documents.zip`;
+
+    res.attachment(zipFileName);
+    const archive = archiver("zip", { zlib: { level: 9 } });
+
+    archive.on("error", (err) => {
+      console.error("[public zip archive error]", err);
+      if (!res.headersSent) res.status(500).send({ message: err.message });
+    });
+
+    archive.pipe(res);
+
+    let addedCount = 0;
+    const addedNames = new Set();
+
+    for (const doc of uploadedDocs) {
+      const diskPath = resolveDiskFilePath(doc.fileUrl);
+      if (diskPath && fs.existsSync(diskPath)) {
+        const ext = path.extname(diskPath) || ".pdf";
+        let entryName = doc.fileName || `${doc.title || doc.docType}${ext}`;
+        if (addedNames.has(entryName)) {
+          entryName = `${doc.docType}_${entryName}`;
+        }
+        addedNames.add(entryName);
+        archive.file(diskPath, { name: entryName });
+        addedCount++;
+      }
+    }
+
+    if (addedCount === 0) {
+      archive.append("No readable document files found on disk.", { name: "README.txt" });
+    }
+
+    await archive.finalize();
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * @desc    Download a specific document slot within a public request
+ * @route   GET /api/public/document-requests/:token/documents/:docId/download
+ */
+const publicDownloadRequestedDoc = async (req, res, next) => {
+  try {
+    const { token, docId } = req.params;
+    const request = await LeadDocumentRequest.findOne({ where: { token } });
+
+    if (!request) {
+      return res.status(404).json({ message: "Document upload request not found" });
+    }
+
+    const slot = (request.requiredDocs || []).find(
+      (d) => String(d.id) === String(docId) || String(d.documentId) === String(docId)
+    );
+
+    if (!slot || !slot.fileUrl) {
+      return res.status(404).json({ message: "Requested document slot has no file" });
+    }
+
+    const diskPath = resolveDiskFilePath(slot.fileUrl);
+    if (!diskPath || !fs.existsSync(diskPath)) {
+      return res.status(404).json({ message: "File does not exist on server storage" });
+    }
+
+    const ext = path.extname(diskPath) || ".pdf";
+    const downloadFileName = slot.fileName || `${(slot.title || "document").replace(/\s+/g, "_")}${ext}`;
+
+    return res.download(diskPath, downloadFileName);
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getConfigDocs,
   createDocumentRequest,
@@ -624,4 +934,8 @@ module.exports = {
   getPublicRequest,
   publicUploadDocument,
   publicSubmitNotes,
+  sendDocumentRequestEmail,
+  publicDownloadRequestZip,
+  publicDownloadRequestedDoc,
 };
+

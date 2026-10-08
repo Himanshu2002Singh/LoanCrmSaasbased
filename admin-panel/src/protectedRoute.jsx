@@ -23,6 +23,9 @@ function ProtectedRoute({ children, allowedRoles = ["manager", "operations"], re
   }
 
   if (!allowedRoles.includes(employeeRole)) {
+    if (employeeRole === "finance" || userRole === "FINANCE") {
+      return <Navigate to="/case-payouts" replace />;
+    }
     if (employeeRole === "operations") {
       return <Navigate to="/operations" replace />;
     }
@@ -45,9 +48,12 @@ function ProtectedRoute({ children, allowedRoles = ["manager", "operations"], re
       permissions = {};
     }
 
-    if (permissions[requiredPermission] === false) {
+    const hasPermission = Boolean(permissions[requiredPermission] || permissions.manageSettings);
+    if (!hasPermission || (permissions[requiredPermission] === false && !permissions.manageSettings)) {
       const fallbackHome =
-        employeeRole === "operations"
+        employeeRole === "finance" || userRole === "FINANCE"
+          ? "/case-payouts"
+          : employeeRole === "operations"
           ? "/operations"
           : employeeRole === "banker"
           ? "/banker"

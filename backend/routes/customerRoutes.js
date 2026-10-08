@@ -11,6 +11,19 @@ router.get("/by-mobile/:mobile", customerController.getCustomerByMobile);
 router.get("/:id", customerController.getCustomerById);
 router.post("/", customerController.createCustomer);
 router.put("/:id", customerController.updateCustomer);
-router.delete("/:id", requireRole(ROLES.COMPANY_ADMIN), customerController.deleteCustomer);
+const canDeleteCustomer = (req, res, next) => {
+  if (!req.user) return res.status(401).json({ message: "Authentication required" });
+  if (req.user.role === ROLES.SUPERADMIN || req.user.role === ROLES.COMPANY_ADMIN) return next();
+  const permissions = req.permissions || {};
+  if (permissions.deleteRecords) return next();
+  return res.status(403).json({
+    code: "PERMISSION_DENIED",
+    permission: "deleteRecords",
+    message: "Access restricted: You do not have permission to delete customer records.",
+  });
+};
+
+router.delete("/:id", canDeleteCustomer, customerController.deleteCustomer);
+
 
 module.exports = router;

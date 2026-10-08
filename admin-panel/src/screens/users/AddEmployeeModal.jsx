@@ -185,6 +185,7 @@ export default function AddEmployeeModal({ open, onClose, onCreated }) {
                 <option value="EMPLOYEE">Sales Manager</option>
                 <option value="MANAGER">Manager</option>
                 <option value="OPS">Operations</option>
+                <option value="FINANCE">Finance & Accounts</option>
                 <option value="BANKER">Banker</option>
               </select>
             </label>

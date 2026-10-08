@@ -10,10 +10,13 @@ import {
   ChevronRight,
   ChevronUp,
   Key,
+  Shield,
+  ShieldCheck,
 } from "lucide-react";
 import API_URL from "../../../config";
 import CcPagination from "../../../components/CcPagination";
 import ResetPasswordModal from "../ResetPasswordModal";
+import ManagePermissionsModal from "../ManagePermissionsModal";
 
 const ROLE_LABELS = {
   EMPLOYEE: "Sales Manager",
@@ -21,6 +24,7 @@ const ROLE_LABELS = {
   OPS: "Operations",
   COMPANY_ADMIN: "Company Admin",
   BANKER: "Banker",
+  FINANCE: "Finance & Accounts",
 };
 const ROLE_CLASS = {
   EMPLOYEE: "role-sales",
@@ -28,6 +32,7 @@ const ROLE_CLASS = {
   OPS: "role-ops",
   COMPANY_ADMIN: "role-manager",
   BANKER: "role-ops",
+  FINANCE: "role-finance",
 };
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
@@ -53,6 +58,7 @@ export default function UserDetailRedesign() {
   const [showCalls, setShowCalls] = useState(true);
   const [showTasks, setShowTasks] = useState(true);
   const [showResetPassword, setShowResetPassword] = useState(false);
+  const [showPermissionsModal, setShowPermissionsModal] = useState(false);
 
   const fetchEmployee = async () => {
     try {
@@ -142,14 +148,25 @@ export default function UserDetailRedesign() {
               </div>
             </div>
           </div>
-          <button
-            type="button"
-            className="cc-udt-btn ghost"
-            onClick={() => setShowResetPassword(true)}
-            title="Reset employee password"
-          >
-            <Key size={14} /> Reset Password
-          </button>
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+            <button
+              type="button"
+              className="cc-udt-btn ghost"
+              onClick={() => setShowPermissionsModal(true)}
+              title="Manage custom employee role permissions"
+              style={{ color: "#2563eb", borderColor: "#bfdbfe" }}
+            >
+              <Shield size={14} /> Manage Custom Permissions
+            </button>
+            <button
+              type="button"
+              className="cc-udt-btn ghost"
+              onClick={() => setShowResetPassword(true)}
+              title="Reset employee password"
+            >
+              <Key size={14} /> Reset Password
+            </button>
+          </div>
         </div>
 
         <dl className="cc-udt-info">
@@ -166,6 +183,44 @@ export default function UserDetailRedesign() {
             </dd>
           </div>
         </dl>
+
+        {/* Feature Permissions Quick Overview */}
+        <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid #e2e8f0" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, flexWrap: "wrap", gap: 6 }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <ShieldCheck size={16} color="#2563eb" /> Active Permissions & Feature Access
+            </span>
+            {employee.permissions && Object.keys(employee.permissions).length > 0 ? (
+              <span style={{ fontSize: 11, fontWeight: 600, color: "#2563eb", background: "#eff6ff", padding: "2px 8px", borderRadius: 999 }}>
+                {Object.keys(employee.permissions).length} Custom Override(s) Applied
+              </span>
+            ) : (
+              <span style={{ fontSize: 11, fontWeight: 500, color: "#64748b" }}>
+                Inherited from Role Defaults ({roleLabel})
+              </span>
+            )}
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {Object.entries(employee.resolvedPermissions || employee.permissions || {}).map(([key, val]) => (
+              <span
+                key={key}
+                style={{
+                  fontSize: 11,
+                  padding: "2px 8px",
+                  borderRadius: 6,
+                  fontWeight: 500,
+                  background: val ? "#eef7f2" : "#fef2f2",
+                  color: val ? "#047857" : "#b91c1c",
+                  border: `1px solid ${val ? "#c7e0d4" : "#fecaca"}`,
+                  textDecoration: val ? "none" : "line-through",
+                }}
+                title={`${key}: ${val ? "Granted" : "Restricted"}`}
+              >
+                {key}
+              </span>
+            ))}
+          </div>
+        </div>
       </section>
 
       <CollapsibleSection
@@ -267,6 +322,15 @@ export default function UserDetailRedesign() {
         open={showResetPassword}
         onClose={() => setShowResetPassword(false)}
         user={employee}
+      />
+
+      <ManagePermissionsModal
+        open={showPermissionsModal}
+        onClose={() => setShowPermissionsModal(false)}
+        user={employee}
+        onUpdated={() => {
+          fetchEmployee();
+        }}
       />
     </div>
   );

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import moment from "moment";
-import { Link } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import {
@@ -39,7 +39,18 @@ import API_URL from "../../config";
 import { resolveLogoUrl } from "../../utils/logo";
 
 export default function CompanyProfileScreen() {
+  const userRole = localStorage.getItem("userRole") || "";
+  const employeeRole = localStorage.getItem("employeeRole") || "";
+  const isCompanyAdmin =
+    ["COMPANY_ADMIN", "SUPERADMIN"].includes(userRole.toUpperCase()) ||
+    ["admin", "superadmin"].includes(employeeRole?.toLowerCase());
+
+  if (!isCompanyAdmin) {
+    return <Navigate to="/profile" replace />;
+  }
+
   const [data, setData] = useState(null);
+
   const [loading, setLoading] = useState(true);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editForm, setEditForm] = useState({ name: "", email: "", phone: "" });

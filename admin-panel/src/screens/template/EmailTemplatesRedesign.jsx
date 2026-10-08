@@ -543,6 +543,7 @@ export default function EmailTemplatesRedesign() {
           <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
             <option value="">All Categories</option>
             <option value="LOAN_SUBMISSION">Loan Application Submission</option>
+            <option value="CUSTOMER_REQUEST">Customer Document Request Link</option>
             <option value="QUERY_RESPONSE">Query &amp; Clarification</option>
             <option value="GENERAL">General Notice</option>
           </select>
@@ -684,6 +685,7 @@ export default function EmailTemplatesRedesign() {
                     onChange={(e) => setForm({ ...form, category: e.target.value })}
                   >
                     <option value="LOAN_SUBMISSION">Loan Application Submission</option>
+                    <option value="CUSTOMER_REQUEST">Customer Document Request Link</option>
                     <option value="QUERY_RESPONSE">Query &amp; Clarification</option>
                     <option value="GENERAL">General Notice</option>
                   </select>

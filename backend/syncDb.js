@@ -37,6 +37,9 @@ const syncAndSeed = async () => {
     if (db.Note) {
       await db.Note.sync();
     }
+    if (db.OperationStatusHistory) {
+      await db.OperationStatusHistory.sync();
+    }
 
     // Sync all models safely without dropping any existing columns or data
     await db.sequelize.sync({ force, alter });

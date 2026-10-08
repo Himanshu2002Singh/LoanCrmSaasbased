@@ -23,6 +23,7 @@ import {
   HelpCircle,
   ArrowRight,
   Check,
+  Download,
 } from "lucide-react";
 import API_URL from "../../config";
 
@@ -318,12 +319,24 @@ export default function CustomerDocumentUploadPortal() {
 
         {/* Document Upload Slots Section */}
         <div className="flex flex-col gap-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <h3 className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
               <FileCheck size={18} className="text-blue-600" />
               <span>Required Documents ({requiredDocs.length})</span>
             </h3>
-            <span className="text-xs text-slate-500">Formats: PDF, JPG, PNG (Max 20MB)</span>
+            <div className="flex items-center gap-2">
+              {uploadedDocs > 0 && (
+                <a
+                  href={`${API_URL}/public/document-requests/${token}/download-all`}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold transition-all flex items-center gap-1.5 border border-emerald-200 shadow-sm"
+                  title="Download all uploaded documents in a single ZIP"
+                >
+                  <Download size={13} />
+                  <span>Download All ({uploadedDocs})</span>
+                </a>
+              )}
+              <span className="text-xs text-slate-500">Formats: PDF, JPG, PNG (Max 20MB)</span>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 gap-3.5">
@@ -418,17 +431,29 @@ export default function CustomerDocumentUploadPortal() {
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2 shrink-0">
+                        <div className="flex items-center gap-2 shrink-0 flex-wrap">
                           {slot.fileUrl && (
-                            <a
-                              href={getFileUrl(slot.fileUrl)}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium transition-all flex items-center gap-1.5 border border-slate-300 shadow-sm"
-                            >
-                              <Eye size={13} />
-                              <span>View File</span>
-                            </a>
+                            <>
+                              <a
+                                href={getFileUrl(slot.fileUrl)}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium transition-all flex items-center gap-1.5 border border-slate-300 shadow-sm"
+                                title="View document in browser"
+                              >
+                                <Eye size={13} />
+                                <span>View</span>
+                              </a>
+                              <a
+                                href={`${API_URL}/public/document-requests/${token}/documents/${slot.documentId || slot.id}/download`}
+                                download={slot.fileName || `${slot.title || "document"}.pdf`}
+                                className="px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold transition-all flex items-center gap-1.5 border border-blue-200 shadow-sm"
+                                title="Download this document"
+                              >
+                                <Download size={13} />
+                                <span>Download</span>
+                              </a>
+                            </>
                           )}
 
                           {/* Re-upload / Replace */}

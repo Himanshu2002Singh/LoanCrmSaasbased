@@ -88,8 +88,8 @@ exports.getLeadStatuses = async (req, res) => {
     const includeInactive = req.query.includeInactive === "true";
     let teamFilter = req.query.team;
 
-    // Auto-scope by user role if team parameter is omitted
-    if (!teamFilter && req.user) {
+    // Auto-scope by user role if team parameter is omitted and not requesting all for settings management
+    if (!teamFilter && req.user && !includeInactive) {
       if (req.user.role === "OPS") {
         teamFilter = TEAMS.OPERATIONS;
       } else if (req.user.role === "EMPLOYEE" || req.user.role === "MANAGER") {

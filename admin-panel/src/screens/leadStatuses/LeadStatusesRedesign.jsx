@@ -32,6 +32,19 @@ const emptyForm = () => ({
 });
 
 export default function LeadStatusesRedesign() {
+  const userRole = localStorage.getItem("userRole") || "";
+  const isCompanyAdmin = userRole === "COMPANY_ADMIN" || userRole === "SUPERADMIN";
+  const userPermissions = useMemo(() => {
+    try {
+      const stored = localStorage.getItem("userPermissions");
+      return stored ? JSON.parse(stored) : {};
+    } catch {
+      return {};
+    }
+  }, []);
+  const canManage = isCompanyAdmin || Boolean(userPermissions.manageLeadStatuses || userPermissions.manageSettings);
+  const canDelete = isCompanyAdmin || Boolean(userPermissions.manageLeadStatuses || userPermissions.manageSettings || userPermissions.deleteRecords);
+
   const [statuses, setStatuses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -69,12 +82,20 @@ export default function LeadStatusesRedesign() {
   }, [searchTerm]);
 
   const openCreate = () => {
+    if (!canManage) {
+      toast.error("You do not have permission to add lead statuses");
+      return;
+    }
     setEditing(null);
     setForm(emptyForm());
     setModalOpen(true);
   };
 
   const openEdit = (status) => {
+    if (!canManage) {
+      toast.error("You do not have permission to edit lead statuses");
+      return;
+    }
     setEditing(status);
     setForm({
       name: status.name || "",
@@ -113,6 +134,10 @@ export default function LeadStatusesRedesign() {
   };
 
   const handleToggleActive = async (status) => {
+    if (!canManage) {
+      toast.error("You do not have permission to modify status state");
+      return;
+    }
     try {
       await axios.put(`${API_URL}/lead-statuses/${status.status_id}`, {
         is_active: !status.is_active,
@@ -128,6 +153,10 @@ export default function LeadStatusesRedesign() {
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
+    if (!canDelete) {
+      toast.error("You do not have permission to delete lead statuses");
+      return;
+    }
     try {
       await axios.delete(`${API_URL}/lead-statuses/${deleteTarget.status_id}`);
       toast.success("Status deleted");

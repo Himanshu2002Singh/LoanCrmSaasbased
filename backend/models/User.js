@@ -49,7 +49,8 @@ const User = sequelize.define(
         "MANAGER",
         "EMPLOYEE",
         "OPS",
-        "BANKER"
+        "BANKER",
+        "FINANCE"
       ),
       allowNull: false,
       defaultValue: "EMPLOYEE",

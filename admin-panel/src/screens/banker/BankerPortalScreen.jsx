@@ -705,9 +705,32 @@ export default function BankerPortalScreen() {
 
                   {/* KYC & Financial Documents Section */}
                   <div className="cc-banker-section">
-                    <div className="cc-banker-sec-title">
-                      <FileCheck size={16} /> KYC &amp; Verification Documents (
-                      {(selectedApp.documents || []).length})
+                    <div className="cc-banker-sec-title" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                        <FileCheck size={16} /> KYC &amp; Verification Documents (
+                        {(selectedApp.documents || []).length})
+                      </span>
+                      {(selectedApp.documents || []).length > 0 && (
+                        <a
+                          href={`${API_URL}/documents/application/${selectedApp.id}/download-all?token=${localStorage.getItem("token")}`}
+                          style={{
+                            fontSize: "12px",
+                            fontWeight: 700,
+                            color: "#059669",
+                            textDecoration: "none",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "5px",
+                            background: "#ecfdf5",
+                            border: "1px solid #a7f3d0",
+                            borderRadius: "6px",
+                            padding: "3px 10px",
+                          }}
+                          title="Download all applicant documents as a single ZIP"
+                        >
+                          <Download size={13} /> Download All ZIP
+                        </a>
+                      )}
                     </div>
                     {(selectedApp.documents || []).length === 0 ? (
                       <div className="cc-banker-empty-box">
@@ -737,21 +760,32 @@ export default function BankerPortalScreen() {
                                 {doc.verificationStatus || "PENDING"}
                               </span>
                             </div>
-                            <div className="cc-doc-actions">
+                            <div className="cc-doc-actions" style={{ display: "flex", gap: "6px" }}>
                               {doc.fileUrl && (
-                                <a
-                                  href={
-                                    doc.fileUrl.startsWith("http")
-                                      ? doc.fileUrl
-                                      : `${API_URL.replace(/\/api\/?$/, "")}/${doc.fileUrl.replace(/^\//, "")}`
-                                  }
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="cc-doc-link-btn"
-                                  title="View Document"
-                                >
-                                  <ExternalLink size={14} /> Open
-                                </a>
+                                <>
+                                  <a
+                                    href={
+                                      doc.fileUrl.startsWith("http")
+                                        ? doc.fileUrl
+                                        : `${API_URL.replace(/\/api\/?$/, "")}/${doc.fileUrl.replace(/^\//, "")}`
+                                    }
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="cc-doc-link-btn"
+                                    title="View Document"
+                                  >
+                                    <ExternalLink size={13} /> Open
+                                  </a>
+                                  <a
+                                    href={`${API_URL}/documents/${doc.id}/download?token=${localStorage.getItem("token")}`}
+                                    download={doc.fileName || `${doc.docType}.pdf`}
+                                    className="cc-doc-link-btn"
+                                    style={{ background: "#ecfdf5", color: "#059669", borderColor: "#a7f3d0" }}
+                                    title="Download Document"
+                                  >
+                                    <Download size={13} /> Download
+                                  </a>
+                                </>
                               )}
                             </div>
                           </div>

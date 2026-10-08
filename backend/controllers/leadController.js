@@ -1,6 +1,6 @@
 const { Op, fn, col, literal } = require("sequelize");
 const XLSX = require("xlsx");
-const { Lead, Customer, User, MasterConfig, CallLog, FollowUp, ActivityLog, Application, Document, Lender, LeadDocumentRequest, sequelize } = require("../models");
+const { Lead, Customer, User, MasterConfig, CallLog, FollowUp, ActivityLog, Application, Document, Lender, LeadDocumentRequest, LeadAssignmentHistory, Note, sequelize } = require("../models");
 const { buildQuery, paginated } = require("../utils/query");
 const { logActivity, diffFields } = require("../utils/activity");
 const { parseScheduledDate, syncLeadFollowUp } = require("../utils/followUpSync");
@@ -53,10 +53,145 @@ const remarkOf = (body) => {
 };
 
 /**
+ * Tracks lead assignment/reassignment in LeadAssignmentHistory and ActivityLog.
+ * Closes previous assignment for fromUserId, creates active record for toUserId,
+ * and maintains complete collaboration trail.
+ */
+const trackLeadAssignment = async ({ companyId, leadId, fromUserId, toUserId, assignedById, reason, req, transaction }) => {
+  try {
+    if (toUserId || fromUserId) {
+      await LeadAssignmentHistory.update(
+        { isActive: false, unassignedAt: new Date() },
+        { where: { leadId, isActive: true }, ...(transaction ? { transaction } : {}) }
+      );
+    }
+
+    const userIds = [fromUserId, toUserId, assignedById].filter(Boolean);
+    const users = userIds.length
+      ? await User.findAll({ where: { id: { [Op.in]: userIds } }, attributes: ["id", "name", "role"], raw: true, ...(transaction ? { transaction } : {}) })
+      : [];
+    const userMap = new Map(users.map((u) => [u.id, u.name]));
+    const fromName = userMap.get(fromUserId) || (fromUserId ? `User #${fromUserId}` : "Unassigned");
+    const toName = userMap.get(toUserId) || (toUserId ? `User #${toUserId}` : "Unassigned");
+    const assignerName = userMap.get(assignedById) || req?.user?.name || "System";
+
+    if (toUserId) {
+      await LeadAssignmentHistory.create(
+        {
+          companyId,
+          leadId,
+          userId: toUserId,
+          assignedById: assignedById || req?.user?.id || null,
+          assignedAt: new Date(),
+          isActive: true,
+          notes: reason || `Assigned to ${toName} by ${assignerName}`,
+        },
+        { ...(transaction ? { transaction } : {}) }
+      );
+    }
+
+    if (req) {
+      await logActivity(req, {
+        recordType: "Lead",
+        recordId: leadId,
+        action: "ASSIGNED",
+        oldValue: { assignedEmployeeId: fromUserId || null, assignedTo: fromName },
+        newValue: { assignedEmployeeId: toUserId || null, assignedTo: toName },
+        remarks: reason || (fromUserId ? `Reassigned from ${fromName} to ${toName} by ${assignerName}` : `Assigned to ${toName} by ${assignerName}`),
+        companyId,
+      });
+    }
+  } catch (err) {
+    console.error("[trackLeadAssignment] error:", err);
+  }
+};
+
+/**
+ * Resolves the most recent remark with timestamp and author across
+ * ActivityLog, FollowUp, and CallLog for an array of lead IDs in one batch.
+ */
+const getLatestRemarksForLeads = async (leadIds, companyId) => {
+  if (!leadIds || !leadIds.length) return new Map();
+
+  const companyWhere = companyId ? { companyId } : {};
+
+  const [activities, followups, calls] = await Promise.all([
+    ActivityLog.findAll({
+      where: {
+        ...companyWhere,
+        recordType: "Lead",
+        recordId: { [Op.in]: leadIds },
+        remarks: { [Op.and]: [{ [Op.ne]: null }, { [Op.ne]: "" }] },
+      },
+      order: [["createdAt", "DESC"]],
+      attributes: ["recordId", "remarks", "createdAt", "actorUserId"],
+    }),
+    FollowUp.findAll({
+      where: {
+        ...companyWhere,
+        leadId: { [Op.in]: leadIds },
+        remarks: { [Op.and]: [{ [Op.ne]: null }, { [Op.ne]: "" }] },
+      },
+      order: [["updatedAt", "DESC"]],
+      attributes: ["leadId", "remarks", "createdAt", "updatedAt", "userId"],
+    }),
+    CallLog.findAll({
+      where: {
+        ...companyWhere,
+        leadId: { [Op.in]: leadIds },
+        remarks: { [Op.and]: [{ [Op.ne]: null }, { [Op.ne]: "" }] },
+      },
+      order: [["createdAt", "DESC"]],
+      attributes: ["leadId", "remarks", "createdAt", "userId"],
+    }),
+  ]);
+
+  const userIds = new Set();
+  activities.forEach((a) => { if (a.actorUserId) userIds.add(a.actorUserId); });
+  followups.forEach((f) => { if (f.userId) userIds.add(f.userId); });
+  calls.forEach((c) => { if (c.userId) userIds.add(c.userId); });
+
+  const users = userIds.size > 0
+    ? await User.findAll({
+        where: { id: { [Op.in]: Array.from(userIds) } },
+        attributes: ["id", "name", "role"],
+        raw: true,
+      })
+    : [];
+  const userMap = new Map(users.map((u) => [u.id, u.name]));
+
+  const latestMap = new Map();
+
+  const consider = (leadId, remark, dateStr, actorId, type) => {
+    if (!remark || !String(remark).trim()) return;
+    const time = new Date(dateStr).getTime();
+    if (isNaN(time)) return;
+    const existing = latestMap.get(leadId);
+    if (!existing || time > existing.timestamp) {
+      latestMap.set(leadId, {
+        remarks: String(remark).trim(),
+        createdAt: new Date(dateStr).toISOString(),
+        actorUserId: actorId,
+        actor: userMap.get(actorId) || null,
+        type,
+        timestamp: time,
+      });
+    }
+  };
+
+  activities.forEach((a) => consider(a.recordId, a.remarks, a.createdAt, a.actorUserId, "Activity"));
+  followups.forEach((f) => consider(f.leadId, f.remarks, f.updatedAt || f.createdAt, f.userId, "FollowUp"));
+  calls.forEach((c) => consider(c.leadId, c.remarks, c.createdAt, c.userId, "CallLog"));
+
+  return latestMap;
+};
+
+
+/**
  * The panel and the mobile app read a flat lead row with the customer's
  * details inlined. Keep that shape and hang the nested records off it.
  */
-const serializeLead = (lead, statusMap = {}, requestingUser = null) => {
+const serializeLead = (lead, statusMap = {}, requestingUser = null, latestRemarkInfo = null) => {
   const customer = lead.customer || {};
   const status = statusMap[lead.status];
   const apps = lead.applications || [];
@@ -122,12 +257,37 @@ const serializeLead = (lead, statusMap = {}, requestingUser = null) => {
     next_meeting: lead.nextFollowupDate,
     person_id: lead.assignedEmployeeId,
     owner: lead.assignedEmployee?.name || null,
+    current_owner: lead.assignedEmployee?.name || "Unassigned",
+    current_owner_id: lead.assignedEmployeeId,
     manager_id: lead.assignedManagerId,
     manager: lead.assignedManager?.name || null,
+    is_read_only: Boolean(
+      requestingUser &&
+      requestingUser.role === ROLES.EMPLOYEE &&
+      !requestingUser.permissions?.editAllLeads &&
+      lead.assignedEmployeeId !== requestingUser.id &&
+      lead.assignedManagerId !== requestingUser.id
+    ),
+    isReadOnly: Boolean(
+      requestingUser &&
+      requestingUser.role === ROLES.EMPLOYEE &&
+      !requestingUser.permissions?.editAllLeads &&
+      lead.assignedEmployeeId !== requestingUser.id &&
+      lead.assignedManagerId !== requestingUser.id
+    ),
+    is_worked_lead: Boolean(
+      lead.is_worked_lead ||
+      (requestingUser && requestingUser.role === ROLES.EMPLOYEE && lead.assignedEmployeeId !== requestingUser.id)
+    ),
     createdAt: lead.createdAt,
     updatedAt: lead.updatedAt,
     customer: lead.customer || null,
     applications_count: apps.length,
+    latest_remark: latestRemarkInfo?.remarks || null,
+    latest_remark_date: latestRemarkInfo?.createdAt || null,
+    latest_remark_by: latestRemarkInfo?.actor || null,
+    latest_remark_source: latestRemarkInfo?.type || null,
+    last_remark: latestRemarkInfo?.remarks || null,
   };
 };
 
@@ -267,11 +427,66 @@ exports.getLeads = async (req, res) => {
       }
     }
 
-    const where = {
-      ...companyScope(req),
-      ...(await visibilityScope(req)),
-      ...dateRangeWhere(fromDate, toDate),
-    };
+    const isWorkedView =
+      req.query.scope === "worked" ||
+      req.query.worked === "true" ||
+      req.query.statusCategory === "WORKED" ||
+      req.query.view === "worked";
+
+    let where;
+    if (isWorkedView) {
+      const targetUserId =
+        req.query.workedBy ||
+        (req.user.role === ROLES.EMPLOYEE ? req.user.id : (req.query.assignedEmployeeId || req.user.id));
+
+      const [assignedLeadRows, callLeadRows, activityLeadRows, noteLeadRows] = await Promise.all([
+        LeadAssignmentHistory.findAll({
+          where: { companyId, userId: targetUserId },
+          attributes: ["leadId"],
+          raw: true,
+        }),
+        CallLog.findAll({
+          where: { companyId, userId: targetUserId },
+          attributes: ["leadId"],
+          raw: true,
+        }),
+        ActivityLog.findAll({
+          where: { companyId, recordType: "Lead", actorUserId: targetUserId },
+          attributes: ["recordId"],
+          raw: true,
+        }),
+        Note.findAll({
+          where: { companyId, userId: targetUserId, leadId: { [Op.ne]: null } },
+          attributes: ["leadId"],
+          raw: true,
+        }),
+      ]);
+
+      const workedLeadIds = [
+        ...new Set([
+          ...assignedLeadRows.map((r) => r.leadId),
+          ...callLeadRows.map((r) => r.leadId),
+          ...activityLeadRows.map((r) => r.recordId),
+          ...noteLeadRows.map((r) => r.leadId),
+        ]),
+      ].filter(Boolean);
+
+      where = {
+        ...companyScope(req),
+        id: { [Op.in]: workedLeadIds.length ? workedLeadIds : [-1] },
+        [Op.or]: [
+          { assignedEmployeeId: { [Op.ne]: targetUserId } },
+          { assignedEmployeeId: null },
+        ],
+        ...dateRangeWhere(fromDate, toDate),
+      };
+    } else {
+      where = {
+        ...companyScope(req),
+        ...(await visibilityScope(req)),
+        ...dateRangeWhere(fromDate, toDate),
+      };
+    }
 
     const statuses = await loadStatuses(companyId);
 
@@ -320,7 +535,7 @@ exports.getLeads = async (req, res) => {
     if (req.query.loanType) where.loanType = req.query.loanType;
     if (req.query.source) where.leadSource = req.query.source;
     if (req.query.priority) where.priority = String(req.query.priority).toUpperCase();
-    if (req.query.assignedEmployeeId) where.assignedEmployeeId = parseInt(req.query.assignedEmployeeId, 10);
+    if (!isWorkedView && req.query.assignedEmployeeId) where.assignedEmployeeId = parseInt(req.query.assignedEmployeeId, 10);
     if (req.query.assignedManagerId) where.assignedManagerId = parseInt(req.query.assignedManagerId, 10);
     if (req.query.unassigned === "true") where.assignedEmployeeId = null;
 
@@ -356,7 +571,15 @@ exports.getLeads = async (req, res) => {
       distinct: true,
     });
 
-    const payload = paginated({ count, rows: rows.map((r) => serializeLead(r, statuses.byValue, req.user)), page, limit });
+    const leadIds = rows.map((r) => r.id);
+    const remarksMap = await getLatestRemarksForLeads(leadIds, companyId);
+
+    const payload = paginated({
+      count,
+      rows: rows.map((r) => serializeLead(r, statuses.byValue, req.user, remarksMap.get(r.id))),
+      page,
+      limit,
+    });
     // The panel's table reads pagination.totalItems.
     payload.pagination.totalItems = count;
     return res.status(200).json(payload);
@@ -405,6 +628,16 @@ exports.getLeadById = async (req, res) => {
             { model: User, as: "creator", attributes: ["id", "name", "role"] },
           ],
         },
+        {
+          model: LeadAssignmentHistory,
+          as: "assignmentHistories",
+          separate: true,
+          order: [["assignedAt", "DESC"]],
+          include: [
+            { model: User, as: "assignee", attributes: ["id", "name", "role", "email"] },
+            { model: User, as: "assignedBy", attributes: ["id", "name", "role"] },
+          ],
+        },
       ],
     });
 
@@ -412,13 +645,25 @@ exports.getLeadById = async (req, res) => {
       return res.status(404).json({ message: "Lead not found" });
     }
 
+    let hasWorkedOnLead = false;
     if (req.user.role === ROLES.EMPLOYEE) {
       if (
         !req.permissions?.viewAllLeads &&
         lead.assignedEmployeeId !== req.user.id &&
         lead.assignedManagerId !== req.user.id
       ) {
-        return res.status(403).json({ message: "You do not have access to this lead" });
+        const [workedHistory, workedActivity, workedCall, workedNote] = await Promise.all([
+          LeadAssignmentHistory.findOne({ where: { leadId: lead.id, userId: req.user.id } }),
+          ActivityLog.findOne({ where: { companyId: lead.companyId, recordType: "Lead", recordId: lead.id, actorUserId: req.user.id } }),
+          CallLog.findOne({ where: { companyId: lead.companyId, leadId: lead.id, userId: req.user.id } }),
+          Note.findOne({ where: { companyId: lead.companyId, leadId: lead.id, userId: req.user.id } }),
+        ]);
+
+        if (workedHistory || workedActivity || workedCall || workedNote) {
+          hasWorkedOnLead = true;
+        } else {
+          return res.status(403).json({ message: "You do not have access to this lead" });
+        }
       }
     }
 
@@ -429,24 +674,42 @@ exports.getLeadById = async (req, res) => {
       attributes: ["remarks"],
     });
 
-    const lastActivity = await ActivityLog.findOne({
-      where: {
-        companyId: lead.companyId,
-        recordType: "Lead",
-        recordId: lead.id,
-        remarks: { [Op.ne]: null },
-      },
-      order: [["createdAt", "DESC"]],
-      attributes: ["remarks"],
-    });
+    const remarksMap = await getLatestRemarksForLeads([lead.id], lead.companyId);
+    const remarkInfo = remarksMap.get(lead.id);
+
+    const isReadOnly = req.user.role === ROLES.EMPLOYEE &&
+      !req.permissions?.editAllLeads &&
+      lead.assignedEmployeeId !== req.user.id &&
+      lead.assignedManagerId !== req.user.id;
 
     return res.status(200).json({
       message: "success",
       data: {
-        ...serializeLead(lead, statuses.byValue, req.user),
+        ...serializeLead(lead, statuses.byValue, req.user, remarkInfo),
+        is_read_only: isReadOnly,
+        isReadOnly: isReadOnly,
+        is_worked_lead: hasWorkedOnLead || lead.assignedEmployeeId !== req.user.id,
+        current_owner: lead.assignedEmployee?.name || "Unassigned",
+        current_owner_id: lead.assignedEmployeeId,
+        assignment_history: (lead.assignmentHistories || []).map((h) => ({
+          id: h.id,
+          user_id: h.userId,
+          assignee_name: h.assignee?.name || "Employee",
+          assignee_role: h.assignee?.role || "",
+          assigned_by_id: h.assignedById,
+          assigned_by_name: h.assignedBy?.name || "Admin/Manager",
+          assigned_at: h.assignedAt,
+          unassigned_at: h.unassignedAt,
+          is_active: h.isActive,
+          notes: h.notes,
+        })),
         remarks: creationActivity?.remarks || null,
         initial_remark: creationActivity?.remarks || null,
-        last_remark: lastActivity?.remarks || null,
+        last_remark: remarkInfo?.remarks || null,
+        latest_remark: remarkInfo?.remarks || null,
+        latest_remark_date: remarkInfo?.createdAt || null,
+        latest_remark_by: remarkInfo?.actor || null,
+        latest_remark_source: remarkInfo?.type || null,
         callLogs: lead.callLogs,
         followUps: lead.followUps,
         applications: lead.applications || [],
@@ -600,6 +863,18 @@ exports.createLead = async (req, res) => {
       companyId,
     });
 
+    if (lead.assignedEmployeeId) {
+      await trackLeadAssignment({
+        companyId,
+        leadId: lead.id,
+        fromUserId: null,
+        toUserId: lead.assignedEmployeeId,
+        assignedById: req.user.id,
+        reason: remark || "Initial lead assignment",
+        req: null,
+      });
+    }
+
     if (data.nextFollowupDate) {
       await syncLeadFollowUp({
         leadId: lead.id,
@@ -632,19 +907,39 @@ exports.updateLead = async (req, res) => {
       return res.status(404).json({ message: "Lead not found" });
     }
 
+    const body = req.body || {};
+
+    const hasReassignField =
+      body.assignedEmployeeId !== undefined ||
+      body.person_id !== undefined ||
+      body.assignedTo !== undefined;
+
     if (req.user.role === ROLES.EMPLOYEE) {
-      if (
-        req.permissions?.editLead === false &&
-        !req.permissions?.editAllLeads &&
-        !req.permissions?.editLeads &&
-        lead.assignedEmployeeId !== req.user.id &&
-        lead.assignedManagerId !== req.user.id
-      ) {
-        return res.status(403).json({ message: "You do not have permission to edit this lead" });
+      const isDeniedReassign = req.permissions?.reassignLeads === false;
+      const canReassign = !isDeniedReassign && (
+        req.permissions?.reassignLeads ||
+        req.permissions?.assignLeads ||
+        req.permissions?.manageLeads ||
+        req.permissions?.editAllLeads ||
+        req.permissions?.reassignLeads !== false
+      );
+      const isOwnLead = lead.assignedEmployeeId === req.user.id || lead.assignedManagerId === req.user.id;
+
+      // If user has edit permissions or is the lead owner, or is performing a permitted reassignment
+      const isPermitted =
+        Boolean(req.permissions?.editAllLeads) ||
+        Boolean(req.permissions?.editLeads) ||
+        isOwnLead ||
+        (hasReassignField && canReassign);
+
+      if (!isPermitted) {
+        return res.status(403).json({
+          code: "WORKED_LEAD_READ_ONLY",
+          message: "This lead is currently assigned to another employee. You have read-only access to this worked lead.",
+        });
       }
     }
 
-    const body = req.body;
     const statuses = await loadStatuses(lead.companyId);
 
     const data = pick(body, LEAD_FIELDS);
@@ -685,8 +980,21 @@ exports.updateLead = async (req, res) => {
       data.status = requested.value;
     }
 
-    if (body.assignedEmployeeId !== undefined || body.person_id !== undefined) {
-      const nextOwnerId = body.assignedEmployeeId ?? body.person_id;
+    if (body.assignedEmployeeId !== undefined || body.person_id !== undefined || body.assignedTo !== undefined) {
+      const isSuperOrAdmin = [ROLES.SUPERADMIN, ROLES.COMPANY_ADMIN].includes(req.user.role);
+      const isDenied = req.permissions?.reassignLeads === false;
+      const canReassignRole =
+        !isDenied &&
+        (isSuperOrAdmin ||
+          [ROLES.MANAGER, ROLES.OPS, ROLES.EMPLOYEE].includes(req.user.role) ||
+          Boolean(req.permissions?.reassignLeads) ||
+          Boolean(req.permissions?.assignLeads) ||
+          Boolean(req.permissions?.manageLeads));
+      if (!canReassignRole) {
+        return res.status(403).json({ message: "You do not have permission to reassign leads" });
+      }
+
+      const nextOwnerId = body.assignedEmployeeId ?? body.person_id ?? body.assignedTo;
       if (nextOwnerId) {
         const owner = await User.findByPk(nextOwnerId);
         if (!owner || owner.companyId !== lead.companyId) {
@@ -702,6 +1010,18 @@ exports.updateLead = async (req, res) => {
     const before = { ...lead.get({ plain: true }) };
     await lead.update(data);
     const after = { ...lead.get({ plain: true }) };
+
+    if (data.assignedEmployeeId !== undefined && before.assignedEmployeeId !== data.assignedEmployeeId) {
+      await trackLeadAssignment({
+        companyId: lead.companyId,
+        leadId: lead.id,
+        fromUserId: before.assignedEmployeeId,
+        toUserId: data.assignedEmployeeId,
+        assignedById: req.user.id,
+        reason: req.body.assignment_reason || req.body.reason || remark || null,
+        req,
+      });
+    }
 
     if (statusChange) {
       await logActivity(req, {
@@ -786,6 +1106,20 @@ exports.updateLeadStatus = async (req, res) => {
     const lead = await Lead.findByPk(req.params.id);
     if (!lead || !belongsToScope(req, lead)) {
       return res.status(404).json({ message: "Lead not found" });
+    }
+
+    if (req.user.role === ROLES.EMPLOYEE) {
+      if (
+        !req.permissions?.editAllLeads &&
+        !req.permissions?.editLeads &&
+        lead.assignedEmployeeId !== req.user.id &&
+        lead.assignedManagerId !== req.user.id
+      ) {
+        return res.status(403).json({
+          code: "WORKED_LEAD_READ_ONLY",
+          message: "This lead is currently assigned to another employee. You have read-only access to this worked lead.",
+        });
+      }
     }
 
     const statuses = await loadStatuses(lead.companyId);
@@ -939,12 +1273,14 @@ exports.assignUnassignedLeads = async (req, res) => {
 
     await Promise.all(
       ids.map((id) =>
-        logActivity(req, {
-          recordType: "Lead",
-          recordId: id,
-          action: "ASSIGNED",
-          newValue: { assignedEmployeeId: owner.id, assignedTo: owner.name },
+        trackLeadAssignment({
           companyId: req.user.companyId,
+          leadId: id,
+          fromUserId: null,
+          toUserId: owner.id,
+          assignedById: req.user.id,
+          reason: `Auto-assigned to ${owner.name}`,
+          req,
         })
       )
     );
@@ -989,13 +1325,14 @@ exports.reassignLeadsBulk = async (req, res) => {
       leads.map(async (lead) => {
         const from = lead.assignedEmployeeId;
         await lead.update({ assignedEmployeeId: owner.id, assignedManagerId: owner.managerId ?? null });
-        await logActivity(req, {
-          recordType: "Lead",
-          recordId: lead.id,
-          action: "ASSIGNED",
-          oldValue: { assignedEmployeeId: from },
-          newValue: { assignedEmployeeId: owner.id, assignedTo: owner.name },
+        await trackLeadAssignment({
           companyId: lead.companyId,
+          leadId: lead.id,
+          fromUserId: from,
+          toUserId: owner.id,
+          assignedById: req.user.id,
+          reason: req.body.reason || `Bulk reassigned to ${owner.name}`,
+          req,
         });
       })
     );
@@ -1050,7 +1387,15 @@ exports.getFollowups = async (req, res) => {
       distinct: true,
     });
 
-    const payload = paginated({ count, rows: rows.map((r) => serializeLead(r, statuses.byValue, req.user)), page, limit });
+    const leadIds = rows.map((r) => r.id);
+    const remarksMap = await getLatestRemarksForLeads(leadIds, companyId);
+
+    const payload = paginated({
+      count,
+      rows: rows.map((r) => serializeLead(r, statuses.byValue, req.user, remarksMap.get(r.id))),
+      page,
+      limit,
+    });
     payload.pagination.totalItems = count;
     return res.status(200).json(payload);
   } catch (error) {
@@ -1107,6 +1452,57 @@ exports.getLeadCounts = async (req, res) => {
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const endOfToday = new Date(startOfToday.getTime() + 86399999);
 
+    let workedCount = 0;
+    try {
+      const targetUserId = req.user.id;
+      const [assignedLeadRows, callLeadRows, activityLeadRows, noteLeadRows] = await Promise.all([
+        LeadAssignmentHistory.findAll({
+          where: { companyId, userId: targetUserId },
+          attributes: ["leadId"],
+          raw: true,
+        }),
+        CallLog.findAll({
+          where: { companyId, userId: targetUserId },
+          attributes: ["leadId"],
+          raw: true,
+        }),
+        ActivityLog.findAll({
+          where: { companyId, recordType: "Lead", actorUserId: targetUserId },
+          attributes: ["recordId"],
+          raw: true,
+        }),
+        Note.findAll({
+          where: { companyId, userId: targetUserId, leadId: { [Op.ne]: null } },
+          attributes: ["leadId"],
+          raw: true,
+        }),
+      ]);
+
+      const workedLeadIds = [
+        ...new Set([
+          ...assignedLeadRows.map((r) => r.leadId),
+          ...callLeadRows.map((r) => r.leadId),
+          ...activityLeadRows.map((r) => r.recordId),
+          ...noteLeadRows.map((r) => r.leadId),
+        ]),
+      ].filter(Boolean);
+
+      if (workedLeadIds.length) {
+        workedCount = await Lead.count({
+          where: {
+            ...companyScope(req),
+            id: { [Op.in]: workedLeadIds },
+            [Op.or]: [
+              { assignedEmployeeId: { [Op.ne]: targetUserId } },
+              { assignedEmployeeId: null },
+            ],
+          },
+        });
+      }
+    } catch (e) {
+      console.error("[getLeadCounts] workedCount error:", e.message);
+    }
+
     const [total, unassigned, dueToday, overdue] = await Promise.all([
       Lead.count({ where }),
       Lead.count({ where: { ...where, assignedEmployeeId: null } }),
@@ -1116,7 +1512,7 @@ exports.getLeadCounts = async (req, res) => {
 
     return res.status(200).json({
       message: "success",
-      data: { total, unassigned, followupsToday: dueToday, followupsOverdue: overdue, byStatus },
+      data: { total, unassigned, followupsToday: dueToday, followupsOverdue: overdue, workedCount, byStatus },
     });
   } catch (error) {
     console.error("[leads] getLeadCounts error:", error);
@@ -1304,8 +1700,80 @@ exports.assignLeadSingle = async (req, res) => {
   }
 };
 
+/**
+ * POST /api/leads/:id/remarks
+ * Body: { remark, nextFollowupDate }
+ */
+exports.addLeadRemark = async (req, res) => {
+  try {
+    const lead = await Lead.findByPk(req.params.id);
+    if (!lead || !belongsToScope(req, lead)) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
+    if (req.user.role === ROLES.EMPLOYEE) {
+      if (
+        !req.permissions?.editAllLeads &&
+        !req.permissions?.editLeads &&
+        lead.assignedEmployeeId !== req.user.id &&
+        lead.assignedManagerId !== req.user.id
+      ) {
+        return res.status(403).json({
+          code: "WORKED_LEAD_READ_ONLY",
+          message: "This lead is currently assigned to another employee. You have read-only access to this worked lead.",
+        });
+      }
+    }
+
+    const remark = remarkOf(req.body);
+    if (!remark) {
+      return res.status(400).json({ message: "Remark text is required" });
+    }
+
+    const nextDate = req.body.nextFollowupDate || req.body.next_meeting;
+    if (nextDate) {
+      lead.nextFollowupDate = parseScheduledDate(nextDate);
+      await lead.save();
+
+      await syncLeadFollowUp({
+        leadId: lead.id,
+        companyId: lead.companyId,
+        nextDate: lead.nextFollowupDate,
+        userId: lead.assignedEmployeeId || lead.assignedManagerId || req.user.id,
+        remarks: remark,
+        reqUser: req.user,
+      });
+    }
+
+    await logActivity(req, {
+      recordType: "Lead",
+      recordId: lead.id,
+      action: "UPDATED",
+      remarks: remark,
+      companyId: lead.companyId,
+    });
+
+    const nowIso = new Date().toISOString();
+    return res.status(200).json({
+      success: true,
+      message: "Remark added successfully",
+      data: {
+        lead_id: lead.id,
+        latest_remark: remark,
+        latest_remark_date: nowIso,
+        latest_remark_by: req.user.name || "User",
+      },
+    });
+  } catch (error) {
+    console.error("[leads] addLeadRemark error:", error);
+    return res.status(500).json({ message: "Internal Server Error", error: error.message });
+  }
+};
+
+exports.getLatestRemarksForLeads = getLatestRemarksForLeads;
 exports.serializeLead = serializeLead;
 exports.loadStatuses = loadStatuses;
 exports.visibilityScope = visibilityScope;
 exports.dateRangeWhere = dateRangeWhere;
 exports.MAX_SELF_ASSIGN_LEADS = MAX_SELF_ASSIGN_LEADS;
+exports.trackLeadAssignment = trackLeadAssignment;

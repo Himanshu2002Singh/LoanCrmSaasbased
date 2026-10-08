@@ -96,6 +96,13 @@ const PERMISSION_DEFINITIONS = [
     confidential: false,
   },
   {
+    key: "reassignLeads",
+    label: "Reassign Leads to Employees",
+    category: "Leads & Workflow",
+    description: "Can reassign leads to other employees within the company",
+    confidential: false,
+  },
+  {
     key: "followupLead",
     label: "Lead Follow-up & Meeting Scheduling",
     category: "Leads & Workflow",
@@ -124,12 +131,34 @@ const PERMISSION_DEFINITIONS = [
     confidential: true,
   },
   {
+    key: "manageLeadStatuses",
+    label: "Manage Lead Statuses (Add & Edit Stages)",
+    category: "User & Access Management",
+    description: "Can add, edit, reorder, and configure lead status pipeline stages",
+    confidential: false,
+  },
+  {
+    key: "manageLoanProducts",
+    label: "Manage Loan Types (Add & Edit Products)",
+    category: "User & Access Management",
+    description: "Can add, edit, and configure available company loan types and financial products",
+    confidential: false,
+  },
+  {
+    key: "manageLeadSources",
+    label: "Manage Lead Sources (Add & Edit Channels)",
+    category: "User & Access Management",
+    description: "Can add, edit, and configure customer acquisition sources, DSA connectors, and partners",
+    confidential: false,
+  },
+  {
     key: "exportData",
     label: "Export Data to Excel / CSV",
     category: "Data Security",
     description: "Can download Excel spreadsheets and export reports",
     confidential: false,
   },
+
   {
     key: "deleteRecords",
     label: "Delete Records",
@@ -147,6 +176,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
     manageLeads: true,
     createLead: true,
     editLead: true,
+    reassignLeads: true,
     followupLead: true,
     viewFollowupWork: true,
     viewOperations: true,
@@ -161,6 +191,9 @@ const DEFAULT_ROLE_PERMISSIONS = {
     viewReports: true,
     manageUsers: true,
     manageSettings: true,
+    manageLeadStatuses: true,
+    manageLoanProducts: true,
+    manageLeadSources: true,
     exportData: true,
     deleteRecords: true,
     viewAttendance: true,
@@ -173,6 +206,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
     manageLeads: true,
     createLead: true,
     editLead: true,
+    reassignLeads: true,
     followupLead: true,
     viewFollowupWork: true,
     viewOperations: true,
@@ -187,6 +221,9 @@ const DEFAULT_ROLE_PERMISSIONS = {
     viewReports: true,
     manageUsers: true,
     manageSettings: true,
+    manageLeadStatuses: true,
+    manageLoanProducts: true,
+    manageLeadSources: true,
     exportData: true,
     deleteRecords: true,
     viewAttendance: true,
@@ -199,6 +236,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
     manageLeads: true,
     createLead: true,
     editLead: true,
+    reassignLeads: true,
     followupLead: true,
     viewFollowupWork: true,
     viewOperations: false, // by default false; admin can toggle ON in Permissions
@@ -213,6 +251,9 @@ const DEFAULT_ROLE_PERMISSIONS = {
     viewReports: true,
     manageUsers: false,
     manageSettings: false,
+    manageLeadStatuses: false,
+    manageLoanProducts: false,
+    manageLeadSources: false,
     exportData: true,
     deleteRecords: false,
     viewAttendance: true,
@@ -225,6 +266,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
     manageLeads: true,
     createLead: false, // admin can grant create lead permission to Ops
     editLead: true, // sales, manager, operations, and admin can edit leads
+    reassignLeads: true,
     followupLead: true, // admin can grant followup permission to Ops
     viewFollowupWork: true,
     viewOperations: true,
@@ -239,6 +281,9 @@ const DEFAULT_ROLE_PERMISSIONS = {
     viewReports: false,
     manageUsers: false,
     manageSettings: false,
+    manageLeadStatuses: false,
+    manageLoanProducts: false,
+    manageLeadSources: false,
     exportData: true,
     deleteRecords: false,
     viewAttendance: false,
@@ -251,10 +296,12 @@ const DEFAULT_ROLE_PERMISSIONS = {
     manageLeads: true,
     createLead: true,
     editLead: true,
+    reassignLeads: true,
     followupLead: true,
     viewFollowupWork: true,
     viewOperations: false,
     manageOperations: false,
+    createLoanApplication: false,
     viewConnectors: false,
     manageConnectors: false,
     viewPayouts: false,
@@ -264,7 +311,40 @@ const DEFAULT_ROLE_PERMISSIONS = {
     viewReports: false,
     manageUsers: false,
     manageSettings: false,
+    manageLeadStatuses: false,
+    manageLoanProducts: false,
+    manageLeadSources: false,
     exportData: false,
+    deleteRecords: false,
+    viewAttendance: false,
+    viewTasks: false,
+  },
+  FINANCE: {
+    viewDashboard: true,
+    viewLeads: false,
+    viewAllLeads: false,
+    manageLeads: false,
+    createLead: false,
+    editLead: false,
+    reassignLeads: false,
+    followupLead: false,
+    viewFollowupWork: false,
+    viewOperations: false,
+    manageOperations: false,
+    createLoanApplication: false,
+    viewConnectors: true,
+    manageConnectors: true,
+    viewPayouts: true,
+    managePayouts: true,
+    viewExpenses: true,
+    manageExpenses: true,
+    viewReports: true,
+    manageUsers: false,
+    manageSettings: false,
+    manageLeadStatuses: false,
+    manageLoanProducts: false,
+    manageLeadSources: false,
+    exportData: true,
     deleteRecords: false,
     viewAttendance: false,
     viewTasks: false,
@@ -276,10 +356,12 @@ const DEFAULT_ROLE_PERMISSIONS = {
     manageLeads: false,
     createLead: false,
     editLead: false,
+    reassignLeads: false,
     followupLead: false,
     viewFollowupWork: false,
     viewOperations: false,
     manageOperations: false,
+    createLoanApplication: false,
     viewConnectors: false,
     manageConnectors: false,
     viewPayouts: false,
@@ -289,6 +371,9 @@ const DEFAULT_ROLE_PERMISSIONS = {
     viewReports: false,
     manageUsers: false,
     manageSettings: false,
+    manageLeadStatuses: false,
+    manageLoanProducts: false,
+    manageLeadSources: false,
     exportData: false,
     deleteRecords: false,
     viewAttendance: false,
@@ -322,12 +407,22 @@ const resolveUserPermissions = (user, explicitCompanyOverrides = null) => {
   const roleOverride = (companyOverrides && companyOverrides[role]) || {};
   const userCustom = typeof user.permissions === "string" ? JSON.parse(user.permissions || "{}") : (user.permissions || {});
 
-  return {
+  const resolved = {
     ...roleDefaults,
     ...roleOverride,
     ...userCustom,
   };
+
+  // If user has manageSettings, ensure lead statuses, loan products, and lead sources are also granted by default
+  if (resolved.manageSettings) {
+    if (resolved.manageLeadStatuses === undefined) resolved.manageLeadStatuses = true;
+    if (resolved.manageLoanProducts === undefined) resolved.manageLoanProducts = true;
+    if (resolved.manageLeadSources === undefined) resolved.manageLeadSources = true;
+  }
+
+  return resolved;
 };
+
 
 module.exports = {
   PERMISSION_DEFINITIONS,
