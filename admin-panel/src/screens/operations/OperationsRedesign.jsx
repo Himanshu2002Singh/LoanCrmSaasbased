@@ -615,6 +615,7 @@ export default function OperationsRedesign() {
   // Bank Email Dispatch Modal State
   const [bankMailModalApp, setBankMailModalApp] = useState(null);
   const [emailTemplates, setEmailTemplates] = useState([]);
+  const [mailSmtpConfig, setMailSmtpConfig] = useState(null);
   const [bankMailLoading, setBankMailLoading] = useState(false);
   const [bankMailSubmitting, setBankMailSubmitting] = useState(false);
   const [mailActiveTab, setMailActiveTab] = useState("compose"); // "compose" | "preview"
@@ -1852,9 +1853,10 @@ export default function OperationsRedesign() {
     setMailActiveTab("compose");
 
     try {
-      const [appRes, tplRes] = await Promise.all([
+      const [appRes, tplRes, smtpRes] = await Promise.all([
         axios.get(`${API_URL}/applications/${app.id}`),
         axios.get(`${API_URL}/email-templates`),
+        axios.get(`${API_URL}/email-templates/smtp/config`).catch(() => ({ data: null })),
       ]);
 
       const fullApp = appRes.data?.application || app;
@@ -1862,6 +1864,12 @@ export default function OperationsRedesign() {
 
       const tpls = tplRes.data?.templates || tplRes.data?.data || [];
       setEmailTemplates(tpls);
+
+      if (smtpRes?.data?.data) {
+        setMailSmtpConfig(smtpRes.data.data);
+      } else {
+        setMailSmtpConfig(null);
+      }
 
       const currentLenderId = fullApp.lenderId || (lenders[0]?.lender_id || lenders[0]?.id || "");
       const currentLender = lenders.find(
@@ -3557,6 +3565,27 @@ export default function OperationsRedesign() {
               </div>
             ) : mailActiveTab === "compose" ? (
               <form className="cc-modal-form" onSubmit={handleSendBankEmail}>
+                {/* Outgoing Sender Email & SMTP Configuration Alert Banner */}
+                {mailSmtpConfig?.isConfigured && mailSmtpConfig?.user ? (
+                  <div style={{ background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: 8, padding: "9px 13px", marginBottom: 12, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "#065f46" }}>
+                      <CheckCircle2 size={15} color="#059669" />
+                      <span>Sending From: <strong>{mailSmtpConfig.senderName}</strong> (&lt;{mailSmtpConfig.user}&gt;)</span>
+                    </div>
+                    <span style={{ fontSize: 11, background: "#d1fae5", color: "#047857", padding: "2px 7px", borderRadius: 5, fontWeight: 700 }}>Verified SMTP</span>
+                  </div>
+                ) : (
+                  <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "9px 13px", marginBottom: 12, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#92400e" }}>
+                      <AlertCircle size={15} color="#d97706" />
+                      <span><strong>Sender Email Not Configured:</strong> Set your Gmail ID &amp; 16-digit App Password in Settings &gt; Email Templates.</span>
+                    </div>
+                    <a href="/email-templates" target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, background: "#fef3c7", color: "#b45309", padding: "3px 8px", borderRadius: 5, fontWeight: 700, textDecoration: "none", border: "1px solid #fcd34d", whiteSpace: "nowrap" }}>
+                      Setup SMTP →
+                    </a>
+                  </div>
+                )}
+
                 {/* Bank / RM Recipient Section */}
                 <div className="cc-mail-section-card">
                   <div className="cc-mail-section-title">
@@ -3861,7 +3890,10 @@ export default function OperationsRedesign() {
                 <div className="cc-email-preview-envelope">
                   <div className="cc-email-preview-headers">
                     <div className="cc-email-hdr-row">
-                      <strong>From:</strong> <span>Operations Desk &lt;operations@capitalcare.com&gt;</span>
+                      <strong>From:</strong>{" "}
+                      <span>
+                        {mailSmtpConfig?.senderName || "Operations Desk"} &lt;{mailSmtpConfig?.user || "operations@capitalcare.com"}&gt;
+                      </span>
                     </div>
                     <div className="cc-email-hdr-row">
                       <strong>To:</strong>{" "}

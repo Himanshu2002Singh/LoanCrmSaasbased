@@ -106,11 +106,10 @@ Operations Desk
 const resolveCompanyId = (req) => {
   if (req.companyId) return req.companyId;
   if (req.user?.companyId) return req.user.companyId;
-  if (req.user?.role === "SUPERADMIN") {
-    const q = parseInt(req.query?.companyId || req.headers?.["x-company-id"] || req.body?.companyId, 10);
-    if (!Number.isNaN(q)) return q;
-  }
-  return null;
+  const q = parseInt(req.query?.companyId || req.headers?.["x-company-id"] || req.body?.companyId, 10);
+  if (!Number.isNaN(q)) return q;
+  // Default fallback for SuperAdmin / platform context
+  return 1;
 };
 
 /**

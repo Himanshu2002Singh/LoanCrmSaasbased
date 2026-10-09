@@ -1303,13 +1303,16 @@ const sendApplicationToBank = async (req, res, next) => {
       await application.update({ lenderId: parseInt(lenderId, 10) });
     }
 
+    // Target company id scoped from application or request
+    const targetCompanyId = application.companyId || getCompanyId(req) || 1;
+
     // Retrieve documents to attach
     let attachedDocs = [];
     if (Array.isArray(documentIds) && documentIds.length > 0) {
       attachedDocs = await Document.findAll({
         where: {
           id: { [Op.in]: documentIds },
-          companyId: getCompanyId(req),
+          companyId: targetCompanyId,
         },
       });
     }
@@ -1346,7 +1349,7 @@ const sendApplicationToBank = async (req, res, next) => {
 
     // Send email via emailService
     const mailResult = await sendMail({
-      companyId: req.companyId || req.user?.companyId,
+      companyId: targetCompanyId,
       to: toEmail,
       cc: ccEmails || undefined,
       subject: subject.trim(),

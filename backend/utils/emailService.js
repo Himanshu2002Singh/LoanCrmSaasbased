@@ -245,6 +245,16 @@ const sendMail = async ({
 
   // 4. Fallback to system transporter if no tenant SMTP is configured
   if (!activeTransporter) {
+    const hasSystemSmtp = Boolean(
+      process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS
+    );
+
+    if (!hasSystemSmtp && (!resolvedConfig || !resolvedConfig.user || !resolvedConfig.pass)) {
+      throw new Error(
+        "Outgoing email (SMTP) is not configured for your company. Please configure your company Gmail ID and 16-character App Password in Settings > Email Templates to dispatch emails directly to bank RMs."
+      );
+    }
+
     activeTransporter = await getSystemFallbackTransporter();
     if (!activeFrom) {
       activeFrom =
