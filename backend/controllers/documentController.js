@@ -1,6 +1,7 @@
 const path = require("path");
 const fs = require("fs");
 const archiver = require("archiver");
+const { Op } = require("sequelize");
 const { Document, Customer, Lead, Application, User } = require("../models");
 const { buildQuery, paginated } = require("../utils/query");
 const { logActivity, diffFields } = require("../utils/activity");
@@ -13,7 +14,8 @@ const { resolveDiskFilePath, getPublicDocumentUrls } = require("../utils/documen
  */
 const uploadDocument = async (req, res, next) => {
   try {
-    if (!req.file) {
+    const rawFiles = req.files && req.files.length > 0 ? req.files : (req.file ? [req.file] : []);
+    if (rawFiles.length === 0) {
       return res.status(400).json({ message: "No file uploaded" });
     }
 
@@ -22,32 +24,48 @@ const uploadDocument = async (req, res, next) => {
       return res.status(400).json({ message: "Document type (docType) is required" });
     }
 
-    const fileUrl = `/uploads/documents/${req.file.filename}`;
-    const fileName = req.file.originalname;
+    // Check maximum 25MB file size limit
+    const maxBytes = 25 * 1024 * 1024;
+    for (const f of rawFiles) {
+      if (f.size > maxBytes) {
+        return res.status(400).json({
+          message: `File "${f.originalname}" exceeds the 25MB maximum size limit.`
+        });
+      }
+    }
 
-    const document = await Document.create({
-      companyId: req.companyId,
-      customerId: customerId ? parseInt(customerId, 10) : null,
-      leadId: leadId ? parseInt(leadId, 10) : null,
-      applicationId: applicationId ? parseInt(applicationId, 10) : null,
-      docType: docType.trim(),
-      fileUrl,
-      fileName,
-      uploadedBy: req.user.id,
-      verificationStatus: "PENDING",
-    });
+    const createdDocs = [];
+    for (const f of rawFiles) {
+      const fileUrl = `/uploads/documents/${f.filename}`;
+      const fileName = f.originalname;
 
-    await logActivity(req, {
-      recordType: "Document",
-      recordId: document.id,
-      action: "DOC_UPLOADED",
-      newValue: { docType: document.docType, fileName: document.fileName },
-      remarks: `Uploaded ${document.docType} file: ${document.fileName}`,
-    });
+      const document = await Document.create({
+        companyId: req.companyId,
+        customerId: customerId ? parseInt(customerId, 10) : null,
+        leadId: leadId ? parseInt(leadId, 10) : null,
+        applicationId: applicationId ? parseInt(applicationId, 10) : null,
+        docType: docType.trim(),
+        fileUrl,
+        fileName,
+        uploadedBy: req.user.id,
+        verificationStatus: "PENDING",
+      });
+
+      await logActivity(req, {
+        recordType: "Document",
+        recordId: document.id,
+        action: "DOC_UPLOADED",
+        newValue: { docType: document.docType, fileName: document.fileName },
+        remarks: `Uploaded ${document.docType} file: ${document.fileName}`,
+      });
+
+      createdDocs.push(document);
+    }
 
     return res.status(201).json({
-      message: "Document uploaded successfully",
-      document,
+      message: `${createdDocs.length} document(s) uploaded successfully`,
+      documents: createdDocs,
+      document: createdDocs[0],
     });
   } catch (error) {
     next(error);
@@ -282,8 +300,19 @@ const downloadAllLeadDocuments = async (req, res, next) => {
       return res.status(404).json({ message: "Lead not found" });
     }
 
-    const docs = await Document.findAll({
+    const leadApps = await Application.findAll({
       where: { leadId: parseInt(leadId, 10) },
+      attributes: ["id"],
+    });
+    const appIds = leadApps.map((a) => a.id);
+
+    const docs = await Document.findAll({
+      where: {
+        [Op.or]: [
+          { leadId: parseInt(leadId, 10) },
+          ...(appIds.length > 0 ? [{ applicationId: { [Op.in]: appIds } }] : []),
+        ],
+      },
     });
 
     if (!docs || docs.length === 0) {
@@ -357,11 +386,18 @@ const downloadAllApplicationDocuments = async (req, res, next) => {
       });
     }
 
-    if (docs.length === 0 && application.leadId) {
-      // Fallback: check documents linked by leadId
-      docs = await Document.findAll({
+    if (application.leadId) {
+      // Also combine KYC documents linked by parent leadId
+      const leadDocs = await Document.findAll({
         where: { leadId: application.leadId },
       });
+      const seenIds = new Set(docs.map((d) => d.id));
+      for (const ld of leadDocs) {
+        if (!seenIds.has(ld.id)) {
+          docs.push(ld);
+          seenIds.add(ld.id);
+        }
+      }
     }
 
     if (!docs || docs.length === 0) {

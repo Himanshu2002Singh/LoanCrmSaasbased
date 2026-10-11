@@ -149,7 +149,7 @@ export default function LeadDetailScreen() {
   // Upload Doc Modal state
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [selectedDocType, setSelectedDocType] = useState("");
-  const [docFile, setDocFile] = useState(null);
+  const [docFiles, setDocFiles] = useState([]);
   const [uploadingDoc, setUploadingDoc] = useState(false);
 
   // Create Application Modal state
@@ -159,6 +159,7 @@ export default function LeadDetailScreen() {
     appliedAmount: "",
     lenderId: "",
   });
+  const [submittingApp, setSubmittingApp] = useState(false);
   const [remarkModalOpen, setRemarkModalOpen] = useState(false);
   const [newRemarkText, setNewRemarkText] = useState("");
   const [newFollowupDate, setNewFollowupDate] = useState("");
@@ -408,18 +409,30 @@ export default function LeadDetailScreen() {
 
   const handleUploadDocument = async (e) => {
     e.preventDefault();
-    if (!docFile) {
-      toast.error("Please select a file to upload");
+    if (!docFiles || docFiles.length === 0) {
+      toast.error("Please select at least one file to upload");
       return;
     }
     if (!selectedDocType) {
       toast.error("Please select a document type");
       return;
     }
+
+    // Check 25MB maximum limit per file
+    const maxBytes = 25 * 1024 * 1024;
+    for (const f of docFiles) {
+      if (f.size > maxBytes) {
+        toast.error(`File "${f.name}" exceeds the 25MB maximum size limit.`);
+        return;
+      }
+    }
+
     setUploadingDoc(true);
     try {
       const formData = new FormData();
-      formData.append("file", docFile);
+      docFiles.forEach((file) => {
+        formData.append("files", file);
+      });
       formData.append("leadId", id);
       if (lead?.customer_id) {
         formData.append("customerId", lead.customer_id);
@@ -433,9 +446,9 @@ export default function LeadDetailScreen() {
           ...(token && { Authorization: `Bearer ${token}` }),
         },
       });
-      toast.success("Document uploaded successfully");
+      toast.success(`${docFiles.length} Document(s) uploaded successfully`);
       setUploadModalOpen(false);
-      setDocFile(null);
+      setDocFiles([]);
       fetchLeadDetails();
     } catch (err) {
       console.error(err);
@@ -1254,46 +1267,51 @@ export default function LeadDetailScreen() {
               <h3>All Documents for this Lead ({documents.length})</h3>
               <p>KYC documents (PAN, Aadhaar, Bank Statement, Salary Slips, ITR, etc.)</p>
             </div>
-            {!isReadOnly && (
-              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-                {documents.length > 0 && (
-                  <a
-                    href={`${API_URL}/documents/lead/${id}/download-all?token=${localStorage.getItem("token")}`}
-                    className="cc-action-btn secondary"
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "6px",
-                      backgroundColor: "#ecfdf5",
-                      color: "#059669",
-                      borderColor: "#a7f3d0",
-                      fontWeight: 700,
-                    }}
-                    title="Download all documents for this lead in a single ZIP file"
-                  >
-                    <Download size={14} />
-                    <span>Download All ({documents.length} Docs ZIP)</span>
-                  </a>
-                )}
-                <button
-                  type="button"
-                  className="cc-action-btn primary"
-                  style={{ backgroundColor: "#2563eb", color: "#ffffff" }}
-                  onClick={() => setDocReqModalOpen(true)}
-                >
-                  <Link size={14} />
-                  <span>Customer Upload Link</span>
-                </button>
-                <button
-                  type="button"
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+              {documents.length > 0 && (
+                <a
+                  href={`${API_URL}/documents/lead/${id}/download-all?token=${localStorage.getItem("token")}`}
                   className="cc-action-btn secondary"
-                  onClick={() => setUploadModalOpen(true)}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    backgroundColor: "#ecfdf5",
+                    color: "#059669",
+                    borderColor: "#a7f3d0",
+                    fontWeight: 700,
+                  }}
+                  title="Download all documents for this lead in a single ZIP file"
                 >
-                  <Upload size={14} />
-                  <span>Staff Upload</span>
-                </button>
-              </div>
-            )}
+                  <Download size={14} />
+                  <span>Download All ({documents.length} Docs ZIP)</span>
+                </a>
+              )}
+              {!isReadOnly && (
+                <>
+                  <button
+                    type="button"
+                    className="cc-action-btn primary"
+                    style={{ backgroundColor: "#2563eb", color: "#ffffff" }}
+                    onClick={() => setDocReqModalOpen(true)}
+                  >
+                    <Link size={14} />
+                    <span>Customer Upload Link</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="cc-action-btn secondary"
+                    onClick={() => {
+                      setDocFiles([]);
+                      setUploadModalOpen(true);
+                    }}
+                  >
+                    <Upload size={14} />
+                    <span>Staff Upload</span>
+                  </button>
+                </>
+              )}
+            </div>
           </div>
 
           {/* Active Customer Upload Links Card */}
@@ -2004,15 +2022,61 @@ export default function LeadDetailScreen() {
 
               <div className="form-group">
                 <label>
-                  Select File <span className="req">*</span>
+                  Select File(s) <span className="req">*</span>
+                  <span style={{ fontSize: "11.5px", color: "#64748b", marginLeft: "6px", fontWeight: "normal" }}>
+                    (Multiple files allowed &bull; Max 25MB per file)
+                  </span>
                 </label>
                 <input
                   type="file"
-                  accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                  onChange={(e) => setDocFile(e.target.files?.[0] || null)}
+                  multiple
+                  accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx,.csv"
+                  onChange={(e) => {
+                    const files = Array.from(e.target.files || []);
+                    const oversized = files.find((f) => f.size > 25 * 1024 * 1024);
+                    if (oversized) {
+                      toast.error(`File "${oversized.name}" exceeds the 25MB maximum size limit!`);
+                      return;
+                    }
+                    setDocFiles(files);
+                  }}
                   required
                 />
-                <small className="help">Accepted: PDF, Images (.jpg, .png), Word (.docx)</small>
+                <small className="help">
+                  Accepted: PDF, Images (.jpg, .png), Word, Excel &bull; <strong>Max 25MB per file</strong>
+                </small>
+
+                {docFiles && docFiles.length > 0 && (
+                  <div style={{ marginTop: "10px", display: "flex", flexDirection: "column", gap: "5px" }}>
+                    <div style={{ fontSize: "12px", fontWeight: "600", color: "#334155" }}>
+                      Selected Files ({docFiles.length}):
+                    </div>
+                    <div style={{ maxHeight: "110px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "4px" }}>
+                      {docFiles.map((f, i) => (
+                        <div
+                          key={i}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            padding: "4px 8px",
+                            backgroundColor: "#f8fafc",
+                            border: "1px solid #e2e8f0",
+                            borderRadius: "6px",
+                            fontSize: "11.5px",
+                          }}
+                        >
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "260px" }}>
+                            📄 {f.name}
+                          </span>
+                          <span style={{ color: "#64748b", fontSize: "11px", shrink: 0 }}>
+                            {(f.size / (1024 * 1024)).toFixed(1)} MB
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="cc-modal-footer">
@@ -2027,9 +2091,9 @@ export default function LeadDetailScreen() {
                 <button
                   type="submit"
                   className="cc-btn primary"
-                  disabled={uploadingDoc || !docFile}
+                  disabled={uploadingDoc || !docFiles || docFiles.length === 0}
                 >
-                  {uploadingDoc ? "Uploading..." : "Upload Document"}
+                  {uploadingDoc ? "Uploading..." : `Upload ${docFiles?.length > 1 ? `${docFiles.length} Documents` : "Document"}`}
                 </button>
               </div>
             </form>

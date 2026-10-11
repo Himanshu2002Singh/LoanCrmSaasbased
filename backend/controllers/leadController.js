@@ -1053,9 +1053,14 @@ exports.updateLead = async (req, res) => {
     // Keep the customer half in step when the caller edits it through the lead.
     const customerPatch = {};
     if (body.name) customerPatch.name = String(body.name).trim();
+    const rawMobile = body.mobile ?? body.number ?? body.phone ?? body.contact ?? body.customerMobile;
+    if (rawMobile !== undefined && String(rawMobile).trim() !== "") {
+      customerPatch.mobile = String(rawMobile).trim();
+    }
     if (body.email !== undefined) customerPatch.email = body.email;
     if (body.city !== undefined) customerPatch.city = body.city;
-    if (body.alternate_number !== undefined) customerPatch.alternateMobile = body.alternate_number;
+    const rawAltMobile = body.alternate_number ?? body.alternateMobile ?? body.alt_phone ?? body.altPhone;
+    if (rawAltMobile !== undefined) customerPatch.alternateMobile = rawAltMobile ? String(rawAltMobile).trim() : null;
     if (body.employment_type !== undefined || body.employmentType !== undefined) {
       customerPatch.employmentType = body.employment_type || body.employmentType;
     }
@@ -1065,8 +1070,31 @@ exports.updateLead = async (req, res) => {
     if (body.pan_number !== undefined || body.panNumber !== undefined) {
       customerPatch.panNumber = body.pan_number || body.panNumber;
     }
-    if (Object.keys(customerPatch).length && lead.customer) {
-      await lead.customer.update(customerPatch);
+    if (Object.keys(customerPatch).length) {
+      if (lead.customer) {
+        await lead.customer.update(customerPatch);
+      } else if (lead.customerId) {
+        await Customer.update(customerPatch, { where: { id: lead.customerId } });
+      } else {
+        const newCust = await Customer.create({
+          companyId: lead.companyId,
+          name: customerPatch.name || "Customer",
+          mobile: customerPatch.mobile || "0000000000",
+          ...customerPatch,
+        });
+        await lead.update({ customerId: newCust.id });
+      }
+
+      // Keep CasePayout customer name / mobile in sync if exists
+      if (customerPatch.mobile || customerPatch.name) {
+        try {
+          const { CasePayout } = require("../models");
+          const payoutPatch = {};
+          if (customerPatch.mobile) payoutPatch.customerMobile = customerPatch.mobile;
+          if (customerPatch.name) payoutPatch.customerName = customerPatch.name;
+          await CasePayout.update(payoutPatch, { where: { leadId: lead.id, companyId: lead.companyId } });
+        } catch (e) {}
+      }
     }
 
     const rawMeetingUpdated = body.next_meeting ?? body.meetingDate ?? body.meeting_date ?? body.nextMeetingDate ?? body.nextFollowupDate ?? body.nextMeeting;
@@ -1081,14 +1109,18 @@ exports.updateLead = async (req, res) => {
       });
     }
 
-    if (["DISBURSED", "SANCTIONED", "APPROVED", "COMPLETED", "CLOSED"].includes(String(lead.status || "").toUpperCase())) {
+    if (["CANCELLED", "REJECTED"].includes(String(lead.status || "").toUpperCase())) {
       try {
-        const { autoSyncDisbursedCases } = require("./casePayoutController");
-        autoSyncDisbursedCases(lead.companyId).catch((e) =>
-          console.error("[leadController] autoSync error:", e.message)
-        );
+        const { CasePayout } = require("../models");
+        CasePayout.destroy({ where: { companyId: lead.companyId, leadId: lead.id } }).catch(() => {});
       } catch (e) {}
     }
+    try {
+      const { autoSyncDisbursedCases } = require("./casePayoutController");
+      autoSyncDisbursedCases(lead.companyId).catch((e) =>
+        console.error("[leadController] autoSync error:", e.message)
+      );
+    } catch (e) {}
 
     return res.status(200).json({ message: "Lead updated", data: serializeLead(lead, statuses.byValue, req.user) });
   } catch (error) {
@@ -1159,14 +1191,18 @@ exports.updateLeadStatus = async (req, res) => {
       companyId: lead.companyId,
     });
 
-    if (["DISBURSED", "SANCTIONED", "APPROVED", "COMPLETED", "CLOSED"].includes(String(status.value || "").toUpperCase())) {
+    if (["CANCELLED", "REJECTED"].includes(String(status.value || "").toUpperCase())) {
       try {
-        const { autoSyncDisbursedCases } = require("./casePayoutController");
-        autoSyncDisbursedCases(lead.companyId).catch((e) =>
-          console.error("[leadController] autoSync error:", e.message)
-        );
+        const { CasePayout } = require("../models");
+        CasePayout.destroy({ where: { companyId: lead.companyId, leadId: lead.id } }).catch(() => {});
       } catch (e) {}
     }
+    try {
+      const { autoSyncDisbursedCases } = require("./casePayoutController");
+      autoSyncDisbursedCases(lead.companyId).catch((e) =>
+        console.error("[leadController] autoSync error:", e.message)
+      );
+    } catch (e) {}
 
     const serialized = serializeLead(lead, statuses.byValue, req.user);
     return res.status(200).json({ message: "Status updated", data: serialized, lead: serialized });

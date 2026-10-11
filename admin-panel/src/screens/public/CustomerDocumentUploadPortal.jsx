@@ -80,22 +80,30 @@ export default function CustomerDocumentUploadPortal() {
     }
   }, [token]);
 
-  // Handle uploading file for a specific slot
-  const handleFileUpload = async (slot, file) => {
-    if (!file) return;
+  // Handle uploading file(s) for a specific slot
+  const handleFileUpload = async (slot, filesInput) => {
+    if (!filesInput) return;
+    const files = Array.isArray(filesInput)
+      ? filesInput
+      : filesInput instanceof FileList
+      ? Array.from(filesInput)
+      : [filesInput];
+    if (files.length === 0) return;
 
-    // Check size limit: 20MB
-    const maxSize = 20 * 1024 * 1024;
-    if (file.size > maxSize) {
-      toast.error("File size exceeds 20MB limit. Please upload a smaller file.");
-      return;
+    // Check size limit: 25MB
+    const maxSize = 25 * 1024 * 1024;
+    for (const file of files) {
+      if (file.size > maxSize) {
+        toast.error(`"${file.name}" exceeds 25MB limit. Please upload a smaller file.`);
+        return;
+      }
     }
 
     const slotId = slot.id;
     setUploadingSlots((prev) => ({ ...prev, [slotId]: true }));
 
     const formData = new FormData();
-    formData.append("file", file);
+    files.forEach((f) => formData.append("files", f));
     formData.append("docSlotId", slot.id);
     formData.append("docType", slot.docType);
     formData.append("docTitle", slot.title);
@@ -335,7 +343,7 @@ export default function CustomerDocumentUploadPortal() {
                   <span>Download All ({uploadedDocs})</span>
                 </a>
               )}
-              <span className="text-xs text-slate-500">Formats: PDF, JPG, PNG (Max 20MB)</span>
+              <span className="text-xs text-slate-500">Formats: PDF, JPG, PNG (Max 25MB)</span>
             </div>
           </div>
 
@@ -459,15 +467,16 @@ export default function CustomerDocumentUploadPortal() {
                           {/* Re-upload / Replace */}
                           <label className="px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 border border-blue-200">
                             <RefreshCw size={12} className={isUploading ? "animate-spin" : ""} />
-                            <span>{isUploading ? "Uploading..." : "Replace"}</span>
+                            <span>{isUploading ? "Uploading..." : "Upload / Replace"}</span>
                             <input
                               type="file"
+                              multiple
                               accept="image/*,application/pdf"
                               disabled={isUploading}
                               className="hidden"
                               onChange={(e) => {
-                                if (e.target.files?.[0]) {
-                                  handleFileUpload(slot, e.target.files[0]);
+                                if (e.target.files && e.target.files.length > 0) {
+                                  handleFileUpload(slot, e.target.files);
                                 }
                               }}
                             />
@@ -485,12 +494,13 @@ export default function CustomerDocumentUploadPortal() {
                         >
                           <input
                             type="file"
+                            multiple
                             accept="image/*,application/pdf"
                             disabled={isUploading}
                             className="hidden"
                             onChange={(e) => {
-                              if (e.target.files?.[0]) {
-                                handleFileUpload(slot, e.target.files[0]);
+                              if (e.target.files && e.target.files.length > 0) {
+                                handleFileUpload(slot, e.target.files);
                               }
                             }}
                           />
@@ -511,7 +521,7 @@ export default function CustomerDocumentUploadPortal() {
                                 Click to browse or take photo from phone
                               </span>
                               <span className="text-[11px] text-slate-500 mt-0.5">
-                                Camera, PDF, JPG, PNG up to 20MB
+                                Camera, PDF, JPG, PNG up to 25MB (multiple files supported)
                               </span>
                             </div>
                           )}

@@ -11,7 +11,7 @@ const upload = require("../middlewares/upload_middleware");
 router.get("/document-requests/:token", docReqController.getPublicRequest);
 router.post(
   "/document-requests/:token/upload",
-  upload.single("file"),
+  upload.any(),
   docReqController.publicUploadDocument
 );
 router.post(

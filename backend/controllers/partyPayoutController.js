@@ -4,7 +4,7 @@ const { companyScope, belongsToScope } = require("../middlewares/auth");
 const { logActivity } = require("../utils/activity");
 const { autoSyncDisbursedCases } = require("./casePayoutController");
 
-const COMPLETED_STATUSES = ["DISBURSED", "SANCTIONED", "APPROVED", "COMPLETED", "CLOSED"];
+const COMPLETED_STATUSES = ["DISBURSED", "CLOSED"];
 
 /**
  * Helper to compute date range filter
@@ -529,9 +529,12 @@ exports.getPartyLedgerDetail = async (req, res) => {
           : defaultComm;
 
       const isDisbursed =
-        COMPLETED_STATUSES.includes((lead.status || "").toUpperCase()) ||
-        COMPLETED_STATUSES.includes((primaryApp?.status || "").toUpperCase()) ||
-        Boolean(sanctionedAmount && parseFloat(sanctionedAmount) > 0);
+        !["CANCELLED", "REJECTED"].includes((lead.status || "").toUpperCase()) &&
+        !["CANCELLED", "REJECTED"].includes((primaryApp?.status || "").toUpperCase()) &&
+        !["CANCELLED", "REJECTED"].includes((primaryApp?.disbursementStatus || "").toUpperCase()) &&
+        (COMPLETED_STATUSES.includes((lead.status || "").toUpperCase()) ||
+          COMPLETED_STATUSES.includes((primaryApp?.status || "").toUpperCase()) ||
+          (primaryApp?.disbursementStatus || "").toUpperCase() === "COMPLETED");
 
       return {
         leadId: lead.id,
@@ -1007,9 +1010,12 @@ exports.searchCompanyLeads = async (req, res) => {
       const baseAmount = sanctionedAmount || appliedAmount || 0;
       const commPct = parseFloat(lead.commissionPercent || 0);
       const isDisbursed =
-        COMPLETED_STATUSES.includes((lead.status || "").toUpperCase()) ||
-        COMPLETED_STATUSES.includes((primaryApp?.status || "").toUpperCase()) ||
-        Boolean(sanctionedAmount);
+        !["CANCELLED", "REJECTED"].includes((lead.status || "").toUpperCase()) &&
+        !["CANCELLED", "REJECTED"].includes((primaryApp?.status || "").toUpperCase()) &&
+        !["CANCELLED", "REJECTED"].includes((primaryApp?.disbursementStatus || "").toUpperCase()) &&
+        (COMPLETED_STATUSES.includes((lead.status || "").toUpperCase()) ||
+          COMPLETED_STATUSES.includes((primaryApp?.status || "").toUpperCase()) ||
+          (primaryApp?.disbursementStatus || "").toUpperCase() === "COMPLETED");
 
       return {
         leadId: lead.id,

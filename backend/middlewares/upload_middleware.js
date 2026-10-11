@@ -38,7 +38,7 @@ const fileFilter = (req, file, cb) => {
 const upload = multer({
   storage: diskStorage,
   fileFilter,
-  limits: { fileSize: 15 * 1024 * 1024 }, // 15MB
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB
 });
 
 // Dedicated storage and filter for company logos
@@ -98,7 +98,7 @@ const uploadTemplate = multer({
 upload.uploadDisk = upload;
 upload.uploadMemory = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 15 * 1024 * 1024 },
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB
 });
 upload.uploadLogo = uploadLogo;
 upload.uploadTemplate = uploadTemplate;

@@ -7,7 +7,7 @@ const { ROLES } = require("../constants/roles");
 
 router.use(isAuthenticated);
 
-router.post("/", upload.single("file"), controller.uploadDocument);
+router.post("/", upload.any(), controller.uploadDocument);
 router.get("/", controller.listDocuments);
 router.get("/lead/:leadId/download-all", controller.downloadAllLeadDocuments);
 router.get("/application/:applicationId/download-all", controller.downloadAllApplicationDocuments);

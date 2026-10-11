@@ -256,8 +256,21 @@ const listApplications = async (req, res, next) => {
           stageOrConditions.push({ technicalStatus: "RESOLVED" });
         } else if (key === "TECHNICAL_REJECTED") {
           stageOrConditions.push({ technicalStatus: "REJECTED" });
+        } else if (key === "LOGIN" || key === "LOGIN_ALL") {
+          stageOrConditions.push({ [Op.or]: [{ loginStatus: { [Op.ne]: null } }, { status: "LOGGED_IN" }] });
+        } else if (key === "LOGIN_PENDING") {
+          stageOrConditions.push({ [Op.or]: [{ loginStatus: "PENDING" }, { status: "SUBMITTED_TO_BANK" }] });
+        } else if (key === "LOGIN_COMPLETED") {
+          stageOrConditions.push({ [Op.or]: [{ loginStatus: "COMPLETED" }, { status: "LOGGED_IN" }] });
         } else if (key === "SANCTIONED") {
-          stageOrConditions.push({ status: "SANCTIONED" });
+          stageOrConditions.push({ [Op.or]: [{ status: "SANCTIONED" }, { sanctionStatus: "SANCTIONED" }] });
+        } else if (key === "DISBURSEMENT" || key === "DISBURSED_INITIATED") {
+          stageOrConditions.push({
+            [Op.or]: [
+              { status: "DISBURSEMENT" },
+              { disbursementStatus: { [Op.in]: ["INITIATED", "PARTIAL", "DISBURSED", "COMPLETED"] } },
+            ],
+          });
         } else if (key === "PDD" || key === "PDD_ALL") {
           stageOrConditions.push({ pddStatus: { [Op.ne]: null } });
         } else if (key === "PDD_PENDING") {
@@ -277,6 +290,8 @@ const listApplications = async (req, res, next) => {
           });
         } else if (key === "DISBURSED") {
           stageOrConditions.push({ status: "DISBURSED" });
+        } else if (key === "CANCELLED") {
+          stageOrConditions.push({ [Op.or]: [{ status: "CANCELLED" }, { disbursementStatus: "CANCELLED" }] });
         } else if (key === "REJECTED") {
           stageOrConditions.push({ status: { [Op.in]: ["REJECTED", "CANCELLED"] } });
         } else {
@@ -425,6 +440,10 @@ const listApplications = async (req, res, next) => {
         workflowStage = "REJECTED";
         stageDisplay = "Rejected";
         disbursementReadiness = "LOCKED";
+      } else if (plain.status === "DISBURSEMENT") {
+        workflowStage = "DISBURSEMENT";
+        stageDisplay = "Disbursement";
+        disbursementReadiness = (!isPddResolved || !isOtcResolved) ? "PENDING_PDD_OTC" : "READY";
       } else if (isSanctioned) {
         if (!isPddResolved || !isOtcResolved) {
           workflowStage = "PENDING_DISBURSEMENT";
@@ -493,19 +512,29 @@ const listApplications = async (req, res, next) => {
         SUBMITTED_TO_BANK: 0,
         QUERY_RAISED: 0,
         SANCTIONED: 0,
+        DISBURSEMENT: 0,
         DISBURSED: 0,
         REJECTED: 0,
+        CANCELLED: 0,
       },
     };
 
     allApps.forEach((app) => {
       const s = (app.status || "DOCS_PENDING").toUpperCase();
+      const disbStatus = (app.disbursementStatus || "").toUpperCase();
       const applied = parseFloat(app.appliedAmount || 0);
       const sanctioned = parseFloat(app.sanctionedAmount || 0);
-      const disbursed = parseFloat(app.disbursedAmount || 0) || (s === "DISBURSED" ? (sanctioned || applied) : 0);
+
+      const isCancelled = s === "CANCELLED" || disbStatus === "CANCELLED" || s === "REJECTED";
+      const isFinalDisbursed = (s === "DISBURSED" || disbStatus === "COMPLETED") && !isCancelled;
+      const isSanctioned = (s === "SANCTIONED" || s === "DISBURSEMENT" || isFinalDisbursed) && !isCancelled;
+
+      const disbursed = isFinalDisbursed ? (parseFloat(app.disbursedAmount || 0) || sanctioned || applied) : 0;
 
       summary.totalAppliedAmount += applied;
-      summary.totalSanctionedAmount += (sanctioned || (s === "SANCTIONED" ? applied : 0));
+      if (isSanctioned) {
+        summary.totalSanctionedAmount += (sanctioned || (s === "SANCTIONED" ? applied : 0));
+      }
       summary.totalDisbursedAmount += disbursed;
 
       if (summary.stageCounts[s] !== undefined) {
@@ -516,11 +545,11 @@ const listApplications = async (req, res, next) => {
         summary.stageCounts.SUBMITTED_TO_BANK++;
       }
 
-      if (s === "DISBURSED" || s === "CLOSED") {
+      if (isFinalDisbursed || s === "CLOSED") {
         summary.disbursedCount++;
-      } else if (s === "SANCTIONED" || s === "APPROVED") {
+      } else if (s === "SANCTIONED" || s === "APPROVED" || s === "DISBURSEMENT") {
         summary.sanctionedCount++;
-      } else if (s === "REJECTED" || s === "CANCELLED") {
+      } else if (isCancelled) {
         summary.rejectedCount++;
       } else {
         summary.pendingCount++;
@@ -567,23 +596,31 @@ const getBankerStats = async (req, res, next) => {
 
     applications.forEach((app) => {
       const s = (app.status || "").toUpperCase();
+      const disbStatus = (app.disbursementStatus || "").toUpperCase();
       const applied = parseFloat(app.appliedAmount) || 0;
       const sanctioned = parseFloat(app.sanctionedAmount) || 0;
-      const disbursed = parseFloat(app.disbursedAmount) || (s.includes("DISBURSE") ? (sanctioned || applied) : 0);
+
+      const isCancelled = s.includes("CANCEL") || disbStatus === "CANCELLED" || s.includes("REJECT");
+      const isFinalDisbursed = (s === "DISBURSED" || disbStatus === "COMPLETED") && !isCancelled;
+      const isSanctioned = (s.includes("SANCTION") || s === "DISBURSEMENT" || isFinalDisbursed) && !isCancelled;
+
+      const disbursed = isFinalDisbursed ? (parseFloat(app.disbursedAmount) || (sanctioned || applied)) : 0;
 
       stats.totalAppliedAmount += applied;
-      stats.totalSanctionedAmount += (sanctioned || (s.includes("SANCTION") ? applied : 0));
+      if (isSanctioned) {
+        stats.totalSanctionedAmount += (sanctioned || applied);
+      }
       stats.totalDisbursedAmount += disbursed;
 
       if (s.includes("DOCS_PENDING") || s.includes("DOCUMENT PENDING")) {
         stats.docsPending++;
       } else if (s.includes("QUERY")) {
         stats.queryRaised++;
-      } else if (s.includes("SANCTION") || s.includes("APPROVED")) {
+      } else if (s === "SANCTIONED" || s.includes("SANCTION") || s.includes("APPROVED")) {
         stats.sanctioned++;
-      } else if (s.includes("DISBURSE")) {
+      } else if (isFinalDisbursed) {
         stats.disbursed++;
-      } else if (s.includes("REJECT")) {
+      } else if (isCancelled) {
         stats.rejected++;
       } else if (s.includes("REVIEW") || s.includes("LOGIN") || s.includes("PROCESS") || s.includes("IN_PROGRESS")) {
         stats.underReview++;
@@ -808,7 +845,10 @@ const updateStatus = async (req, res, next) => {
     if (sanctionedAmount !== undefined && sanctionedAmount !== null && sanctionedAmount !== "") {
       application.sanctionedAmount = parseFloat(sanctionedAmount);
     }
-    if (disbursedAmount !== undefined && disbursedAmount !== null && disbursedAmount !== "") {
+    if (status === "CANCELLED" || status === "REJECTED") {
+      application.disbursementStatus = "CANCELLED";
+      application.disbursedAmount = 0;
+    } else if (disbursedAmount !== undefined && disbursedAmount !== null && disbursedAmount !== "") {
       application.disbursedAmount = parseFloat(disbursedAmount);
     } else if (status === "DISBURSED" && (!application.disbursedAmount || application.disbursedAmount === 0)) {
       // Auto-fallback: if marking disbursed without explicit disbursedAmount, use sanctioned or applied amount
@@ -918,14 +958,24 @@ const updateStatus = async (req, res, next) => {
       }
     }
 
-    // If application is marked DISBURSED or has disbursed amount, sync with case payouts
-    if (status === "DISBURSED" || (application.disbursedAmount && parseFloat(application.disbursedAmount) > 0)) {
-      try {
-        const { autoSyncDisbursedCases } = require("./casePayoutController");
-        await autoSyncDisbursedCases(application.companyId);
-      } catch (e) {
-        console.error("[applicationController] autoSync error:", e.message);
+    // Sync with case payouts (creates for DISBURSED, purges for CANCELLED/REJECTED or non-disbursed)
+    try {
+      if (status === "CANCELLED" || status === "REJECTED") {
+        const { CasePayout } = require("../models");
+        await CasePayout.destroy({
+          where: {
+            companyId: application.companyId,
+            [Op.or]: [
+              { applicationId: application.id },
+              ...(application.leadId ? [{ leadId: application.leadId }] : []),
+            ],
+          },
+        });
       }
+      const { autoSyncDisbursedCases } = require("./casePayoutController");
+      await autoSyncDisbursedCases(application.companyId);
+    } catch (e) {
+      console.error("[applicationController] autoSync error:", e.message);
     }
 
     return res.json({
@@ -957,7 +1007,7 @@ const updateStageStatus = async (req, res, next) => {
 
     if (!stageType) {
       await t.rollback();
-      return res.status(400).json({ message: "stageType is required (PD, QUERY, LEGAL, TECHNICAL, PDD, OTC, DISBURSED, STAGE)" });
+      return res.status(400).json({ message: "stageType is required (PD, QUERY, LEGAL, TECHNICAL, SANCTION, DISBURSEMENT, PDD, OTC, DISBURSED, STAGE)" });
     }
     if (!status) {
       await t.rollback();
@@ -980,7 +1030,16 @@ const updateStageStatus = async (req, res, next) => {
     let oldStatus = null;
     let newStatus = statusUpper;
 
-    if (typeUpper === "PD") {
+    if (typeUpper === "LOGIN") {
+      oldStatus = application.loginStatus || "PENDING";
+      application.loginStatus = statusUpper;
+      application.loginRemark = trimmedRemark;
+      application.loginUpdatedAt = now;
+      application.loginUpdatedBy = userId;
+      if (statusUpper === "COMPLETED" && (application.status === "SUBMITTED_TO_BANK" || application.status === "DOCS_PENDING" || application.status === "READY_TO_SEND")) {
+        application.status = "LOGGED_IN";
+      }
+    } else if (typeUpper === "PD") {
       oldStatus = application.pdStatus || "PENDING";
       application.pdStatus = statusUpper;
       application.pdRemark = trimmedRemark;
@@ -1004,6 +1063,24 @@ const updateStageStatus = async (req, res, next) => {
       application.technicalRemark = trimmedRemark;
       application.technicalUpdatedAt = now;
       application.technicalUpdatedBy = userId;
+    } else if (typeUpper === "SANCTION" || typeUpper === "SANCTIONED") {
+      oldStatus = application.sanctionStatus || "PENDING";
+      application.sanctionStatus = statusUpper;
+      application.sanctionRemark = trimmedRemark;
+      application.sanctionUpdatedAt = now;
+      application.sanctionUpdatedBy = userId;
+      if (sanctionedAmount) {
+        application.sanctionedAmount = parseFloat(sanctionedAmount);
+      }
+      if (statusUpper === "SANCTIONED") {
+        application.status = "SANCTIONED";
+        if (!application.sanctionedAmount) application.sanctionedAmount = application.appliedAmount || 0;
+        if (!application.pddStatus) application.pddStatus = "PENDING";
+        if (!application.otcStatus) application.otcStatus = "PENDING";
+      } else if (statusUpper === "REJECTED") {
+        application.status = "REJECTED";
+        application.rejectionReason = rejectionReason || trimmedRemark;
+      }
     } else if (typeUpper === "PDD") {
       oldStatus = application.pddStatus || "PENDING";
       application.pddStatus = statusUpper;
@@ -1016,32 +1093,85 @@ const updateStageStatus = async (req, res, next) => {
       application.otcRemark = trimmedRemark;
       application.otcUpdatedAt = now;
       application.otcUpdatedBy = userId;
-    } else if (typeUpper === "DISBURSED" || statusUpper === "DISBURSED") {
-      // CRITICAL BUSINESS RULE: Both PDD and OTC must be RESOLVED!
-      const pddResolved = (application.pddStatus || "").toUpperCase() === "RESOLVED";
-      const otcResolved = (application.otcStatus || "").toUpperCase() === "RESOLVED";
-
-      if (!pddResolved || !otcResolved) {
-        await t.rollback();
-        const blockers = [];
-        if (!pddResolved) blockers.push("PDD is Pending");
-        if (!otcResolved) blockers.push("OTC is Pending");
-        return res.status(400).json({
-          message: `Cannot disburse! Case is 'Pending for Disbursement' (${blockers.join(", ")}). Both PDD and OTC must be Resolved before Final Disbursement.`,
-          blockers,
-        });
-      }
-
-      oldStatus = application.status;
-      newStatus = "DISBURSED";
-      application.status = "DISBURSED";
-      application.disbursedAt = disbursementDate ? new Date(disbursementDate) : now;
-      application.disbursedBy = userId;
+    } else if (typeUpper === "DISBURSEMENT") {
+      oldStatus = application.disbursementStatus || "PENDING";
+      newStatus = statusUpper;
+      application.disbursementStatus = statusUpper;
       application.disbursedRemark = trimmedRemark;
+      application.disbursedUpdatedAt = now;
+      application.disbursedUpdatedBy = userId;
       if (disbursedAmount) {
         application.disbursedAmount = parseFloat(disbursedAmount);
-      } else if (!application.disbursedAmount) {
-        application.disbursedAmount = application.sanctionedAmount || application.appliedAmount || 0;
+      }
+      if (disbursementDate) {
+        application.disbursedAt = new Date(disbursementDate);
+      }
+      if (statusUpper === "DISBURSED" || statusUpper === "COMPLETED") {
+        application.status = "DISBURSEMENT";
+        if (!application.disbursedAmount) {
+          application.disbursedAmount = application.sanctionedAmount || application.appliedAmount || 0;
+        }
+      }
+    } else if (typeUpper === "DISBURSED" || statusUpper === "DISBURSED") {
+      if (statusUpper === "CANCEL" || statusUpper === "CANCELLED") {
+        oldStatus = application.status;
+        newStatus = "CANCELLED";
+        application.status = "CANCELLED";
+        application.disbursementStatus = "CANCELLED";
+        application.disbursedAmount = 0;
+        application.disbursedRemark = trimmedRemark;
+        application.rejectionReason = rejectionReason || trimmedRemark;
+
+        // Destroy CasePayout immediately
+        try {
+          const { CasePayout } = require("../models");
+          await CasePayout.destroy({
+            where: {
+              companyId: application.companyId,
+              [Op.or]: [
+                { applicationId: application.id },
+                ...(application.leadId ? [{ leadId: application.leadId }] : []),
+              ],
+            },
+            transaction: t,
+          });
+        } catch (e) {
+          console.error("Error removing CasePayout on cancel in updateStageStatus:", e.message);
+        }
+      } else if (statusUpper === "PENDING") {
+        oldStatus = application.disbursementStatus || "PENDING";
+        newStatus = "PENDING";
+        application.disbursementStatus = "PENDING";
+        application.disbursedRemark = trimmedRemark;
+      } else {
+        // COMPLETED / DISBURSED
+        // CRITICAL BUSINESS RULE: Both PDD and OTC must be RESOLVED!
+        const pddResolved = (application.pddStatus || "").toUpperCase() === "RESOLVED";
+        const otcResolved = (application.otcStatus || "").toUpperCase() === "RESOLVED";
+
+        if (!pddResolved || !otcResolved) {
+          await t.rollback();
+          const blockers = [];
+          if (!pddResolved) blockers.push("PDD is Pending");
+          if (!otcResolved) blockers.push("OTC is Pending");
+          return res.status(400).json({
+            message: `Cannot disburse! Case is 'Pending for Disbursement' (${blockers.join(", ")}). Both PDD and OTC must be Resolved before Final Disbursement.`,
+            blockers,
+          });
+        }
+
+        oldStatus = application.status;
+        newStatus = "DISBURSED";
+        application.status = "DISBURSED";
+        application.disbursementStatus = "COMPLETED";
+        application.disbursedAt = disbursementDate ? new Date(disbursementDate) : now;
+        application.disbursedBy = userId;
+        application.disbursedRemark = trimmedRemark;
+        if (disbursedAmount) {
+          application.disbursedAmount = parseFloat(disbursedAmount);
+        } else if (!application.disbursedAmount) {
+          application.disbursedAmount = application.sanctionedAmount || application.appliedAmount || 0;
+        }
       }
     } else {
       // General workflow stage change (DOCS_PENDING, READY_TO_SEND, SUBMITTED_TO_BANK, SANCTIONED, REJECTED)
@@ -1085,7 +1215,7 @@ const updateStageStatus = async (req, res, next) => {
       if (lead) {
         if (newStatus === "DISBURSED") await lead.update({ status: "DISBURSED" }, { transaction: t });
         else if (newStatus === "SANCTIONED") await lead.update({ status: "SANCTIONED" }, { transaction: t });
-        else if (newStatus === "REJECTED") await lead.update({ status: "REJECTED" }, { transaction: t });
+        else if (newStatus === "REJECTED" || newStatus === "CANCELLED") await lead.update({ status: newStatus }, { transaction: t });
       }
     }
 
@@ -1095,7 +1225,7 @@ const updateStageStatus = async (req, res, next) => {
       {
         recordType: "Application",
         recordId: application.id,
-        action: `OPS_${typeUpper}_${newStatus}`,
+        action: newStatus === "DISBURSED" ? "DISBURSED" : "STATUS_CHANGED",
         oldValue: { [typeUpper]: oldStatus },
         newValue: { [typeUpper]: newStatus },
         remarks: `[${typeUpper}] ${oldStatus || "—"} → ${newStatus} | Remark: ${trimmedRemark}`,
@@ -1105,14 +1235,12 @@ const updateStageStatus = async (req, res, next) => {
 
     await t.commit();
 
-    // If application is marked DISBURSED, sync case payouts
-    if (newStatus === "DISBURSED") {
-      try {
-        const { autoSyncDisbursedCases } = require("./casePayoutController");
-        await autoSyncDisbursedCases(application.companyId);
-      } catch (e) {
-        console.error("[applicationController] autoSync error:", e.message);
-      }
+    // Sync case payouts (auto-syncs newly disbursed cases, purges cancelled/non-disbursed)
+    try {
+      const { autoSyncDisbursedCases } = require("./casePayoutController");
+      await autoSyncDisbursedCases(application.companyId);
+    } catch (e) {
+      console.error("[applicationController] autoSync error:", e.message);
     }
 
     return res.json({

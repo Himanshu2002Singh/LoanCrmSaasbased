@@ -85,7 +85,7 @@ const LeadEditScreen = () => {
         setLead({
           name: data.name || "",
           email: data.email || "",
-          number: data.number || "",
+          number: data.number || data.mobile || data.phone || data.customer?.mobile || "",
           person_id: data.person_id || "",
           owner: data.owner || "",
           status: data.status || "",
@@ -157,6 +157,9 @@ const LeadEditScreen = () => {
     try {
       const payload = {
         ...lead,
+        mobile: lead.number,
+        number: lead.number,
+        phone: lead.number,
         commission_percent:
           lead.commission_percent !== "" && !isNaN(parseFloat(lead.commission_percent))
             ? parseFloat(lead.commission_percent)

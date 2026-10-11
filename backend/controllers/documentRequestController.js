@@ -418,8 +418,18 @@ const publicUploadDocument = async (req, res, next) => {
     const { token } = req.params;
     const { docSlotId, docType } = req.body;
 
-    if (!req.file) {
+    const rawFiles = req.files && req.files.length > 0 ? req.files : (req.file ? [req.file] : []);
+    if (rawFiles.length === 0) {
       return res.status(400).json({ message: "No document file was uploaded" });
+    }
+
+    const maxBytes = 25 * 1024 * 1024;
+    for (const f of rawFiles) {
+      if (f.size > maxBytes) {
+        return res.status(400).json({
+          message: `File "${f.originalname}" exceeds the 25MB maximum size limit.`
+        });
+      }
     }
 
     const request = await LeadDocumentRequest.findOne({
@@ -451,10 +461,6 @@ const publicUploadDocument = async (req, res, next) => {
       return res.status(404).json({ message: "Associated lead record not found" });
     }
 
-    // Correct fileUrl pointing to /uploads/documents/...
-    const fileUrl = `/uploads/documents/${req.file.filename}`;
-    const fileName = req.file.originalname;
-
     // Resolve doc type
     let chosenDocType = docType || "OTHER";
     let slotTitle = "Document";
@@ -469,30 +475,45 @@ const publicUploadDocument = async (req, res, next) => {
       slotTitle = requiredDocs[slotIndex].title || slotTitle;
     }
 
-    // 1. Create or replace Document record
-    const document = await Document.create({
-      companyId: request.companyId,
-      customerId: lead.customerId,
-      leadId: lead.id,
-      docType: chosenDocType,
-      fileUrl,
-      fileName,
-      uploadedBy: null, // Null indicates self-uploaded by customer
-      isCustomerUpload: true,
-      customerRequestId: request.id,
-      verificationStatus: "PENDING",
-    });
+    const createdDocs = [];
+    for (const fileItem of rawFiles) {
+      const fileUrl = `/uploads/documents/${fileItem.filename}`;
+      const fileName = fileItem.originalname;
+
+      // 1. Create Document record
+      const document = await Document.create({
+        companyId: request.companyId,
+        customerId: lead.customerId,
+        leadId: lead.id,
+        docType: chosenDocType,
+        fileUrl,
+        fileName,
+        uploadedBy: null, // Null indicates self-uploaded by customer
+        isCustomerUpload: true,
+        customerRequestId: request.id,
+        verificationStatus: "PENDING",
+      });
+
+      createdDocs.push(document);
+    }
+
+    const primaryDoc = createdDocs[0];
 
     // 2. Update the slot in requiredDocs JSON
     if (slotIndex !== -1) {
       requiredDocs[slotIndex] = {
         ...requiredDocs[slotIndex],
         status: "UPLOADED",
-        documentId: document.id,
-        fileName: document.fileName,
-        fileUrl: document.fileUrl,
-        fileSize: req.file.size,
+        documentId: primaryDoc.id,
+        fileName: primaryDoc.fileName,
+        fileUrl: primaryDoc.fileUrl,
+        fileSize: rawFiles[0].size,
         uploadedAt: new Date().toISOString(),
+        allUploadedFiles: createdDocs.map((d) => ({
+          documentId: d.id,
+          fileName: d.fileName,
+          fileUrl: d.fileUrl,
+        })),
       };
     } else {
       // If slot wasn't predefined, add it to requiredDocs
@@ -503,11 +524,16 @@ const publicUploadDocument = async (req, res, next) => {
         category: "CUSTOMER_UPLOAD",
         isRequired: false,
         status: "UPLOADED",
-        documentId: document.id,
-        fileName: document.fileName,
-        fileUrl: document.fileUrl,
-        fileSize: req.file.size,
+        documentId: primaryDoc.id,
+        fileName: primaryDoc.fileName,
+        fileUrl: primaryDoc.fileUrl,
+        fileSize: rawFiles[0].size,
         uploadedAt: new Date().toISOString(),
+        allUploadedFiles: createdDocs.map((d) => ({
+          documentId: d.id,
+          fileName: d.fileName,
+          fileUrl: d.fileUrl,
+        })),
       });
     }
 

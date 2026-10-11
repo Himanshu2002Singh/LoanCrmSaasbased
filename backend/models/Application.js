@@ -233,6 +233,57 @@ const Application = sequelize.define(
       allowNull: true,
       field: "otc_updated_by",
     },
+    loginStatus: {
+      type: DataTypes.STRING(50),
+      allowNull: true,
+      defaultValue: "PENDING",
+      field: "login_status",
+      comment: "PENDING, COMPLETED",
+    },
+    loginRemark: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      field: "login_remark",
+    },
+    loginUpdatedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: "login_updated_at",
+    },
+    loginUpdatedBy: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      field: "login_updated_by",
+    },
+    sanctionStatus: {
+      type: DataTypes.STRING(50),
+      allowNull: true,
+      defaultValue: null,
+      field: "sanction_status",
+      comment: "PENDING, SANCTIONED, REJECTED",
+    },
+    sanctionRemark: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      field: "sanction_remark",
+    },
+    sanctionUpdatedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: "sanction_updated_at",
+    },
+    sanctionUpdatedBy: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      field: "sanction_updated_by",
+    },
+    disbursementStatus: {
+      type: DataTypes.STRING(50),
+      allowNull: true,
+      defaultValue: "PENDING",
+      field: "disbursement_status",
+      comment: "PENDING, COMPLETED, CANCELLED",
+    },
     disbursedAt: {
       type: DataTypes.DATE,
       allowNull: true,

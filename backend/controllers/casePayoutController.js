@@ -17,9 +17,6 @@ const {
 // Statuses considered as completed/disbursed
 const COMPLETED_STATUSES = [
   "DISBURSED",
-  "APPROVED",
-  "COMPLETED",
-  "SANCTIONED",
   "CLOSED",
 ];
 
@@ -54,11 +51,61 @@ const logActivity = async (req, { recordType, recordId, action, previousValue, n
 };
 
 /**
- * Auto-syncs any newly disbursed leads into case_payouts table
+ * Auto-syncs any newly disbursed leads into case_payouts table,
+ * and purges any payouts whose lead/application is CANCELLED, REJECTED,
+ * or not completed through Final Disbursement.
  */
 const autoSyncDisbursedCases = async (companyId) => {
   try {
-    // 1. Find all leads for company that are completed/disbursed or have positive sanctioned amount
+    // 1. Cleanup / Purge step: remove any CasePayout records whose linked Lead or Application
+    // is CANCELLED, REJECTED, or has NOT completed Final Disbursement.
+    const existingPayouts = await CasePayout.findAll({
+      where: { companyId },
+      include: [
+        {
+          model: Lead,
+          as: "lead",
+          include: [
+            {
+              model: Application,
+              as: "applications",
+            },
+          ],
+        },
+        {
+          model: Application,
+          as: "application",
+        },
+      ],
+    });
+
+    for (const payout of existingPayouts) {
+      const lead = payout.lead;
+      const app = payout.application || (lead?.applications || [])[0];
+
+      const leadStatus = (lead?.status || "").toUpperCase();
+      const appStatus = (app?.status || "").toUpperCase();
+      const disbStatus = (app?.disbursementStatus || "").toUpperCase();
+
+      const isCancelledOrRejected =
+        leadStatus === "CANCELLED" ||
+        leadStatus === "REJECTED" ||
+        appStatus === "CANCELLED" ||
+        appStatus === "REJECTED" ||
+        disbStatus === "CANCELLED";
+
+      // A case has completed Final Disbursement ONLY if app.status === "DISBURSED"
+      // (or lead.status === "DISBURSED" if standalone lead without app)
+      const isFinalDisbursed =
+        !isCancelledOrRejected &&
+        (app ? appStatus === "DISBURSED" : leadStatus === "DISBURSED");
+
+      if (isCancelledOrRejected || !isFinalDisbursed) {
+        await CasePayout.destroy({ where: { id: payout.id } });
+      }
+    }
+
+    // 2. Find all leads for company that are completed/disbursed
     const leads = await Lead.findAll({
       where: { companyId },
       include: [
@@ -72,7 +119,7 @@ const autoSyncDisbursedCases = async (companyId) => {
       order: [["createdAt", "DESC"]],
     });
 
-    // 2. Fetch existing party configs for default codes and commissions
+    // 3. Fetch existing party configs for default codes and commissions
     const sourceConfigs = await MasterConfig.findAll({
       where: { companyId, configType: "LEAD_SOURCE" },
     });
@@ -84,27 +131,40 @@ const autoSyncDisbursedCases = async (companyId) => {
     });
 
     for (const lead of leads) {
-      const apps = lead.applications || [];
-      const primaryApp =
-        apps.find((a) =>
-          parseFloat(a.disbursedAmount || 0) > 0 ||
-          parseFloat(a.sanctionedAmount || 0) > 0 ||
-          COMPLETED_STATUSES.includes((a.status || "").toUpperCase())
-        ) || apps[0];
       const leadStatusUpper = (lead.status || "").toUpperCase();
+      const apps = lead.applications || [];
+
+      // Find the application that has completed Final Disbursement
+      const primaryApp =
+        apps.find((a) => {
+          const aStat = (a.status || "").toUpperCase();
+          return aStat === "DISBURSED";
+        }) || apps[0];
+
       const appStatusUpper = (primaryApp?.status || "").toUpperCase();
+      const appDisbStatusUpper = (primaryApp?.disbursementStatus || "").toUpperCase();
 
-      const isDisbursed =
-        COMPLETED_STATUSES.includes(leadStatusUpper) ||
-        COMPLETED_STATUSES.includes(appStatusUpper) ||
-        leadStatusUpper.includes("DISBURSE") ||
-        leadStatusUpper.includes("SANCTION") ||
-        appStatusUpper.includes("DISBURSE") ||
-        appStatusUpper.includes("SANCTION") ||
-        parseFloat(primaryApp?.sanctionedAmount || 0) > 0 ||
-        parseFloat(primaryApp?.disbursedAmount || 0) > 0;
+      const isCancelledOrRejected =
+        leadStatusUpper === "CANCELLED" ||
+        leadStatusUpper === "REJECTED" ||
+        appStatusUpper === "CANCELLED" ||
+        appStatusUpper === "REJECTED" ||
+        appDisbStatusUpper === "CANCELLED";
 
-      if (!isDisbursed) continue;
+      if (isCancelledOrRejected) {
+        await CasePayout.destroy({ where: { companyId, leadId: lead.id } });
+        continue;
+      }
+
+      // Check strictly for final disbursement: app must be DISBURSED
+      const isFinalDisbursed =
+        !isCancelledOrRejected &&
+        (primaryApp ? appStatusUpper === "DISBURSED" : leadStatusUpper === "DISBURSED");
+
+      if (!isFinalDisbursed) {
+        await CasePayout.destroy({ where: { companyId, leadId: lead.id } });
+        continue;
+      }
 
       // Check if CasePayout exists
       let payout = await CasePayout.findOne({
@@ -119,6 +179,11 @@ const autoSyncDisbursedCases = async (companyId) => {
           : parseFloat(primaryApp?.appliedAmount || 0) > 0
           ? parseFloat(primaryApp.appliedAmount)
           : parseFloat(lead.requiredAmount || 0);
+
+      if (loanAmount <= 0) {
+        await CasePayout.destroy({ where: { companyId, leadId: lead.id } });
+        continue;
+      }
 
       const partyName = lead.leadSource || "Direct";
       const sourceConfig = configMap.get(partyName.toLowerCase());

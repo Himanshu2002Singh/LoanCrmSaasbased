@@ -94,14 +94,17 @@ const PIPELINE_STAGES = [
   { key: "DOCS_PENDING", label: "1. Docs Pending", color: "#b45309", bg: "#fef3c7", border: "#fde68a" },
   { key: "READY_TO_SEND", label: "2. Ready to Send", color: "#4f46e5", bg: "#eef2ff", border: "#c7d2fe" },
   { key: "SUBMITTED_TO_BANK", label: "3. Submitted to Bank", color: "#0369a1", bg: "#e0f2fe", border: "#bae6fd" },
-  { key: "PD", label: "4. PD Status", color: "#6366f1", bg: "#eef2ff", border: "#c7d2fe" },
-  { key: "QUERY", label: "5. Banker Query", color: "#e11d48", bg: "#ffe4e6", border: "#fecdd3" },
-  { key: "LEGAL", label: "6. Legal", color: "#7c3aed", bg: "#f5f3ff", border: "#ddd6fe" },
-  { key: "TECHNICAL", label: "7. Technical", color: "#0891b2", bg: "#ecfeff", border: "#a5f3fc" },
-  { key: "SANCTIONED", label: "8. Sanctioned", color: "#15803d", bg: "#f0fdf4", border: "#bbf7d0" },
-  { key: "PDD", label: "9. PDD", color: "#d97706", bg: "#fffbeb", border: "#fde68a" },
-  { key: "OTC", label: "10. OTC", color: "#ea580c", bg: "#fff7ed", border: "#ffedd5" },
-  { key: "DISBURSED", label: "11. Final Disbursed", color: "#047857", bg: "#ecfdf5", border: "#a7f3d0" },
+  { key: "LOGIN", label: "4. Bank Login", color: "#0284c7", bg: "#f0f9ff", border: "#bae6fd" },
+  { key: "PD", label: "5. PD Status", color: "#6366f1", bg: "#eef2ff", border: "#c7d2fe" },
+  { key: "QUERY", label: "6. Banker Query", color: "#e11d48", bg: "#ffe4e6", border: "#fecdd3" },
+  { key: "LEGAL", label: "7. Legal", color: "#7c3aed", bg: "#f5f3ff", border: "#ddd6fe" },
+  { key: "TECHNICAL", label: "8. Technical", color: "#0891b2", bg: "#ecfeff", border: "#a5f3fc" },
+  { key: "SANCTIONED", label: "9. Sanctioned", color: "#15803d", bg: "#f0fdf4", border: "#bbf7d0" },
+  { key: "DISBURSEMENT", label: "10. Disbursement", color: "#0d9488", bg: "#f0fdfa", border: "#99f6e4" },
+  { key: "PDD", label: "11. PDD", color: "#d97706", bg: "#fffbeb", border: "#fde68a" },
+  { key: "OTC", label: "12. OTC", color: "#ea580c", bg: "#fff7ed", border: "#ffedd5" },
+  { key: "DISBURSED", label: "13. Final Disbursed", color: "#047857", bg: "#ecfdf5", border: "#a7f3d0" },
+  { key: "CANCELLED", label: "Cancelled", color: "#475569", bg: "#f1f5f9", border: "#cbd5e1" },
   { key: "REJECTED", label: "Rejected", color: "#b91c1c", bg: "#fef2f2", border: "#fecaca" },
 ];
 
@@ -330,10 +333,24 @@ const renderWorkflowStageBadge = (app) => {
       </span>
     );
   }
-  if (s === "REJECTED" || s === "CANCELLED") {
+  if (s === "CANCELLED" || app.disbursementStatus === "CANCELLED") {
+    return (
+      <span className="cc-ops-status-tag rejected" title={app.disbursedRemark || app.rejectionReason || "Disbursement Cancelled"}>
+        <XCircle size={13} /> Cancelled
+      </span>
+    );
+  }
+  if (s === "REJECTED") {
     return (
       <span className="cc-ops-status-tag rejected" title={app.rejectionReason || "Application Rejected"}>
         <XCircle size={13} /> Rejected
+      </span>
+    );
+  }
+  if (s === "DISBURSEMENT") {
+    return (
+      <span className="cc-ops-status-tag" style={{ background: "#f0fdfa", color: "#0d9488", border: "1px solid #99f6e4" }} title="Disbursed - Awaiting PDD/OTC Tracking">
+        <CheckCircle2 size={13} /> Disbursement
       </span>
     );
   }
@@ -365,6 +382,13 @@ const renderWorkflowStageBadge = (app) => {
       </span>
     );
   }
+  if (s === "LOGIN" || s === "LOGGED_IN" || (app.loginStatus || "").toUpperCase() === "COMPLETED") {
+    return (
+      <span className="cc-ops-status-tag info-blue" style={{ background: "#f0f9ff", color: "#0284c7", borderColor: "#bae6fd" }} title="File Logged in Bank Portal">
+        <CheckCircle2 size={12} /> Bank Login
+      </span>
+    );
+  }
   if (s === "SUBMITTED_TO_BANK" || s === "UNDER_REVIEW") {
     return (
       <span className="cc-ops-status-tag info-blue" title="Submitted to Bank Partner">
@@ -372,9 +396,9 @@ const renderWorkflowStageBadge = (app) => {
       </span>
     );
   }
-  if (s === "READY_TO_SEND" || s === "LOGGED_IN") {
+  if (s === "READY_TO_SEND") {
     return (
-      <span className="cc-ops-status-tag ready-purple" title="Ready to Send / Logged In">
+      <span className="cc-ops-status-tag ready-purple" title="Ready to Send">
         <FileCheck size={12} /> Ready to Send
       </span>
     );
@@ -392,6 +416,21 @@ const renderStagePendingNotice = (app) => {
   const isOtcPending = (app.otcStatus || "PENDING").toUpperCase() === "PENDING";
 
   if (s === "DISBURSED") return null;
+
+  if (s === "DISBURSEMENT") {
+    if (isPddPending || isOtcPending) {
+      return (
+        <div className="cc-stage-stuck-notice warning">
+          ⚠️ Loan Disbursed! Case is currently pending for PDD &amp; OTC document resolution.
+        </div>
+      );
+    }
+    return (
+      <div className="cc-stage-stuck-notice success">
+        ✓ PDD &amp; OTC Resolved. Case is eligible for Final Disbursement.
+      </div>
+    );
+  }
 
   if (s === "SANCTIONED" || s === "APPROVED") {
     if (isPddPending && isOtcPending) {
@@ -492,6 +531,12 @@ export default function OperationsRedesign() {
   const [selectedStages, setSelectedStages] = useState([]);
 
   // Sub-status Popups State
+  // 0. Bank Login Modal
+  const [loginModalApp, setLoginModalApp] = useState(null);
+  const [loginStatusInput, setLoginStatusInput] = useState("PENDING");
+  const [loginRemarkInput, setLoginRemarkInput] = useState("");
+  const [loginSubmitting, setLoginSubmitting] = useState(false);
+
   // 0a. PD Status Modal
   const [pdModalApp, setPdModalApp] = useState(null);
   const [pdStatusInput, setPdStatusInput] = useState("PENDING");
@@ -515,6 +560,21 @@ export default function OperationsRedesign() {
   const [technicalStatusInput, setTechnicalStatusInput] = useState("INITIATED");
   const [technicalRemarkInput, setTechnicalRemarkInput] = useState("");
   const [technicalSubmitting, setTechnicalSubmitting] = useState(false);
+
+  // 2b. Bank Sanction Modal
+  const [sanctionModalApp, setSanctionModalApp] = useState(null);
+  const [sanctionStatusInput, setSanctionStatusInput] = useState("PENDING");
+  const [sanctionAmountInput, setSanctionAmountInput] = useState("");
+  const [sanctionRemarkInput, setSanctionRemarkInput] = useState("");
+  const [sanctionSubmitting, setSanctionSubmitting] = useState(false);
+
+  // 2b. Intermediate Disbursement Stage Modal
+  const [disbursementStageModalApp, setDisbursementStageModalApp] = useState(null);
+  const [disbursementStageStatusInput, setDisbursementStageStatusInput] = useState("DISBURSED");
+  const [disbursementStageAmountInput, setDisbursementStageAmountInput] = useState("");
+  const [disbursementStageDateInput, setDisbursementStageDateInput] = useState("");
+  const [disbursementStageRemarkInput, setDisbursementStageRemarkInput] = useState("");
+  const [disbursementStageSubmitting, setDisbursementStageSubmitting] = useState(false);
 
   // 3. PDD Modal
   const [pddModalApp, setPddModalApp] = useState(null);
@@ -565,6 +625,7 @@ export default function OperationsRedesign() {
 
   // Disbursal Confirmation Modal State
   const [disburseModalApp, setDisburseModalApp] = useState(null);
+  const [disburseStatusInput, setDisburseStatusInput] = useState("COMPLETED"); // "COMPLETED" | "PENDING" | "CANCEL"
   const [disburseAmountInput, setDisburseAmountInput] = useState("");
   const [disburseRemarksInput, setDisburseRemarksInput] = useState("");
   const [disburseSubmitting, setDisburseSubmitting] = useState(false);
@@ -597,6 +658,7 @@ export default function OperationsRedesign() {
   const [masterDocTypes, setMasterDocTypes] = useState([]);
   const [uploadDocType, setUploadDocType] = useState("PAN Card");
   const [uploadFile, setUploadFile] = useState(null);
+  const [uploadFiles, setUploadFiles] = useState([]);
   const [uploadingDoc, setUploadingDoc] = useState(false);
   const [opsDocReqLead, setOpsDocReqLead] = useState(null);
 
@@ -757,24 +819,28 @@ export default function OperationsRedesign() {
   // Status / Workflow Stage Options
   const stageOptions = useMemo(() => [
     { value: "DOCS_PENDING", label: "1. Documents Pending" },
-    { value: "READY_TO_SEND", label: "2. Ready to Send / Logged In" },
+    { value: "READY_TO_SEND", label: "2. Ready to Send" },
     { value: "SUBMITTED_TO_BANK", label: "3. Submitted to Bank" },
-    { value: "PD_PENDING", label: "4. PD - Pending" },
-    { value: "PD_COMPLETED", label: "4. PD - Completed" },
-    { value: "QUERY_PENDING", label: "5. Query - Pending" },
-    { value: "QUERY_COMPLETED", label: "5. Query - Completed" },
-    { value: "LEGAL_INITIATED", label: "6. Legal - Initiated" },
-    { value: "LEGAL_RESOLVED", label: "6. Legal - Resolved" },
-    { value: "TECHNICAL_INITIATED", label: "7. Technical - Initiated" },
-    { value: "TECHNICAL_RESOLVED", label: "7. Technical - Resolved" },
-    { value: "SANCTIONED", label: "8. Sanctioned" },
-    { value: "PDD_PENDING", label: "9. PDD - Pending" },
-    { value: "PDD_RESOLVED", label: "9. PDD - Resolved" },
-    { value: "OTC_PENDING", label: "10. OTC - Pending" },
-    { value: "OTC_RESOLVED", label: "10. OTC - Resolved" },
-    { value: "PENDING_DISBURSEMENT", label: "⏳ Pending for Disbursement" },
-    { value: "DISBURSED", label: "11. Final Disbursed" },
-    { value: "REJECTED", label: "❌ Rejected" },
+    { value: "LOGIN_PENDING", label: "4. Bank Login - Pending" },
+    { value: "LOGIN_COMPLETED", label: "4. Bank Login - Completed" },
+    { value: "PD_PENDING", label: "5. PD - Pending" },
+    { value: "PD_COMPLETED", label: "5. PD - Completed" },
+    { value: "QUERY_PENDING", label: "6. Query - Pending" },
+    { value: "QUERY_COMPLETED", label: "6. Query - Completed" },
+    { value: "LEGAL_INITIATED", label: "7. Legal - Initiated" },
+    { value: "LEGAL_RESOLVED", label: "7. Legal - Resolved" },
+    { value: "TECHNICAL_INITIATED", label: "8. Technical - Initiated" },
+    { value: "TECHNICAL_RESOLVED", label: "8. Technical - Resolved" },
+    { value: "SANCTIONED", label: "9. Sanctioned" },
+    { value: "DISBURSEMENT", label: "10. Disbursement" },
+    { value: "PDD_PENDING", label: "11. PDD - Pending" },
+    { value: "PDD_RESOLVED", label: "11. PDD - Resolved" },
+    { value: "OTC_PENDING", label: "12. OTC - Pending" },
+    { value: "OTC_RESOLVED", label: "12. OTC - Resolved" },
+    { value: "PENDING_DISBURSEMENT", label: "⏳ Pending for Final Disbursement" },
+    { value: "DISBURSED", label: "13. Final Disbursed" },
+    { value: "CANCELLED", label: "❌ Cancelled" },
+    { value: "REJECTED", label: "🚫 Rejected" },
   ], []);
 
   // Fetch Open Banker Queries
@@ -1375,14 +1441,22 @@ export default function OperationsRedesign() {
   // Upload Missing Document on Behalf of Customer
   const handleUploadDocumentSubmit = async (e) => {
     e.preventDefault();
-    if (!uploadFile) {
-      toast.warning("Please choose a file to upload");
+    const filesToUpload = uploadFiles && uploadFiles.length > 0 ? uploadFiles : (uploadFile ? [uploadFile] : []);
+    if (filesToUpload.length === 0) {
+      toast.warning("Please choose at least one file to upload");
       return;
+    }
+    const MAX_SIZE = 25 * 1024 * 1024;
+    for (const f of filesToUpload) {
+      if (f.size > MAX_SIZE) {
+        toast.error(`File "${f.name}" exceeds the 25MB maximum limit.`);
+        return;
+      }
     }
     setUploadingDoc(true);
     try {
       const formData = new FormData();
-      formData.append("file", uploadFile);
+      filesToUpload.forEach((f) => formData.append("files", f));
       formData.append("docType", uploadDocType);
       if (verificationApp.customerId) formData.append("customerId", verificationApp.customerId);
       if (verificationApp.leadId) formData.append("leadId", verificationApp.leadId);
@@ -1391,8 +1465,9 @@ export default function OperationsRedesign() {
       await axios.post(`${API_URL}/documents`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-      toast.success(`${uploadDocType} uploaded successfully!`);
+      toast.success(`${filesToUpload.length} document(s) uploaded successfully!`);
       setUploadFile(null);
+      setUploadFiles([]);
 
       // Refresh
       const res = await axios.get(`${API_URL}/applications/${verificationApp.id}`);
@@ -1409,15 +1484,108 @@ export default function OperationsRedesign() {
   // Disburse Loan Modal Handlers
   const initiateDisburseModal = (app) => {
     setDisburseModalApp(app);
+    setDisburseStatusInput(
+      app.status === "CANCELLED" || app.disbursementStatus === "CANCELLED"
+        ? "CANCEL"
+        : app.status === "DISBURSED"
+        ? "COMPLETED"
+        : "COMPLETED"
+    );
     const defaultAmt = app.disbursedAmount || app.sanctionedAmount || app.appliedAmount || "";
     setDisburseAmountInput(defaultAmt ? String(defaultAmt) : "");
-    setDisburseRemarksInput("");
+    setDisburseRemarksInput(app.disbursedRemark || "");
   };
 
   const handleConfirmDisburse = async (e) => {
     if (e) e.preventDefault();
     if (!disburseModalApp) return;
 
+    if (disburseStatusInput === "CANCEL") {
+      if (!disburseRemarksInput.trim()) {
+        toast.error("Please enter a remark / cancellation reason for cancelling the disbursement");
+        return;
+      }
+      setDisburseSubmitting(true);
+      try {
+        const res = await axios.put(`${API_URL}/applications/${disburseModalApp.id}/stage-status`, {
+          stageType: "DISBURSED",
+          status: "CANCELLED",
+          remark: disburseRemarksInput.trim(),
+        });
+        toast.success(`Disbursement CANCELLED for Application #${disburseModalApp.applicationNumber}`);
+        const updated = res.data?.application;
+        if (updated) {
+          setApplications((prev) =>
+            prev.map((a) =>
+              a.id === updated.id
+                ? {
+                    ...a,
+                    ...updated,
+                    status: "CANCELLED",
+                    disbursementStatus: "CANCELLED",
+                    disbursedRemark: disburseRemarksInput.trim(),
+                  }
+                : a
+            )
+          );
+        }
+        if (verificationApp && verificationApp.id === disburseModalApp.id) {
+          setVerificationApp((prev) => ({
+            ...prev,
+            status: "CANCELLED",
+            disbursementStatus: "CANCELLED",
+            disbursedRemark: disburseRemarksInput.trim(),
+          }));
+        }
+        setDisburseModalApp(null);
+        fetchApplications(appCurrentPage);
+      } catch (error) {
+        console.error("Cancel disburse error:", error);
+        toast.error(error.response?.data?.message || "Failed to cancel disbursement");
+      } finally {
+        setDisburseSubmitting(false);
+      }
+      return;
+    }
+
+    if (disburseStatusInput === "PENDING") {
+      setDisburseSubmitting(true);
+      try {
+        const res = await axios.put(`${API_URL}/applications/${disburseModalApp.id}/stage-status`, {
+          stageType: "DISBURSED",
+          status: "PENDING",
+          remark: disburseRemarksInput.trim() || undefined,
+        });
+        toast.success(`Application #${disburseModalApp.applicationNumber} disbursement marked as PENDING.`);
+        const updated = res.data?.application;
+        if (updated) {
+          setApplications((prev) =>
+            prev.map((a) =>
+              a.id === updated.id
+                ? { ...a, ...updated, disbursementStatus: "PENDING", disbursedRemark: disburseRemarksInput.trim() }
+                : a
+            )
+          );
+        }
+        if (verificationApp && verificationApp.id === disburseModalApp.id) {
+          setVerificationApp((prev) => ({
+            ...prev,
+            disbursementStatus: "PENDING",
+            disbursedRemark: disburseRemarksInput.trim(),
+          }));
+        }
+        setDisburseModalApp(null);
+        fetchApplications(appCurrentPage);
+      } catch (error) {
+        console.error("Disburse pending error:", error);
+        toast.error(error.response?.data?.message || "Failed to update disbursement status");
+      } finally {
+        setDisburseSubmitting(false);
+      }
+      return;
+    }
+
+    // Default: COMPLETED / DISBURSED
     // BUSINESS RULE ENFORCEMENT: Both PDD and OTC must be RESOLVED!
     const isPddResolved = (disburseModalApp.pddStatus || "").toUpperCase() === "RESOLVED";
     const isOtcResolved = (disburseModalApp.otcStatus || "").toUpperCase() === "RESOLVED";
@@ -1448,7 +1616,7 @@ export default function OperationsRedesign() {
       toast.success(`Application #${disburseModalApp.applicationNumber} marked as DISBURSED! Payout & Lead synced.`);
       const updated = res.data?.application;
       if (updated) {
-        setApplications((prev) => prev.map((a) => (a.id === updated.id ? { ...a, ...updated, status: "DISBURSED" } : a)));
+        setApplications((prev) => prev.map((a) => (a.id === updated.id ? { ...a, ...updated, status: "DISBURSED", disbursementStatus: "COMPLETED" } : a)));
       }
       setDisburseModalApp(null);
       fetchApplications(appCurrentPage);
@@ -1457,6 +1625,7 @@ export default function OperationsRedesign() {
         setVerificationApp((prev) => ({
           ...prev,
           status: "DISBURSED",
+          disbursementStatus: "COMPLETED",
           disbursedAmount: amt,
         }));
       }
@@ -1717,6 +1886,205 @@ export default function OperationsRedesign() {
     }
   };
 
+  // 4b. Bank Login Modal Handlers
+  const openLoginModal = (app) => {
+    setLoginModalApp(app);
+    setLoginStatusInput(
+      (app.loginStatus || "").toUpperCase() === "COMPLETED" || app.status === "LOGGED_IN"
+        ? "COMPLETED"
+        : "PENDING"
+    );
+    setLoginRemarkInput(app.loginRemark || "");
+  };
+
+  const handleLoginSubmit = async (e) => {
+    if (e) e.preventDefault();
+    if (!loginModalApp) return;
+    setLoginSubmitting(true);
+    try {
+      const res = await axios.put(`${API_URL}/applications/${loginModalApp.id}/stage-status`, {
+        stageType: "LOGIN",
+        status: loginStatusInput,
+        remark: loginRemarkInput.trim() || undefined,
+      });
+      toast.success(`Bank Login status updated to ${loginStatusInput}!`);
+      const updated = res.data?.application;
+      if (updated) {
+        setApplications((prev) =>
+          prev.map((a) =>
+            a.id === updated.id
+              ? {
+                  ...a,
+                  ...updated,
+                  loginStatus: loginStatusInput,
+                  loginRemark: loginRemarkInput.trim(),
+                  loginUpdatedAt: new Date(),
+                  status: loginStatusInput === "COMPLETED" && (a.status === "SUBMITTED_TO_BANK" || a.status === "DOCS_PENDING" || a.status === "READY_TO_SEND") ? "LOGGED_IN" : a.status,
+                }
+              : a
+          )
+        );
+      }
+      if (verificationApp && verificationApp.id === loginModalApp.id) {
+        setVerificationApp((prev) => ({
+          ...prev,
+          ...(updated || {}),
+          loginStatus: loginStatusInput,
+          loginRemark: loginRemarkInput.trim(),
+          loginUpdatedAt: new Date(),
+          status: loginStatusInput === "COMPLETED" && (prev.status === "SUBMITTED_TO_BANK" || prev.status === "DOCS_PENDING" || prev.status === "READY_TO_SEND") ? "LOGGED_IN" : prev.status,
+        }));
+      }
+      setLoginModalApp(null);
+      fetchApplications(appCurrentPage);
+    } catch (err) {
+      console.error(err);
+      toast.error(err.response?.data?.message || "Failed to update Login status");
+    } finally {
+      setLoginSubmitting(false);
+    }
+  };
+
+  // 4c. Bank Sanction Modal Handlers
+  const openSanctionModal = (app) => {
+    setSanctionModalApp(app);
+    setSanctionStatusInput(
+      (app.sanctionStatus || "").toUpperCase() === "SANCTIONED" || app.status === "SANCTIONED"
+        ? "SANCTIONED"
+        : (app.sanctionStatus || "").toUpperCase() === "REJECTED"
+        ? "REJECTED"
+        : "PENDING"
+    );
+    setSanctionAmountInput(
+      app.sanctionedAmount ? String(app.sanctionedAmount) : app.appliedAmount ? String(app.appliedAmount) : ""
+    );
+    setSanctionRemarkInput(app.sanctionRemark || "");
+  };
+
+  const handleSanctionSubmit = async (e) => {
+    if (e) e.preventDefault();
+    if (!sanctionModalApp) return;
+    setSanctionSubmitting(true);
+    try {
+      const amt = sanctionAmountInput ? parseFloat(sanctionAmountInput) : undefined;
+      const res = await axios.put(`${API_URL}/applications/${sanctionModalApp.id}/stage-status`, {
+        stageType: "SANCTION",
+        status: sanctionStatusInput,
+        sanctionedAmount: amt,
+        remark: sanctionRemarkInput.trim() || undefined,
+      });
+      toast.success(`Sanction status updated to ${sanctionStatusInput}!`);
+      const updated = res.data?.application;
+      if (updated) {
+        setApplications((prev) =>
+          prev.map((a) =>
+            a.id === updated.id
+              ? {
+                  ...a,
+                  ...updated,
+                  sanctionStatus: sanctionStatusInput,
+                  sanctionedAmount: amt !== undefined ? amt : a.sanctionedAmount,
+                  sanctionRemark: sanctionRemarkInput.trim(),
+                  sanctionUpdatedAt: new Date(),
+                  status: sanctionStatusInput === "SANCTIONED" ? "SANCTIONED" : sanctionStatusInput === "REJECTED" ? "REJECTED" : a.status,
+                }
+              : a
+          )
+        );
+      }
+      if (verificationApp && verificationApp.id === sanctionModalApp.id) {
+        setVerificationApp((prev) => ({
+          ...prev,
+          ...(updated || {}),
+          sanctionStatus: sanctionStatusInput,
+          sanctionedAmount: amt !== undefined ? amt : prev.sanctionedAmount,
+          sanctionRemark: sanctionRemarkInput.trim(),
+          sanctionUpdatedAt: new Date(),
+          status: sanctionStatusInput === "SANCTIONED" ? "SANCTIONED" : sanctionStatusInput === "REJECTED" ? "REJECTED" : prev.status,
+        }));
+      }
+      setSanctionModalApp(null);
+      fetchApplications(appCurrentPage);
+    } catch (err) {
+      console.error(err);
+      toast.error(err.response?.data?.message || "Failed to update Sanction status");
+    } finally {
+      setSanctionSubmitting(false);
+    }
+  };
+
+  // 4d. Intermediate Disbursement Stage Modal Handlers
+  const openDisbursementStageModal = (app) => {
+    setDisbursementStageModalApp(app);
+    setDisbursementStageStatusInput(
+      (app.disbursementStatus || "").toUpperCase() === "DISBURSED" || (app.disbursementStatus || "").toUpperCase() === "COMPLETED" || app.status === "DISBURSEMENT"
+        ? "DISBURSED"
+        : (app.disbursementStatus || "").toUpperCase() === "INITIATED"
+        ? "INITIATED"
+        : "PENDING"
+    );
+    setDisbursementStageAmountInput(
+      app.disbursedAmount ? String(app.disbursedAmount) : app.sanctionedAmount ? String(app.sanctionedAmount) : app.appliedAmount ? String(app.appliedAmount) : ""
+    );
+    setDisbursementStageDateInput(
+      app.disbursedAt ? new Date(app.disbursedAt).toISOString().split("T")[0] : new Date().toISOString().split("T")[0]
+    );
+    setDisbursementStageRemarkInput(app.disbursedRemark || "");
+  };
+
+  const handleDisbursementStageSubmit = async (e) => {
+    if (e) e.preventDefault();
+    if (!disbursementStageModalApp) return;
+    setDisbursementStageSubmitting(true);
+    try {
+      const amt = disbursementStageAmountInput ? parseFloat(disbursementStageAmountInput) : undefined;
+      const res = await axios.put(`${API_URL}/applications/${disbursementStageModalApp.id}/stage-status`, {
+        stageType: "DISBURSEMENT",
+        status: disbursementStageStatusInput,
+        disbursedAmount: amt,
+        disbursementDate: disbursementStageDateInput || undefined,
+        remark: disbursementStageRemarkInput.trim() || undefined,
+      });
+      toast.success(`Disbursement status updated to ${disbursementStageStatusInput}!`);
+      const updated = res.data?.application;
+      if (updated) {
+        setApplications((prev) =>
+          prev.map((a) =>
+            a.id === updated.id
+              ? {
+                  ...a,
+                  ...updated,
+                  status: disbursementStageStatusInput === "DISBURSED" ? "DISBURSEMENT" : a.status,
+                  disbursementStatus: disbursementStageStatusInput,
+                  disbursedAmount: amt !== undefined ? amt : a.disbursedAmount,
+                  disbursedAt: disbursementStageDateInput ? new Date(disbursementStageDateInput) : a.disbursedAt,
+                  disbursedRemark: disbursementStageRemarkInput.trim(),
+                }
+              : a
+          )
+        );
+      }
+      if (verificationApp && verificationApp.id === disbursementStageModalApp.id) {
+        setVerificationApp((prev) => ({
+          ...prev,
+          ...(updated || {}),
+          status: disbursementStageStatusInput === "DISBURSED" ? "DISBURSEMENT" : prev.status,
+          disbursementStatus: disbursementStageStatusInput,
+          disbursedAmount: amt !== undefined ? amt : prev.disbursedAmount,
+          disbursedAt: disbursementStageDateInput ? new Date(disbursementStageDateInput) : prev.disbursedAt,
+          disbursedRemark: disbursementStageRemarkInput.trim(),
+        }));
+      }
+      setDisbursementStageModalApp(null);
+      fetchApplications(appCurrentPage);
+    } catch (err) {
+      console.error(err);
+      toast.error(err.response?.data?.message || "Failed to update Disbursement status");
+    } finally {
+      setDisbursementStageSubmitting(false);
+    }
+  };
+
   // 5. General Stage Modal
   const openStageModal = (app, defaultTarget) => {
     setStageModalApp(app);
@@ -1780,6 +2148,10 @@ export default function OperationsRedesign() {
     const app = (verificationApp?.id === appId ? verificationApp : null) || applications.find((a) => a.id === appId);
     if (!app) return;
 
+    if (newStatus === "LOGIN" || newStatus === "BANK_LOGIN" || newStatus === "LOGGED_IN") {
+      openLoginModal(app);
+      return;
+    }
     if (newStatus === "PD") {
       openPdModal(app);
       return;
@@ -1794,6 +2166,14 @@ export default function OperationsRedesign() {
     }
     if (newStatus === "TECHNICAL") {
       openTechnicalModal(app);
+      return;
+    }
+    if (newStatus === "SANCTIONED" || newStatus === "SANCTION") {
+      openSanctionModal(app);
+      return;
+    }
+    if (newStatus === "DISBURSEMENT") {
+      openDisbursementStageModal(app);
       return;
     }
     if (newStatus === "PDD") {
@@ -2234,8 +2614,17 @@ export default function OperationsRedesign() {
                   if (stage.key === "SUBMITTED_TO_BANK") {
                     return s === "SUBMITTED_TO_BANK" || s === "UNDER_REVIEW";
                   }
+                  if (stage.key === "LOGIN") {
+                    return s === "LOGIN" || s === "LOGGED_IN" || (a.loginStatus || "").toUpperCase() === "COMPLETED";
+                  }
                   if (stage.key === "SANCTIONED") {
-                    return s === "SANCTIONED" || s === "APPROVED";
+                    return (s === "SANCTIONED" || s === "APPROVED" || (a.sanctionStatus || "").toUpperCase() === "SANCTIONED") && s !== "DISBURSEMENT" && s !== "DISBURSED";
+                  }
+                  if (stage.key === "DISBURSEMENT") {
+                    return s === "DISBURSEMENT" || (a.disbursementStatus || "").toUpperCase() === "INITIATED" || (a.disbursementStatus || "").toUpperCase() === "PARTIAL";
+                  }
+                  if (stage.key === "CANCELLED") {
+                    return s === "CANCELLED" || a.disbursementStatus === "CANCELLED";
                   }
                   return s === stage.key;
                 });
@@ -2329,26 +2718,29 @@ export default function OperationsRedesign() {
                       <th>App &amp; Borrower</th>
                       <th>Bank &amp; Team</th>
                       <th>Workflow Stage</th>
+                      <th>Login</th>
                       <th>PD Status</th>
                       <th>Banker Query</th>
                       <th>Legal</th>
                       <th>Technical</th>
+                      <th>Sanction</th>
+                      <th>Disbursement</th>
                       <th>PDD</th>
                       <th>OTC</th>
-                      <th>Disbursement</th>
+                      <th>Final Disbursed</th>
                       <th>Action</th>
                     </tr>
                   </thead>
                   <tbody>
                     {appsLoading ? (
                       <tr>
-                        <td colSpan={11} className="cc-report-empty">
+                        <td colSpan={14} className="cc-report-empty">
                           Loading loan applications...
                         </td>
                       </tr>
                     ) : applications.length === 0 ? (
                       <tr>
-                        <td colSpan={11} className="cc-report-empty">
+                        <td colSpan={14} className="cc-report-empty">
                           No loan applications match the selected filters.
                         </td>
                       </tr>
@@ -2445,7 +2837,17 @@ export default function OperationsRedesign() {
                             {renderStagePendingNotice(app)}
                           </td>
 
-                          {/* 4. PD Status */}
+                          {/* 4. Login */}
+                          {renderOpsStatusCell({
+                            status: app.loginStatus || (app.status === "LOGGED_IN" ? "COMPLETED" : "PENDING"),
+                            updatedAt: app.loginUpdatedAt,
+                            remark: app.loginRemark,
+                            onClick: () => openLoginModal(app),
+                            pendingText: "Pending",
+                            completedText: "Completed",
+                          })}
+
+                          {/* 5. PD Status */}
                           {renderOpsStatusCell({
                             status: app.pdStatus || "PENDING",
                             updatedAt: app.pdUpdatedAt,
@@ -2455,7 +2857,7 @@ export default function OperationsRedesign() {
                             completedText: "Completed",
                           })}
 
-                          {/* 5. Banker Query */}
+                          {/* 6. Banker Query */}
                           {renderOpsStatusCell({
                             status:
                               app.opsQueryStatus && app.opsQueryStatus !== "NONE"
@@ -2472,7 +2874,7 @@ export default function OperationsRedesign() {
                             completedText: "Completed",
                           })}
 
-                          {/* 6. Legal */}
+                          {/* 7. Legal */}
                           {renderOpsStatusCell({
                             status: app.legalStatus || "NOT_STARTED",
                             updatedAt: app.legalUpdatedAt,
@@ -2482,7 +2884,7 @@ export default function OperationsRedesign() {
                             completedText: "Resolved",
                           })}
 
-                          {/* 7. Technical */}
+                          {/* 8. Technical */}
                           {renderOpsStatusCell({
                             status: app.technicalStatus || "NOT_STARTED",
                             updatedAt: app.technicalUpdatedAt,
@@ -2492,7 +2894,97 @@ export default function OperationsRedesign() {
                             completedText: "Resolved",
                           })}
 
-                          {/* 8. PDD */}
+                          {/* 9. Sanction */}
+                          <td
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openSanctionModal(app);
+                            }}
+                            style={{ cursor: "pointer" }}
+                            title="Click to view or update Bank Sanction status & amount"
+                          >
+                            <div className="cc-ops-status-cell-inner">
+                              {(app.sanctionStatus || "").toUpperCase() === "SANCTIONED" || app.status === "SANCTIONED" ? (
+                                <span className="cc-substatus-pill resolved" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                  <CheckCircle2 size={11} /> <strong>Sanctioned ✓</strong>
+                                </span>
+                              ) : (app.sanctionStatus || "").toUpperCase() === "REJECTED" ? (
+                                <span className="cc-substatus-pill rejected" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                  <XCircle size={11} /> <strong>Rejected ❌</strong>
+                                </span>
+                              ) : (
+                                <span className="cc-substatus-pill pending" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                  <Clock size={11} /> <strong>Pending ⏳</strong>
+                                </span>
+                              )}
+
+                              {app.sanctionedAmount ? (
+                                <div style={{ fontSize: 11, fontWeight: 700, color: "#15803d", marginTop: 3 }}>
+                                  {currencyFormatter.format(app.sanctionedAmount)}
+                                </div>
+                              ) : null}
+
+                              {app.sanctionUpdatedAt && (
+                                <div className="cc-status-cell-time" style={{ marginTop: 2 }}>
+                                  <Clock size={10} />
+                                  <span>{new Date(app.sanctionUpdatedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</span>
+                                </div>
+                              )}
+
+                              {app.sanctionRemark && (
+                                <div className="cc-status-cell-remark" title={app.sanctionRemark} style={{ marginTop: 2 }}>
+                                  "{app.sanctionRemark}"
+                                </div>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* 10. Intermediate Disbursement */}
+                          <td
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openDisbursementStageModal(app);
+                            }}
+                            style={{ cursor: "pointer" }}
+                            title="Click to view or update Loan Disbursement status & amount"
+                          >
+                            <div className="cc-ops-status-cell-inner">
+                              {(app.disbursementStatus || "").toUpperCase() === "DISBURSED" || (app.disbursementStatus || "").toUpperCase() === "COMPLETED" || app.status === "DISBURSEMENT" ? (
+                                <span className="cc-substatus-pill resolved" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                  <CheckCircle2 size={11} /> <strong>Disbursed ✓</strong>
+                                </span>
+                              ) : (app.disbursementStatus || "").toUpperCase() === "INITIATED" ? (
+                                <span className="cc-substatus-pill initiated" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                  <Clock size={11} /> <strong>Initiated ⚡</strong>
+                                </span>
+                              ) : (
+                                <span className="cc-substatus-pill pending" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                  <Clock size={11} /> <strong>Pending ⏳</strong>
+                                </span>
+                              )}
+
+                              {app.disbursedAmount ? (
+                                <div style={{ fontSize: 11, fontWeight: 700, color: "#047857", marginTop: 3 }}>
+                                  {currencyFormatter.format(app.disbursedAmount)}
+                                </div>
+                              ) : null}
+
+                              {app.disbursedAt && (
+                                <div className="cc-status-cell-time" style={{ marginTop: 2 }}>
+                                  <Clock size={10} />
+                                  <span>{new Date(app.disbursedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</span>
+                                </div>
+                              )}
+
+                              {app.disbursedRemark && (
+                                <div className="cc-status-cell-remark" title={app.disbursedRemark} style={{ marginTop: 2 }}>
+                                  "{app.disbursedRemark}"
+                                </div>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* 11. PDD */}
                           {renderOpsStatusCell({
                             status: app.pddStatus || "PENDING",
                             updatedAt: app.pddUpdatedAt,
@@ -2502,7 +2994,7 @@ export default function OperationsRedesign() {
                             completedText: "Resolved",
                           })}
 
-                          {/* 9. OTC */}
+                          {/* 11. OTC */}
                           {renderOpsStatusCell({
                             status: app.otcStatus || "PENDING",
                             updatedAt: app.otcUpdatedAt,
@@ -2512,13 +3004,34 @@ export default function OperationsRedesign() {
                             completedText: "Resolved",
                           })}
 
-                          {/* 10. Disbursement */}
+                          {/* 12. Disbursement */}
                           <td onClick={(e) => e.stopPropagation()}>
-                            {app.status === "DISBURSED" ? (
+                            {app.status === "CANCELLED" || app.disbursementStatus === "CANCELLED" ? (
+                              <div className="cc-ops-status-cell-inner">
+                                <span
+                                  className="cc-substatus-pill rejected"
+                                  title={app.disbursedRemark || app.rejectionReason || "Disbursement cancelled"}
+                                  onClick={() => initiateDisburseModal(app)}
+                                  style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}
+                                >
+                                  <XCircle size={11} /> <strong>Cancelled ❌</strong>
+                                </span>
+                                {app.disbursedRemark && (
+                                  <div className="cc-status-cell-remark" title={app.disbursedRemark} style={{ marginTop: 2 }}>
+                                    "{app.disbursedRemark}"
+                                  </div>
+                                )}
+                              </div>
+                            ) : app.status === "DISBURSED" ? (
                               <div className="cc-ops-status-cell-inner">
                                 <span className="cc-disbursed-done-tag" title="Loan application is fully Disbursed">
                                   <CheckCircle2 size={12} /> Disbursed
                                 </span>
+                                {app.disbursedAmount ? (
+                                  <div style={{ fontSize: 11, fontWeight: 700, color: "#047857", marginTop: 2 }}>
+                                    {currencyFormatter.format(app.disbursedAmount)}
+                                  </div>
+                                ) : null}
                                 {app.disbursedAt && (
                                   <div className="cc-status-cell-time">
                                     <Clock size={10} />
@@ -2547,7 +3060,7 @@ export default function OperationsRedesign() {
                               <button
                                 type="button"
                                 className="cc-ops-action-btn cc-btn-disburse-locked"
-                                title="Disbursement locked until PDD & OTC are both Resolved"
+                                title="Disbursement locked until PDD & OTC are both Resolved (Click to review/manage)"
                                 onClick={() => initiateDisburseModal(app)}
                               >
                                 <Clock size={12} /> Disburse (Locked)
@@ -2837,6 +3350,35 @@ export default function OperationsRedesign() {
                     </div>
 
                     <div className="cc-drawer-status-cards-grid">
+                      {/* 0. Bank Login */}
+                      <div
+                        className="cc-drawer-status-card"
+                        onClick={() => openLoginModal(verificationApp)}
+                        title="Click to update Bank Login Status & Remark"
+                      >
+                        <div className="cc-dsc-head">
+                          <span className="cc-dsc-title">🏦 Bank Login</span>
+                          <span className={`cc-substatus-pill ${
+                            (verificationApp.loginStatus || "").toUpperCase() === "COMPLETED" || verificationApp.status === "LOGGED_IN" ? "resolved" : "pending"
+                          }`}>
+                            <strong>{
+                              (verificationApp.loginStatus || "").toUpperCase() === "COMPLETED" || verificationApp.status === "LOGGED_IN" ? "Completed ✓" : "Pending ⏳"
+                            }</strong>
+                          </span>
+                        </div>
+                        {verificationApp.loginUpdatedAt && (
+                          <div className="cc-status-cell-time" style={{ marginTop: 2 }}>
+                            <Clock size={10} />
+                            <span>{new Date(verificationApp.loginUpdatedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true })}</span>
+                          </div>
+                        )}
+                        {verificationApp.loginRemark && (
+                          <div className="cc-status-cell-remark" style={{ marginTop: 2, maxWidth: "100%" }} title={verificationApp.loginRemark}>
+                            "{verificationApp.loginRemark}"
+                          </div>
+                        )}
+                      </div>
+
                       {/* 1. PD Status */}
                       <div
                         className="cc-drawer-status-card"
@@ -2959,7 +3501,79 @@ export default function OperationsRedesign() {
                         )}
                       </div>
 
-                      {/* 5. PDD Status */}
+                      {/* 5. Bank Sanction */}
+                      <div
+                        className="cc-drawer-status-card"
+                        onClick={() => openSanctionModal(verificationApp)}
+                        title="Click to update Bank Sanction Status, Amount & Remark"
+                      >
+                        <div className="cc-dsc-head">
+                          <span className="cc-dsc-title">📜 Bank Sanction</span>
+                          <span className={`cc-substatus-pill ${
+                            (verificationApp.sanctionStatus || "").toUpperCase() === "SANCTIONED" || verificationApp.status === "SANCTIONED" ? "resolved" :
+                            (verificationApp.sanctionStatus || "").toUpperCase() === "REJECTED" ? "rejected" : "pending"
+                          }`}>
+                            <strong>{
+                              (verificationApp.sanctionStatus || "").toUpperCase() === "SANCTIONED" || verificationApp.status === "SANCTIONED" ? "Sanctioned ✓" :
+                              (verificationApp.sanctionStatus || "").toUpperCase() === "REJECTED" ? "Rejected ❌" : "Pending ⏳"
+                            }</strong>
+                          </span>
+                        </div>
+                        {verificationApp.sanctionedAmount ? (
+                          <div style={{ fontSize: 11.5, fontWeight: 700, color: "#15803d", marginTop: 2 }}>
+                            {currencyFormatter.format(verificationApp.sanctionedAmount)}
+                          </div>
+                        ) : null}
+                        {verificationApp.sanctionUpdatedAt && (
+                          <div className="cc-status-cell-time" style={{ marginTop: 2 }}>
+                            <Clock size={10} />
+                            <span>{new Date(verificationApp.sanctionUpdatedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true })}</span>
+                          </div>
+                        )}
+                        {verificationApp.sanctionRemark && (
+                          <div className="cc-status-cell-remark" style={{ marginTop: 2, maxWidth: "100%" }} title={verificationApp.sanctionRemark}>
+                            "{verificationApp.sanctionRemark}"
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 6. Intermediate Disbursement */}
+                      <div
+                        className="cc-drawer-status-card"
+                        onClick={() => openDisbursementStageModal(verificationApp)}
+                        title="Click to update Loan Disbursement Status, Amount, Date & Remark"
+                      >
+                        <div className="cc-dsc-head">
+                          <span className="cc-dsc-title">💸 Loan Disbursement</span>
+                          <span className={`cc-substatus-pill ${
+                            (verificationApp.disbursementStatus || "").toUpperCase() === "DISBURSED" || (verificationApp.disbursementStatus || "").toUpperCase() === "COMPLETED" || verificationApp.status === "DISBURSEMENT" ? "resolved" :
+                            (verificationApp.disbursementStatus || "").toUpperCase() === "INITIATED" ? "initiated" : "pending"
+                          }`}>
+                            <strong>{
+                              (verificationApp.disbursementStatus || "").toUpperCase() === "DISBURSED" || (verificationApp.disbursementStatus || "").toUpperCase() === "COMPLETED" || verificationApp.status === "DISBURSEMENT" ? "Disbursed ✓" :
+                              (verificationApp.disbursementStatus || "").toUpperCase() === "INITIATED" ? "Initiated ⚡" : "Pending ⏳"
+                            }</strong>
+                          </span>
+                        </div>
+                        {verificationApp.disbursedAmount ? (
+                          <div style={{ fontSize: 11.5, fontWeight: 700, color: "#047857", marginTop: 2 }}>
+                            {currencyFormatter.format(verificationApp.disbursedAmount)}
+                          </div>
+                        ) : null}
+                        {verificationApp.disbursedAt && (
+                          <div className="cc-status-cell-time" style={{ marginTop: 2 }}>
+                            <Clock size={10} />
+                            <span>{new Date(verificationApp.disbursedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true })}</span>
+                          </div>
+                        )}
+                        {verificationApp.disbursedRemark && (
+                          <div className="cc-status-cell-remark" style={{ marginTop: 2, maxWidth: "100%" }} title={verificationApp.disbursedRemark}>
+                            "{verificationApp.disbursedRemark}"
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 7. PDD Status */}
                       <div
                         className="cc-drawer-status-card"
                         onClick={() => openPddModal(verificationApp)}
@@ -2984,7 +3598,7 @@ export default function OperationsRedesign() {
                         )}
                       </div>
 
-                      {/* 6. OTC Status */}
+                      {/* 7. OTC Status */}
                       <div
                         className="cc-drawer-status-card"
                         onClick={() => openOtcModal(verificationApp)}
@@ -3009,16 +3623,22 @@ export default function OperationsRedesign() {
                         )}
                       </div>
 
-                      {/* 7. Disbursement */}
+                      {/* 8. Final Disbursement */}
                       <div
                         className="cc-drawer-status-card"
                         onClick={() => initiateDisburseModal(verificationApp)}
-                        title="Click to initiate Final Loan Disbursement"
+                        title="Click to manage Final Loan Disbursement"
                       >
                         <div className="cc-dsc-head">
-                          <span className="cc-dsc-title">💰 Disbursement</span>
-                          <span className={`cc-substatus-pill ${(verificationApp.status || "").toUpperCase() === "DISBURSED" ? "resolved" : "pending"}`}>
-                            <strong>{(verificationApp.status || "").toUpperCase() === "DISBURSED" ? "Disbursed ✓" : "Pending"}</strong>
+                          <span className="cc-dsc-title">💰 Final Disbursement</span>
+                          <span className={`cc-substatus-pill ${
+                            verificationApp.status === "CANCELLED" || verificationApp.disbursementStatus === "CANCELLED" ? "rejected" :
+                            (verificationApp.status || "").toUpperCase() === "DISBURSED" ? "resolved" : "pending"
+                          }`}>
+                            <strong>{
+                              verificationApp.status === "CANCELLED" || verificationApp.disbursementStatus === "CANCELLED" ? "Cancelled ❌" :
+                              (verificationApp.status || "").toUpperCase() === "DISBURSED" ? "Disbursed ✓" : "Pending"
+                            }</strong>
                           </span>
                         </div>
                         {verificationApp.disbursedAt && (
@@ -3028,7 +3648,9 @@ export default function OperationsRedesign() {
                           </div>
                         )}
                         <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>
-                          {verificationApp.disbursedAmount ? `₹${Number(verificationApp.disbursedAmount).toLocaleString("en-IN")}` : "Click to Disburse"}
+                          {verificationApp.status === "CANCELLED" || verificationApp.disbursementStatus === "CANCELLED"
+                            ? verificationApp.disbursedRemark || "Disbursement Cancelled"
+                            : verificationApp.disbursedAmount ? `₹${Number(verificationApp.disbursedAmount).toLocaleString("en-IN")}` : "Click to Manage"}
                         </div>
                       </div>
                     </div>
@@ -3069,6 +3691,32 @@ export default function OperationsRedesign() {
                         <Link size={13} />
                         <span>Customer Doc Link</span>
                       </button>
+
+                      {verificationApp.documents && verificationApp.documents.length > 0 && (
+                        <a
+                          href={`${API_URL}/documents/application/${verificationApp.id}/download-all?token=${localStorage.getItem("token") || ""}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 5,
+                            fontSize: 12,
+                            fontWeight: 600,
+                            padding: "4px 10px",
+                            borderRadius: 8,
+                            background: "#ecfdf5",
+                            color: "#047857",
+                            border: "1px solid #a7f3d0",
+                            textDecoration: "none",
+                            cursor: "pointer",
+                          }}
+                          title={`Download all ${verificationApp.documents.length} documents as a single ZIP archive`}
+                        >
+                          <Download size={13} />
+                          <span>Download All ({verificationApp.documents.length} Docs ZIP)</span>
+                        </a>
+                      )}
                     </div>
 
                     {(verificationApp.documents || []).length === 0 ? (
@@ -3262,13 +3910,34 @@ export default function OperationsRedesign() {
                             </>
                           )}
                         </select>
-                        <input
-                          type="file"
-                          onChange={(e) => setUploadFile(e.target.files[0])}
-                          required
-                        />
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                          <input
+                            type="file"
+                            multiple
+                            accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx"
+                            onChange={(e) => {
+                              const files = Array.from(e.target.files || []);
+                              const invalid = files.find((f) => f.size > 25 * 1024 * 1024);
+                              if (invalid) {
+                                toast.error(`File "${invalid.name}" exceeds 25MB limit.`);
+                                e.target.value = "";
+                                setUploadFiles([]);
+                                setUploadFile(null);
+                                return;
+                              }
+                              setUploadFiles(files);
+                              setUploadFile(files[0] || null);
+                            }}
+                            required={uploadFiles.length === 0}
+                          />
+                          <small style={{ fontSize: 11, color: "#64748b" }}>
+                            {uploadFiles.length > 0
+                              ? `Selected ${uploadFiles.length} file(s) (Max 25MB each)`
+                              : "Select 1 or more files (Max 25MB each)"}
+                          </small>
+                        </div>
                         <button type="submit" className="cc-upload-submit-btn" disabled={uploadingDoc}>
-                          {uploadingDoc ? "Uploading..." : "Upload Document"}
+                          {uploadingDoc ? "Uploading..." : `Upload ${uploadFiles.length > 1 ? `${uploadFiles.length} Docs` : "Document"}`}
                         </button>
                       </div>
                     </form>
@@ -4028,17 +4697,35 @@ export default function OperationsRedesign() {
       {/* MODAL: CONFIRM LOAN DISBURSAL & FINANCIAL SYNC */}
       {disburseModalApp && (
         <div className="cc-disburse-backdrop" onClick={() => !disburseSubmitting && setDisburseModalApp(null)}>
-          <div className="cc-disburse-dialog" onClick={(e) => e.stopPropagation()}>
-            <div className="cc-disburse-header">
+          <div className="cc-disburse-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 510, maxHeight: "88vh", display: "flex", flexDirection: "column" }}>
+            <div className="cc-disburse-header" style={{
+              background: disburseStatusInput === "CANCEL"
+                ? "linear-gradient(135deg, #991b1b 0%, #dc2626 100%)"
+                : disburseStatusInput === "PENDING"
+                ? "linear-gradient(135deg, #b45309 0%, #d97706 100%)"
+                : "linear-gradient(135deg, #065f46 0%, #047857 100%)",
+              flexShrink: 0,
+              padding: "14px 20px"
+            }}>
               <div className="cc-disburse-title-wrap">
                 <div className="cc-disburse-icon-badge">
-                  <CheckCircle2 size={20} />
+                  {disburseStatusInput === "CANCEL" ? (
+                    <XCircle size={20} />
+                  ) : disburseStatusInput === "PENDING" ? (
+                    <Clock size={20} />
+                  ) : (
+                    <CheckCircle2 size={20} />
+                  )}
                 </div>
                 <div>
                   <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#fff" }}>
-                    Confirm Loan Disbursal
+                    {disburseStatusInput === "CANCEL"
+                      ? "Cancel Loan Disbursement"
+                      : disburseStatusInput === "PENDING"
+                      ? "Pending for Disbursement"
+                      : "Confirm Final Disbursement"}
                   </h3>
-                  <small style={{ color: "#94a3b8", fontSize: 12 }}>
+                  <small style={{ color: "#f1f5f9", fontSize: 12 }}>
                     App #{disburseModalApp.applicationNumber} • {disburseModalApp.customer?.name}
                   </small>
                 </div>
@@ -4052,186 +4739,337 @@ export default function OperationsRedesign() {
               </button>
             </div>
 
-            <form onSubmit={handleConfirmDisburse} style={{ padding: "20px 24px" }}>
+            <form onSubmit={handleConfirmDisburse} style={{ padding: "16px 20px", overflowY: "auto", flex: 1, display: "flex", flexDirection: "column" }}>
+              {/* Disbursement Action Decision Selector */}
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 6 }}>
+                  Disbursement Decision / Option <span style={{ color: "#ef4444" }}>*</span>
+                </label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => setDisburseStatusInput("COMPLETED")}
+                    style={{
+                      padding: "8px 6px",
+                      borderRadius: 9,
+                      border: disburseStatusInput === "COMPLETED" ? "2px solid #047857" : "1.5px solid #cbd5e1",
+                      background: disburseStatusInput === "COMPLETED" ? "#ecfdf5" : "#fff",
+                      color: disburseStatusInput === "COMPLETED" ? "#047857" : "#475569",
+                      fontWeight: 700,
+                      fontSize: 12.5,
+                      cursor: "pointer",
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      gap: 3,
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    <CheckCircle2 size={15} /> Completed
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setDisburseStatusInput("PENDING")}
+                    style={{
+                      padding: "8px 6px",
+                      borderRadius: 9,
+                      border: disburseStatusInput === "PENDING" ? "2px solid #d97706" : "1.5px solid #cbd5e1",
+                      background: disburseStatusInput === "PENDING" ? "#fffbeb" : "#fff",
+                      color: disburseStatusInput === "PENDING" ? "#b45309" : "#475569",
+                      fontWeight: 700,
+                      fontSize: 12.5,
+                      cursor: "pointer",
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      gap: 3,
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    <Clock size={15} /> Pending
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setDisburseStatusInput("CANCEL")}
+                    style={{
+                      padding: "8px 6px",
+                      borderRadius: 9,
+                      border: disburseStatusInput === "CANCEL" ? "2px solid #ef4444" : "1.5px solid #cbd5e1",
+                      background: disburseStatusInput === "CANCEL" ? "#fef2f2" : "#fff",
+                      color: disburseStatusInput === "CANCEL" ? "#b91c1c" : "#475569",
+                      fontWeight: 700,
+                      fontSize: 12.5,
+                      cursor: "pointer",
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      gap: 3,
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    <XCircle size={15} /> Cancel
+                  </button>
+                </div>
+              </div>
+
               {/* Case Summary Card */}
-              <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 12, padding: "14px 16px", marginBottom: 18 }}>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 14px", fontSize: 12.5 }}>
+              <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "10px 14px", marginBottom: 12 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px 12px", fontSize: 12 }}>
                   <div>
-                    <span style={{ color: "#64748b", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>Borrower</span>
-                    <strong style={{ display: "block", color: "#0f172a", fontSize: 13, marginTop: 1 }}>{disburseModalApp.customer?.name}</strong>
+                    <span style={{ color: "#64748b", fontSize: 10.5, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>Borrower</span>
+                    <strong style={{ display: "block", color: "#0f172a", fontSize: 12.5, marginTop: 1 }}>{disburseModalApp.customer?.name}</strong>
                   </div>
                   <div>
-                    <span style={{ color: "#64748b", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>Contact</span>
-                    <strong style={{ display: "block", color: "#0f172a", fontSize: 13, marginTop: 1 }}>{disburseModalApp.customer?.mobile || "—"}</strong>
+                    <span style={{ color: "#64748b", fontSize: 10.5, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>Contact</span>
+                    <strong style={{ display: "block", color: "#0f172a", fontSize: 12.5, marginTop: 1 }}>{disburseModalApp.customer?.mobile || "—"}</strong>
                   </div>
                   <div>
-                    <span style={{ color: "#64748b", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>Loan Product</span>
-                    <strong style={{ display: "block", color: "#0f172a", fontSize: 13, marginTop: 1 }}>{disburseModalApp.loanProduct}</strong>
+                    <span style={{ color: "#64748b", fontSize: 10.5, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>Loan Product</span>
+                    <strong style={{ display: "block", color: "#0f172a", fontSize: 12.5, marginTop: 1 }}>{disburseModalApp.loanProduct}</strong>
                   </div>
                   <div>
-                    <span style={{ color: "#64748b", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>Assigned Bank</span>
-                    <strong style={{ display: "block", color: "#047857", fontSize: 13, marginTop: 1 }}>{disburseModalApp.lender?.name || "Direct / Bank"}</strong>
+                    <span style={{ color: "#64748b", fontSize: 10.5, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>Assigned Bank</span>
+                    <strong style={{ display: "block", color: "#047857", fontSize: 12.5, marginTop: 1 }}>{disburseModalApp.lender?.name || "Direct / Bank"}</strong>
                   </div>
                   <div>
-                    <span style={{ color: "#64748b", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>Applied Amount</span>
-                    <strong style={{ display: "block", color: "#0f172a", fontSize: 13, marginTop: 1 }}>{currencyFormatter.format(disburseModalApp.appliedAmount || 0)}</strong>
+                    <span style={{ color: "#64748b", fontSize: 10.5, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>Applied Amount</span>
+                    <strong style={{ display: "block", color: "#0f172a", fontSize: 12.5, marginTop: 1 }}>{currencyFormatter.format(disburseModalApp.appliedAmount || 0)}</strong>
                   </div>
                   <div>
-                    <span style={{ color: "#64748b", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>Sanctioned Amount</span>
-                    <strong style={{ display: "block", color: "#0284c7", fontSize: 13, marginTop: 1 }}>
+                    <span style={{ color: "#64748b", fontSize: 10.5, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>Sanctioned Amount</span>
+                    <strong style={{ display: "block", color: "#0284c7", fontSize: 12.5, marginTop: 1 }}>
                       {disburseModalApp.sanctionedAmount ? currencyFormatter.format(disburseModalApp.sanctionedAmount) : "—"}
                     </strong>
                   </div>
                 </div>
               </div>
 
-              {/* PDD & OTC Requirements Gatekeeping Check */}
-              {(() => {
-                const isPddOk = (disburseModalApp.pddStatus || "").toUpperCase() === "RESOLVED";
-                const isOtcOk = (disburseModalApp.otcStatus || "").toUpperCase() === "RESOLVED";
-                const canDisburse = isPddOk && isOtcOk;
-
-                return (
-                  <div style={{
-                    marginBottom: 18,
-                    padding: "12px 16px",
-                    borderRadius: 10,
-                    background: canDisburse ? "#ecfdf5" : "#fffbeb",
-                    border: canDisburse ? "1px solid #a7f3d0" : "1px solid #fde68a"
-                  }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: canDisburse ? "#065f46" : "#92400e", textTransform: "uppercase", letterSpacing: 0.5 }}>
-                        Disbursement Gatekeeping Rules
-                      </span>
-                      <span style={{
-                        fontSize: 11,
-                        fontWeight: 700,
-                        padding: "2px 8px",
-                        borderRadius: 12,
-                        background: canDisburse ? "#059669" : "#d97706",
-                        color: "#fff"
-                      }}>
-                        {canDisburse ? "✓ Approved to Disburse" : "⏳ Pending Requirements"}
-                      </span>
-                    </div>
-
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, fontSize: 12 }}>
-                      <div style={{
-                        padding: "8px 10px",
-                        borderRadius: 8,
-                        background: isPddOk ? "#d1fae5" : "#fee2e2",
-                        border: isPddOk ? "1px solid #6ee7b7" : "1px solid #fca5a5",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between"
-                      }}>
-                        <span><strong>PDD Status:</strong> {disburseModalApp.pddStatus || "Pending"}</span>
-                        <span>{isPddOk ? "✓ Resolved" : "❌ Pending"}</span>
-                      </div>
-                      <div style={{
-                        padding: "8px 10px",
-                        borderRadius: 8,
-                        background: isOtcOk ? "#d1fae5" : "#fee2e2",
-                        border: isOtcOk ? "1px solid #6ee7b7" : "1px solid #fca5a5",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between"
-                      }}>
-                        <span><strong>OTC Status:</strong> {disburseModalApp.otcStatus || "Pending"}</span>
-                        <span>{isOtcOk ? "✓ Resolved" : "❌ Pending"}</span>
+              {/* BRANCH 1: CANCEL DISBURSEMENT */}
+              {disburseStatusInput === "CANCEL" && (
+                <div style={{ marginBottom: 18 }}>
+                  <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderLeft: "4px solid #ef4444", borderRadius: 8, padding: "12px 14px", marginBottom: 16, fontSize: 12.5, color: "#991b1b" }}>
+                    <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                      <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+                      <div>
+                        <strong>Disbursement Cancel Warning:</strong> Cancelling this disbursement means the loan will <strong>NOT</strong> proceed for disbursement. The application status will be marked as <strong>CANCELLED</strong>.
                       </div>
                     </div>
+                  </div>
 
-                    {!canDisburse && (
-                      <p style={{ margin: "8px 0 0 0", fontSize: 11.5, color: "#b45309", lineHeight: 1.4 }}>
-                        🔒 <strong>Case is Pending for Disbursement:</strong> Final disbursement cannot be submitted until both PDD and OTC are marked as <strong>Resolved</strong>. Please resolve both stages before proceeding.
-                      </p>
+                  <div>
+                    <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 6 }}>
+                      Cancellation Reason / Remark <span style={{ color: "#ef4444" }}>*</span>
+                    </label>
+                    <textarea
+                      rows={3}
+                      required
+                      value={disburseRemarksInput}
+                      onChange={(e) => setDisburseRemarksInput(e.target.value)}
+                      placeholder="Enter mandatory reason for cancelling disbursement (e.g. Borrower backed out, Property issue, Bank rejected disbursement)..."
+                      style={{
+                        width: "100%",
+                        padding: "10px 14px",
+                        borderRadius: 8,
+                        border: "1.5px solid #ef4444",
+                        fontSize: 13,
+                        boxSizing: "border-box",
+                        outline: "none",
+                        color: "#0f172a",
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* BRANCH 2: PENDING DISBURSEMENT */}
+              {disburseStatusInput === "PENDING" && (
+                <div style={{ marginBottom: 18 }}>
+                  <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderLeft: "4px solid #d97706", borderRadius: 8, padding: "12px 14px", marginBottom: 16, fontSize: 12.5, color: "#92400e" }}>
+                    <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                      <Clock size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+                      <div>
+                        <strong>Pending for Disbursement:</strong> Application will remain pending while awaiting PDD/OTC clearance or bank clearing schedule.
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#334155", marginBottom: 6 }}>
+                      Pending Remarks / Notes <span style={{ color: "#64748b", fontWeight: 400, fontSize: 12 }}>(Optional)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={disburseRemarksInput}
+                      onChange={(e) => setDisburseRemarksInput(e.target.value)}
+                      placeholder="e.g. Awaiting banker final docket clearance, OTC documents in transit"
+                      style={{
+                        width: "100%",
+                        padding: "10px 14px",
+                        borderRadius: 8,
+                        border: "1px solid #cbd5e1",
+                        fontSize: 13,
+                        boxSizing: "border-box",
+                        outline: "none",
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* BRANCH 3: COMPLETED DISBURSEMENT */}
+              {disburseStatusInput === "COMPLETED" && (
+                <>
+                  {/* PDD & OTC Requirements Gatekeeping Check */}
+                  {(() => {
+                    const isPddOk = (disburseModalApp.pddStatus || "").toUpperCase() === "RESOLVED";
+                    const isOtcOk = (disburseModalApp.otcStatus || "").toUpperCase() === "RESOLVED";
+                    const canDisburse = isPddOk && isOtcOk;
+
+                    return (
+                      <div style={{
+                        marginBottom: 12,
+                        padding: "10px 14px",
+                        borderRadius: 10,
+                        background: canDisburse ? "#ecfdf5" : "#fffbeb",
+                        border: canDisburse ? "1px solid #a7f3d0" : "1px solid #fde68a"
+                      }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                          <span style={{ fontSize: 11.5, fontWeight: 700, color: canDisburse ? "#065f46" : "#92400e", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                            Disbursement Gatekeeping Rules
+                          </span>
+                          <span style={{
+                            fontSize: 10.5,
+                            fontWeight: 700,
+                            padding: "2px 8px",
+                            borderRadius: 12,
+                            background: canDisburse ? "#059669" : "#d97706",
+                            color: "#fff"
+                          }}>
+                            {canDisburse ? "✓ Approved to Disburse" : "⏳ Pending Requirements"}
+                          </span>
+                        </div>
+
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, fontSize: 11.5 }}>
+                          <div style={{
+                            padding: "6px 9px",
+                            borderRadius: 7,
+                            background: isPddOk ? "#d1fae5" : "#fee2e2",
+                            border: isPddOk ? "1px solid #6ee7b7" : "1px solid #fca5a5",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between"
+                          }}>
+                            <span><strong>PDD:</strong> {disburseModalApp.pddStatus || "Pending"}</span>
+                            <span>{isPddOk ? "✓ Resolved" : "❌ Pending"}</span>
+                          </div>
+                          <div style={{
+                            padding: "6px 9px",
+                            borderRadius: 7,
+                            background: isOtcOk ? "#d1fae5" : "#fee2e2",
+                            border: isOtcOk ? "1px solid #6ee7b7" : "1px solid #fca5a5",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between"
+                          }}>
+                            <span><strong>OTC:</strong> {disburseModalApp.otcStatus || "Pending"}</span>
+                            <span>{isOtcOk ? "✓ Resolved" : "❌ Pending"}</span>
+                          </div>
+                        </div>
+
+                        {!canDisburse && (
+                          <p style={{ margin: "6px 0 0 0", fontSize: 11, color: "#b45309", lineHeight: 1.35 }}>
+                            🔒 <strong>Case is Pending for Disbursement:</strong> Final disbursement cannot be submitted until both PDD and OTC are marked as <strong>Resolved</strong>. Please resolve both stages before proceeding.
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {/* Disbursed Amount Input */}
+                  <div style={{ marginBottom: 12 }}>
+                    <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 5 }}>
+                      Final Disbursed Amount (₹) <span style={{ color: "#ef4444" }}>*</span>
+                    </label>
+                    <div style={{ position: "relative" }}>
+                      <IndianRupee size={16} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "#64748b" }} />
+                      <input
+                        type="number"
+                        step="1"
+                        min="1"
+                        required
+                        value={disburseAmountInput}
+                        onChange={(e) => setDisburseAmountInput(e.target.value)}
+                        placeholder="e.g. 5000000"
+                        style={{
+                          width: "100%",
+                          padding: "9px 12px 9px 36px",
+                          borderRadius: 8,
+                          border: "1.5px solid #cbd5e1",
+                          fontSize: 15,
+                          fontWeight: 700,
+                          color: "#047857",
+                          background: "#fff",
+                          boxSizing: "border-box",
+                          outline: "none",
+                        }}
+                        onFocus={(e) => (e.target.style.borderColor = "#047857")}
+                        onBlur={(e) => (e.target.style.borderColor = "#cbd5e1")}
+                      />
+                    </div>
+                    {disburseAmountInput && !isNaN(parseFloat(disburseAmountInput)) && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, color: "#047857", fontWeight: 700, fontSize: 12, marginTop: 4 }}>
+                        <CheckCircle2 size={12} />
+                        <span>Amount: {currencyFormatter.format(parseFloat(disburseAmountInput))}</span>
+                      </div>
                     )}
                   </div>
-                );
-              })()}
 
-              {/* Disbursed Amount Input */}
-              <div style={{ marginBottom: 16 }}>
-                <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 6 }}>
-                  Final Disbursed Amount (₹) <span style={{ color: "#ef4444" }}>*</span>
-                </label>
-                <div style={{ position: "relative" }}>
-                  <IndianRupee size={17} style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "#64748b" }} />
-                  <input
-                    type="number"
-                    step="1"
-                    min="1"
-                    required
-                    value={disburseAmountInput}
-                    onChange={(e) => setDisburseAmountInput(e.target.value)}
-                    placeholder="e.g. 5000000"
-                    style={{
-                      width: "100%",
-                      padding: "11px 14px 11px 40px",
-                      borderRadius: 10,
-                      border: "2px solid #cbd5e1",
-                      fontSize: 16,
-                      fontWeight: 700,
-                      color: "#047857",
-                      background: "#fff",
-                      boxSizing: "border-box",
-                      outline: "none",
-                    }}
-                    onFocus={(e) => (e.target.style.borderColor = "#047857")}
-                    onBlur={(e) => (e.target.style.borderColor = "#cbd5e1")}
-                  />
-                </div>
-                {disburseAmountInput && !isNaN(parseFloat(disburseAmountInput)) && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, color: "#047857", fontWeight: 700, fontSize: 13, marginTop: 6 }}>
-                    <CheckCircle2 size={13} />
-                    <span>Amount: {currencyFormatter.format(parseFloat(disburseAmountInput))}</span>
+                  {/* Disbursal Remarks */}
+                  <div style={{ marginBottom: 12 }}>
+                    <label style={{ display: "block", fontWeight: 600, fontSize: 12.5, color: "#334155", marginBottom: 5 }}>
+                      Remarks / UTR / Reference <span style={{ color: "#64748b", fontWeight: 400, fontSize: 11.5 }}>(Optional)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={disburseRemarksInput}
+                      onChange={(e) => setDisburseRemarksInput(e.target.value)}
+                      placeholder="e.g. Disbursal confirmed, UTR #..., Banker approval"
+                      style={{
+                        width: "100%",
+                        padding: "8px 12px",
+                        borderRadius: 8,
+                        border: "1px solid #cbd5e1",
+                        fontSize: 12.5,
+                        color: "#0f172a",
+                        boxSizing: "border-box",
+                        outline: "none",
+                      }}
+                      onFocus={(e) => (e.target.style.borderColor = "#64748b")}
+                      onBlur={(e) => (e.target.style.borderColor = "#cbd5e1")}
+                    />
                   </div>
-                )}
-              </div>
 
-              {/* Disbursal Remarks */}
-              <div style={{ marginBottom: 18 }}>
-                <label style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#334155", marginBottom: 6 }}>
-                  Remarks / UTR / Reference <span style={{ color: "#64748b", fontWeight: 400, fontSize: 12 }}>(Optional)</span>
-                </label>
-                <input
-                  type="text"
-                  value={disburseRemarksInput}
-                  onChange={(e) => setDisburseRemarksInput(e.target.value)}
-                  placeholder="e.g. Disbursal confirmed, UTR #..., Banker approval"
-                  style={{
-                    width: "100%",
-                    padding: "10px 14px",
-                    borderRadius: 8,
-                    border: "1px solid #cbd5e1",
-                    fontSize: 13,
-                    color: "#0f172a",
-                    boxSizing: "border-box",
-                    outline: "none",
-                  }}
-                  onFocus={(e) => (e.target.style.borderColor = "#64748b")}
-                  onBlur={(e) => (e.target.style.borderColor = "#cbd5e1")}
-                />
-              </div>
-
-              {/* Notice Alert */}
-              <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderLeft: "4px solid #047857", borderRadius: 8, padding: "11px 14px", marginBottom: 20, fontSize: 12, color: "#334155", display: "flex", gap: 10, alignItems: "flex-start" }}>
-                <CheckCircle2 size={16} style={{ flexShrink: 0, marginTop: 1, color: "#047857" }} />
-                <div style={{ lineHeight: 1.5 }}>
-                  <strong>Direct Payout Sync:</strong> Marking this application as <strong>Disbursed</strong> will automatically update the linked lead status to <strong>DISBURSED</strong> and generate the case payout &amp; invoice record in <strong>Case Payouts</strong>.
-                </div>
-              </div>
+                  {/* Notice Alert */}
+                  <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderLeft: "4px solid #047857", borderRadius: 8, padding: "9px 12px", marginBottom: 14, fontSize: 11.5, color: "#334155", display: "flex", gap: 8, alignItems: "flex-start" }}>
+                    <CheckCircle2 size={15} style={{ flexShrink: 0, marginTop: 1, color: "#047857" }} />
+                    <div style={{ lineHeight: 1.4 }}>
+                      <strong>Direct Payout Sync:</strong> Marking this application as <strong>Disbursed</strong> will automatically update the linked lead status to <strong>DISBURSED</strong> and generate the case payout &amp; invoice record in <strong>Case Payouts</strong>.
+                    </div>
+                  </div>
+                </>
+              )}
 
               {/* Modal Actions */}
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: "auto", borderTop: "1px solid #f1f5f9", paddingTop: 10 }}>
                 <button
                   type="button"
                   disabled={disburseSubmitting}
                   onClick={() => setDisburseModalApp(null)}
                   style={{
-                    padding: "10px 18px",
-                    borderRadius: 9,
+                    padding: "8px 16px",
+                    borderRadius: 8,
                     border: "1px solid #cbd5e1",
                     background: "#f8fafc",
                     color: "#475569",
@@ -4246,43 +5084,621 @@ export default function OperationsRedesign() {
                   type="submit"
                   disabled={
                     disburseSubmitting ||
-                    (disburseModalApp.pddStatus || "").toUpperCase() !== "RESOLVED" ||
-                    (disburseModalApp.otcStatus || "").toUpperCase() !== "RESOLVED"
+                    (disburseStatusInput === "COMPLETED" && (
+                      (disburseModalApp.pddStatus || "").toUpperCase() !== "RESOLVED" ||
+                      (disburseModalApp.otcStatus || "").toUpperCase() !== "RESOLVED"
+                    ))
                   }
                   style={{
                     padding: "10px 22px",
                     borderRadius: 9,
                     border: "none",
                     background:
-                      (disburseModalApp.pddStatus || "").toUpperCase() === "RESOLVED" &&
-                      (disburseModalApp.otcStatus || "").toUpperCase() === "RESOLVED"
+                      disburseStatusInput === "CANCEL"
+                        ? "#dc2626"
+                        : disburseStatusInput === "PENDING"
+                        ? "#d97706"
+                        : (disburseModalApp.pddStatus || "").toUpperCase() === "RESOLVED" &&
+                          (disburseModalApp.otcStatus || "").toUpperCase() === "RESOLVED"
                         ? "#047857"
                         : "#94a3b8",
                     color: "#fff",
                     fontSize: 13,
                     fontWeight: 700,
                     cursor:
-                      (disburseModalApp.pddStatus || "").toUpperCase() === "RESOLVED" &&
-                      (disburseModalApp.otcStatus || "").toUpperCase() === "RESOLVED"
+                      disburseStatusInput === "CANCEL" || disburseStatusInput === "PENDING"
+                        ? "pointer"
+                        : (disburseModalApp.pddStatus || "").toUpperCase() === "RESOLVED" &&
+                          (disburseModalApp.otcStatus || "").toUpperCase() === "RESOLVED"
                         ? "pointer"
                         : "not-allowed",
                     display: "inline-flex",
                     alignItems: "center",
                     gap: 8,
                     boxShadow:
-                      (disburseModalApp.pddStatus || "").toUpperCase() === "RESOLVED" &&
-                      (disburseModalApp.otcStatus || "").toUpperCase() === "RESOLVED"
+                      disburseStatusInput === "CANCEL"
+                        ? "0 2px 6px rgba(220, 38, 38, 0.35)"
+                        : disburseStatusInput === "PENDING"
+                        ? "0 2px 6px rgba(217, 119, 6, 0.35)"
+                        : (disburseModalApp.pddStatus || "").toUpperCase() === "RESOLVED" &&
+                          (disburseModalApp.otcStatus || "").toUpperCase() === "RESOLVED"
                         ? "0 2px 6px rgba(4, 120, 87, 0.35)"
                         : "none",
                   }}
                 >
                   {disburseSubmitting ? (
                     <>
-                      <RefreshCw size={14} className="cc-spin" /> Disbursing...
+                      <RefreshCw size={14} className="cc-spin" /> Processing...
+                    </>
+                  ) : disburseStatusInput === "CANCEL" ? (
+                    <>
+                      <XCircle size={16} /> Confirm Cancellation
+                    </>
+                  ) : disburseStatusInput === "PENDING" ? (
+                    <>
+                      <Clock size={16} /> Save Pending Status
                     </>
                   ) : (
                     <>
                       <CheckCircle2 size={16} /> Confirm &amp; Disburse
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: BANK LOGIN STATUS */}
+      {loginModalApp && (
+        <div className="cc-disburse-backdrop" onClick={() => !loginSubmitting && setLoginModalApp(null)}>
+          <div className="cc-disburse-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
+            <div className="cc-disburse-header" style={{ background: "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)" }}>
+              <div className="cc-disburse-title-wrap">
+                <div className="cc-disburse-icon-badge" style={{ background: "rgba(255, 255, 255, 0.2)" }}>
+                  🏦
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#fff" }}>
+                    Bank Login Status
+                  </h3>
+                  <small style={{ color: "#e0f2fe", fontSize: 12 }}>
+                    App #{loginModalApp.applicationNumber} • {loginModalApp.customer?.name}
+                  </small>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="cc-disburse-close-btn"
+                onClick={() => !loginSubmitting && setLoginModalApp(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleLoginSubmit} style={{ padding: "20px 24px" }}>
+              {/* Current Status Box */}
+              <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12 }}>
+                  <span style={{ color: "#64748b" }}>Current Login Status:</span>
+                  <strong style={{
+                    padding: "3px 10px",
+                    borderRadius: 12,
+                    fontSize: 12,
+                    background: (loginModalApp.loginStatus || "").toUpperCase() === "COMPLETED" || loginModalApp.status === "LOGGED_IN" ? "#d1fae5" : "#fef3c7",
+                    color: (loginModalApp.loginStatus || "").toUpperCase() === "COMPLETED" || loginModalApp.status === "LOGGED_IN" ? "#047857" : "#b45309",
+                  }}>
+                    {(loginModalApp.loginStatus || "").toUpperCase() === "COMPLETED" || loginModalApp.status === "LOGGED_IN" ? "COMPLETED" : "PENDING"}
+                  </strong>
+                </div>
+                {loginModalApp.loginRemark && (
+                  <div style={{ marginTop: 8, fontSize: 11.5, color: "#475569", borderTop: "1px dashed #cbd5e1", paddingTop: 6 }}>
+                    <strong>Last Remark:</strong> "{loginModalApp.loginRemark}"
+                  </div>
+                )}
+              </div>
+
+              {/* Status Select */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 6 }}>
+                  Update Login Status <span style={{ color: "#64748b", fontWeight: 400, fontSize: 12 }}>(Select option)</span>
+                </label>
+                <select
+                  value={loginStatusInput}
+                  onChange={(e) => setLoginStatusInput(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    border: "1.5px solid #cbd5e1",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: "#0f172a",
+                    background: "#fff",
+                    outline: "none",
+                  }}
+                >
+                  <option value="PENDING">Pending (Bank Login in Progress / Docket Under Review)</option>
+                  <option value="COMPLETED">Completed (File Logged in Bank Portal / LAN Generated)</option>
+                </select>
+              </div>
+
+              {/* Remark */}
+              <div style={{ marginBottom: 18 }}>
+                <label style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#334155", marginBottom: 6 }}>
+                  Login Remark / Reference / LAN Number <span style={{ color: "#64748b", fontWeight: 400, fontSize: 12 }}>(Optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={loginRemarkInput}
+                  onChange={(e) => setLoginRemarkInput(e.target.value)}
+                  placeholder="e.g. Logged in HDFC LOS, Application LAN #678912"
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    fontSize: 13,
+                    boxSizing: "border-box",
+                    outline: "none",
+                  }}
+                />
+              </div>
+
+              {/* Actions */}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                <button
+                  type="button"
+                  disabled={loginSubmitting}
+                  onClick={() => setLoginModalApp(null)}
+                  style={{
+                    padding: "9px 16px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    background: "#f8fafc",
+                    color: "#475569",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={loginSubmitting}
+                  style={{
+                    padding: "9px 20px",
+                    borderRadius: 8,
+                    border: "none",
+                    background: "#0284c7",
+                    color: "#fff",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  {loginSubmitting ? (
+                    <>
+                      <RefreshCw size={13} className="cc-spin" /> Saving...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 size={15} /> Save Login Status
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: BANK SANCTION STATUS */}
+      {sanctionModalApp && (
+        <div className="cc-disburse-backdrop" onClick={() => !sanctionSubmitting && setSanctionModalApp(null)}>
+          <div className="cc-disburse-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
+            <div className="cc-disburse-header" style={{ background: "linear-gradient(135deg, #15803d 0%, #16a34a 100%)" }}>
+              <div className="cc-disburse-title-wrap">
+                <div className="cc-disburse-icon-badge" style={{ background: "rgba(255, 255, 255, 0.2)" }}>
+                  📜
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#fff" }}>
+                    Bank Sanction Status
+                  </h3>
+                  <small style={{ color: "#dcfce7", fontSize: 12 }}>
+                    App #{sanctionModalApp.applicationNumber} • {sanctionModalApp.customer?.name}
+                  </small>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="cc-disburse-close-btn"
+                onClick={() => !sanctionSubmitting && setSanctionModalApp(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSanctionSubmit} style={{ padding: "20px 24px" }}>
+              {/* Current Status Box */}
+              <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12 }}>
+                  <span style={{ color: "#64748b" }}>Current Status:</span>
+                  <strong style={{
+                    padding: "3px 10px",
+                    borderRadius: 12,
+                    fontSize: 12,
+                    background: (sanctionModalApp.sanctionStatus || "").toUpperCase() === "SANCTIONED" || sanctionModalApp.status === "SANCTIONED" ? "#d1fae5" : (sanctionModalApp.sanctionStatus || "").toUpperCase() === "REJECTED" ? "#fee2e2" : "#fef3c7",
+                    color: (sanctionModalApp.sanctionStatus || "").toUpperCase() === "SANCTIONED" || sanctionModalApp.status === "SANCTIONED" ? "#047857" : (sanctionModalApp.sanctionStatus || "").toUpperCase() === "REJECTED" ? "#b91c1c" : "#b45309",
+                  }}>
+                    {(sanctionModalApp.sanctionStatus || "").toUpperCase() === "SANCTIONED" || sanctionModalApp.status === "SANCTIONED" ? "SANCTIONED" : (sanctionModalApp.sanctionStatus || "").toUpperCase() === "REJECTED" ? "REJECTED" : "PENDING"}
+                  </strong>
+                </div>
+                {sanctionModalApp.sanctionedAmount && (
+                  <div style={{ marginTop: 6, fontSize: 12.5, color: "#15803d", fontWeight: 700 }}>
+                    Sanctioned Amount: {currencyFormatter.format(sanctionModalApp.sanctionedAmount)}
+                  </div>
+                )}
+                {sanctionModalApp.sanctionRemark && (
+                  <div style={{ marginTop: 6, fontSize: 11.5, color: "#475569", borderTop: "1px dashed #cbd5e1", paddingTop: 6 }}>
+                    <strong>Last Remark:</strong> "{sanctionModalApp.sanctionRemark}"
+                  </div>
+                )}
+              </div>
+
+              {/* Status Select */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 6 }}>
+                  Update Sanction Decision <span style={{ color: "#64748b", fontWeight: 400, fontSize: 12 }}>(Select option)</span>
+                </label>
+                <select
+                  value={sanctionStatusInput}
+                  onChange={(e) => setSanctionStatusInput(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    border: "1.5px solid #cbd5e1",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: "#0f172a",
+                    background: "#fff",
+                    outline: "none",
+                  }}
+                >
+                  <option value="PENDING">Pending (Bank Credit Assessment in Progress)</option>
+                  <option value="SANCTIONED">Sanctioned (Sanction Letter Issued / Credit Approved)</option>
+                  <option value="REJECTED">Rejected (Sanction Declined by Credit Committee)</option>
+                </select>
+              </div>
+
+              {/* Sanctioned Amount (when SANCTIONED) */}
+              {sanctionStatusInput === "SANCTIONED" && (
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 6 }}>
+                    Sanctioned Amount (₹) <span style={{ color: "#ef4444" }}>*</span>
+                  </label>
+                  <div style={{ position: "relative" }}>
+                    <IndianRupee size={16} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "#64748b" }} />
+                    <input
+                      type="number"
+                      step="1"
+                      min="1"
+                      required
+                      value={sanctionAmountInput}
+                      onChange={(e) => setSanctionAmountInput(e.target.value)}
+                      placeholder="e.g. 5000000"
+                      style={{
+                        width: "100%",
+                        padding: "10px 14px 10px 36px",
+                        borderRadius: 8,
+                        border: "1.5px solid #cbd5e1",
+                        fontSize: 15,
+                        fontWeight: 700,
+                        color: "#15803d",
+                        boxSizing: "border-box",
+                        outline: "none",
+                      }}
+                    />
+                  </div>
+                  {sanctionAmountInput && !isNaN(parseFloat(sanctionAmountInput)) && (
+                    <div style={{ color: "#15803d", fontSize: 12, fontWeight: 700, marginTop: 4 }}>
+                      Amount: {currencyFormatter.format(parseFloat(sanctionAmountInput))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Remark */}
+              <div style={{ marginBottom: 18 }}>
+                <label style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#334155", marginBottom: 6 }}>
+                  Sanction Remark / Letter Reference <span style={{ color: "#64748b", fontWeight: 400, fontSize: 12 }}>(Optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={sanctionRemarkInput}
+                  onChange={(e) => setSanctionRemarkInput(e.target.value)}
+                  placeholder="e.g. Sanctioned at 8.75% ROI, Letter Ref #12345"
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    fontSize: 13,
+                    boxSizing: "border-box",
+                    outline: "none",
+                  }}
+                />
+              </div>
+
+              {/* Actions */}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                <button
+                  type="button"
+                  disabled={sanctionSubmitting}
+                  onClick={() => setSanctionModalApp(null)}
+                  style={{
+                    padding: "9px 16px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    background: "#f8fafc",
+                    color: "#475569",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={sanctionSubmitting}
+                  style={{
+                    padding: "9px 20px",
+                    borderRadius: 8,
+                    border: "none",
+                    background: sanctionStatusInput === "REJECTED" ? "#dc2626" : "#15803d",
+                    color: "#fff",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  {sanctionSubmitting ? (
+                    <>
+                      <RefreshCw size={13} className="cc-spin" /> Saving...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 size={15} /> Save Sanction Status
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: INTERMEDIATE LOAN DISBURSEMENT STATUS */}
+      {disbursementStageModalApp && (
+        <div className="cc-disburse-backdrop" onClick={() => !disbursementStageSubmitting && setDisbursementStageModalApp(null)}>
+          <div className="cc-disburse-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520, maxHeight: "88vh", display: "flex", flexDirection: "column" }}>
+            <div className="cc-disburse-header" style={{ background: "linear-gradient(135deg, #0d9488 0%, #0f766e 100%)", flexShrink: 0 }}>
+              <div className="cc-disburse-title-wrap">
+                <div className="cc-disburse-icon-badge" style={{ background: "rgba(255, 255, 255, 0.2)" }}>
+                  💸
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#fff" }}>
+                    Loan Disbursement Status
+                  </h3>
+                  <small style={{ color: "#ccfbf1", fontSize: 12 }}>
+                    App #{disbursementStageModalApp.applicationNumber} • {disbursementStageModalApp.customer?.name}
+                  </small>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="cc-disburse-close-btn"
+                onClick={() => !disbursementStageSubmitting && setDisbursementStageModalApp(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleDisbursementStageSubmit} style={{ padding: "18px 22px", overflowY: "auto", flex: 1 }}>
+              {/* Current Status Box */}
+              <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "12px 14px", marginBottom: 14 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12 }}>
+                  <span style={{ color: "#64748b" }}>Current Status:</span>
+                  <strong style={{
+                    padding: "3px 10px",
+                    borderRadius: 12,
+                    fontSize: 12,
+                    background: (disbursementStageModalApp.disbursementStatus || "").toUpperCase() === "DISBURSED" || (disbursementStageModalApp.disbursementStatus || "").toUpperCase() === "COMPLETED" || disbursementStageModalApp.status === "DISBURSEMENT" ? "#ccfbf1" : (disbursementStageModalApp.disbursementStatus || "").toUpperCase() === "INITIATED" ? "#e0e7ff" : "#fef3c7",
+                    color: (disbursementStageModalApp.disbursementStatus || "").toUpperCase() === "DISBURSED" || (disbursementStageModalApp.disbursementStatus || "").toUpperCase() === "COMPLETED" || disbursementStageModalApp.status === "DISBURSEMENT" ? "#0f766e" : (disbursementStageModalApp.disbursementStatus || "").toUpperCase() === "INITIATED" ? "#4338ca" : "#b45309",
+                  }}>
+                    {(disbursementStageModalApp.disbursementStatus || "").toUpperCase() === "DISBURSED" || (disbursementStageModalApp.disbursementStatus || "").toUpperCase() === "COMPLETED" || disbursementStageModalApp.status === "DISBURSEMENT" ? "DISBURSED" : (disbursementStageModalApp.disbursementStatus || "").toUpperCase() === "INITIATED" ? "INITIATED" : "PENDING"}
+                  </strong>
+                </div>
+                {disbursementStageModalApp.sanctionedAmount && (
+                  <div style={{ marginTop: 6, fontSize: 12, color: "#64748b" }}>
+                    Sanctioned Amount: <strong style={{ color: "#15803d" }}>{currencyFormatter.format(disbursementStageModalApp.sanctionedAmount)}</strong>
+                  </div>
+                )}
+                {disbursementStageModalApp.disbursedAmount && (
+                  <div style={{ marginTop: 4, fontSize: 12.5, color: "#0d9488", fontWeight: 700 }}>
+                    Disbursed Amount: {currencyFormatter.format(disbursementStageModalApp.disbursedAmount)}
+                  </div>
+                )}
+                {disbursementStageModalApp.disbursedRemark && (
+                  <div style={{ marginTop: 6, fontSize: 11.5, color: "#475569", borderTop: "1px dashed #cbd5e1", paddingTop: 6 }}>
+                    <strong>Last Remark:</strong> "{disbursementStageModalApp.disbursedRemark}"
+                  </div>
+                )}
+              </div>
+
+              {/* Status Select */}
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 6 }}>
+                  Update Disbursement Decision <span style={{ color: "#ef4444" }}>*</span>
+                </label>
+                <select
+                  value={disbursementStageStatusInput}
+                  onChange={(e) => setDisbursementStageStatusInput(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    border: "1.5px solid #cbd5e1",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: "#0f172a",
+                    background: "#fff",
+                    outline: "none",
+                  }}
+                >
+                  <option value="PENDING">Pending (Awaiting Bank Disbursal)</option>
+                  <option value="INITIATED">Initiated (Disbursal Docket Submitted to Bank)</option>
+                  <option value="DISBURSED">Disbursed (Loan Amount Disbursed / UTR Generated)</option>
+                </select>
+              </div>
+
+              {/* Disbursed Amount */}
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 6 }}>
+                  Disbursed Amount (₹) {disbursementStageStatusInput === "DISBURSED" && <span style={{ color: "#ef4444" }}>*</span>}
+                </label>
+                <div style={{ position: "relative" }}>
+                  <IndianRupee size={16} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "#64748b" }} />
+                  <input
+                    type="number"
+                    step="1"
+                    min="1"
+                    required={disbursementStageStatusInput === "DISBURSED"}
+                    value={disbursementStageAmountInput}
+                    onChange={(e) => setDisbursementStageAmountInput(e.target.value)}
+                    placeholder="e.g. 5000000"
+                    style={{
+                      width: "100%",
+                      padding: "10px 14px 10px 36px",
+                      borderRadius: 8,
+                      border: "1.5px solid #cbd5e1",
+                      fontSize: 15,
+                      fontWeight: 700,
+                      color: "#0f766e",
+                      boxSizing: "border-box",
+                      outline: "none",
+                    }}
+                  />
+                </div>
+                {disbursementStageAmountInput && !isNaN(parseFloat(disbursementStageAmountInput)) && (
+                  <div style={{ marginTop: 4, fontSize: 12, color: "#0d9488", fontWeight: 600 }}>
+                    Formatted: {currencyFormatter.format(parseFloat(disbursementStageAmountInput))}
+                  </div>
+                )}
+              </div>
+
+              {/* Disbursement Date */}
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 6 }}>
+                  Disbursement Date
+                </label>
+                <input
+                  type="date"
+                  value={disbursementStageDateInput}
+                  onChange={(e) => setDisbursementStageDateInput(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "9px 12px",
+                    borderRadius: 8,
+                    border: "1.5px solid #cbd5e1",
+                    fontSize: 13,
+                    boxSizing: "border-box",
+                    outline: "none",
+                  }}
+                />
+              </div>
+
+              {/* UTR / Remarks */}
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 6 }}>
+                  UTR / Reference / Remark <span style={{ color: "#64748b", fontWeight: 400, fontSize: 12 }}>(Optional)</span>
+                </label>
+                <textarea
+                  rows={2}
+                  value={disbursementStageRemarkInput}
+                  onChange={(e) => setDisbursementStageRemarkInput(e.target.value)}
+                  placeholder="e.g. UTR #HDFC12345678, Initial tranche disbursed"
+                  style={{
+                    width: "100%",
+                    padding: "9px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    fontSize: 13,
+                    boxSizing: "border-box",
+                    outline: "none",
+                  }}
+                />
+              </div>
+
+              <div style={{ background: "#f0fdfa", border: "1px solid #99f6e4", borderRadius: 8, padding: "10px 12px", marginBottom: 16, fontSize: 11.5, color: "#0f766e", lineHeight: 1.4 }}>
+                ℹ️ Recording this disbursement allows your operations team to track and resolve <strong>PDD (Post-Disbursement Documents)</strong> and <strong>OTC</strong> clearance before the final case closure.
+              </div>
+
+              {/* Actions */}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, borderTop: "1px solid #f1f5f9", paddingTop: 12 }}>
+                <button
+                  type="button"
+                  disabled={disbursementStageSubmitting}
+                  onClick={() => setDisbursementStageModalApp(null)}
+                  style={{
+                    padding: "8px 16px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    background: "#f8fafc",
+                    color: "#475569",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={disbursementStageSubmitting}
+                  style={{
+                    padding: "8px 20px",
+                    borderRadius: 8,
+                    border: "none",
+                    background: "#0d9488",
+                    color: "#fff",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  {disbursementStageSubmitting ? (
+                    <>
+                      <RefreshCw size={13} className="cc-spin" /> Saving...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 size={15} /> Save Disbursement
                     </>
                   )}
                 </button>
@@ -5241,16 +6657,18 @@ export default function OperationsRedesign() {
                   }}
                 >
                   <option value="DOCS_PENDING">1. Documents Pending</option>
-                  <option value="READY_TO_SEND">2. Ready to Send / Logged In</option>
+                  <option value="READY_TO_SEND">2. Ready to Send</option>
                   <option value="SUBMITTED_TO_BANK">3. Submitted to Bank</option>
-                  <option value="PD">4. PD Status</option>
-                  <option value="QUERY">5. Banker Query</option>
-                  <option value="LEGAL">6. Legal</option>
-                  <option value="TECHNICAL">7. Technical</option>
-                  <option value="SANCTIONED">8. Sanctioned</option>
-                  <option value="PDD">9. PDD (Pending / Resolved)</option>
-                  <option value="OTC">10. OTC (Pending / Resolved)</option>
-                  <option value="DISBURSED">11. Final Disbursed</option>
+                  <option value="LOGIN">4. Bank Login</option>
+                  <option value="PD">5. PD Status</option>
+                  <option value="QUERY">6. Banker Query</option>
+                  <option value="LEGAL">7. Legal</option>
+                  <option value="TECHNICAL">8. Technical</option>
+                  <option value="SANCTIONED">9. Sanctioned</option>
+                  <option value="DISBURSEMENT">10. Disbursement</option>
+                  <option value="PDD">11. PDD (Pending / Resolved)</option>
+                  <option value="OTC">12. OTC (Pending / Resolved)</option>
+                  <option value="DISBURSED">13. Final Disbursed</option>
                   <option value="REJECTED">❌ Rejected</option>
                 </select>
               </div>
@@ -5497,6 +6915,7 @@ const opsStyles = `
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
     padding: 16px;
+    overflow-y: auto;
     animation: ccDisburseFadeIn 0.2s ease-out;
   }
   @keyframes ccDisburseFadeIn {
@@ -5505,8 +6924,11 @@ const opsStyles = `
   }
   .cc-disburse-dialog {
     background: #ffffff;
-    max-width: 530px;
+    max-width: 520px;
     width: 100%;
+    max-height: 88vh;
+    display: flex;
+    flex-direction: column;
     border-radius: 16px;
     box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(226, 232, 240, 0.8);
     overflow: hidden;
