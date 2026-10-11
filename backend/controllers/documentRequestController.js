@@ -484,6 +484,7 @@ const publicUploadDocument = async (req, res, next) => {
         companyId: request.companyId,
         customerId: lead.customerId,
         leadId: lead.id,
+        applicationId: request.applicationId || null,
         docType: chosenDocType,
         fileUrl,
         fileName,
@@ -552,12 +553,13 @@ const publicUploadDocument = async (req, res, next) => {
     await request.save();
 
     // 4. Log Activity on Lead
+    const uploadedFileNames = createdDocs.map((d) => d.fileName).filter(Boolean).join(", ");
     await ActivityLog.create({
       companyId: request.companyId,
       recordType: "Lead",
       recordId: lead.id,
       action: "DOC_UPLOADED",
-      remarks: `Customer uploaded ${slotTitle} (${fileName}) via secure upload link`,
+      remarks: `Customer uploaded ${slotTitle} (${uploadedFileNames || primaryDoc?.fileName || "Document"}) via secure upload link`,
     }).catch((err) => console.error("ActivityLog doc uploaded error:", err.message));
 
     // 5. Notify Staff (Assigned Employee, Assigned Manager, & Operations Team)
@@ -598,7 +600,8 @@ const publicUploadDocument = async (req, res, next) => {
       success: true,
       message: `"${slotTitle}" uploaded successfully!`,
       data: {
-        document,
+        document: primaryDoc,
+        documents: createdDocs,
         slotId: docSlotId,
         status: request.status,
         requiredPending,
