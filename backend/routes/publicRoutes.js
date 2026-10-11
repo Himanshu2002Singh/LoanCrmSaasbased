@@ -26,6 +26,10 @@ router.get(
   "/document-requests/:token/documents/:docId/download",
   docReqController.publicDownloadRequestedDoc
 );
+router.delete(
+  "/document-requests/:token/documents/:docId",
+  docReqController.publicDeleteRequestedDoc
+);
 
 // Public document download & view endpoints (Used in Bank RM emails and public portals)
 router.get("/documents/:id/download", docController.downloadDocument);

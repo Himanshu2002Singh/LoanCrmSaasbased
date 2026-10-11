@@ -24,6 +24,8 @@ import {
   ArrowRight,
   Check,
   Download,
+  Plus,
+  Trash2,
 } from "lucide-react";
 import API_URL from "../../config";
 
@@ -35,6 +37,8 @@ export default function CustomerDocumentUploadPortal() {
   const [uploadingSlots, setUploadingSlots] = useState({}); // { [slotId]: boolean }
   const [customerNotes, setCustomerNotes] = useState("");
   const [savingNotes, setSavingNotes] = useState(false);
+  const [customDocTitle, setCustomDocTitle] = useState("");
+  const [showAddCustomDoc, setShowAddCustomDoc] = useState(false);
 
   // Fetch upload link details
   const fetchPortalData = async () => {
@@ -124,6 +128,23 @@ export default function CustomerDocumentUploadPortal() {
       toast.error(err.response?.data?.message || "Failed to upload document. Please try again.");
     } finally {
       setUploadingSlots((prev) => ({ ...prev, [slotId]: false }));
+    }
+  };
+
+  // Handle deleting an individual file from a slot
+  const handleDeleteFile = async (slot, docId) => {
+    if (!window.confirm("Are you sure you want to remove this file?")) return;
+    try {
+      const res = await axios.delete(
+        `${API_URL}/public/document-requests/${token}/documents/${docId}`
+      );
+      if (res.data?.success) {
+        toast.success("File removed successfully!");
+        await fetchPortalData();
+      }
+    } catch (err) {
+      console.error("Delete error:", err);
+      toast.error(err.response?.data?.message || "Failed to remove file.");
     }
   };
 
@@ -414,74 +435,124 @@ export default function CustomerDocumentUploadPortal() {
                     </div>
                   </div>
 
-                  {/* Slot Body: Either Upload Dropzone or Uploaded File Info */}
+                  {/* Slot Body: Either Upload Dropzone or Uploaded File List */}
                   <div className="mt-4 pt-4 border-t border-slate-100">
                     {isUploaded ? (
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-emerald-50/50 rounded-xl p-3 border border-emerald-200">
-                        <div className="flex items-center gap-2.5 overflow-hidden">
-                          <FileCheck size={18} className="text-emerald-600 shrink-0" />
-                          <div className="truncate">
-                            <span className="text-xs font-semibold text-slate-900 truncate block">
-                              {slot.fileName || "Uploaded File"}
-                            </span>
-                            <span className="text-[11px] text-slate-500 block">
-                              {slot.fileSize ? `${(slot.fileSize / 1024).toFixed(1)} KB &bull; ` : ""}
-                              Uploaded on{" "}
-                              {slot.uploadedAt
-                                ? new Date(slot.uploadedAt).toLocaleDateString("en-IN", {
-                                    day: "numeric",
-                                    month: "short",
-                                    hour: "2-digit",
-                                    minute: "2-digit",
-                                  })
-                                : "Today"}
-                            </span>
-                          </div>
-                        </div>
+                      <div className="space-y-2.5">
+                        {/* List of all uploaded files/pages for this document */}
+                        {(() => {
+                          const slotFiles =
+                            Array.isArray(slot.allUploadedFiles) && slot.allUploadedFiles.length > 0
+                              ? slot.allUploadedFiles
+                              : slot.fileUrl
+                              ? [
+                                  {
+                                    documentId: slot.documentId,
+                                    fileName: slot.fileName,
+                                    fileUrl: slot.fileUrl,
+                                    fileSize: slot.fileSize,
+                                    uploadedAt: slot.uploadedAt,
+                                  },
+                                ]
+                              : [];
 
-                        <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                          {slot.fileUrl && (
+                          return (
                             <>
-                              <a
-                                href={getFileUrl(slot.fileUrl)}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium transition-all flex items-center gap-1.5 border border-slate-300 shadow-sm"
-                                title="View document in browser"
-                              >
-                                <Eye size={13} />
-                                <span>View</span>
-                              </a>
-                              <a
-                                href={`${API_URL}/public/document-requests/${token}/documents/${slot.documentId || slot.id}/download`}
-                                download={slot.fileName || `${slot.title || "document"}.pdf`}
-                                className="px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold transition-all flex items-center gap-1.5 border border-blue-200 shadow-sm"
-                                title="Download this document"
-                              >
-                                <Download size={13} />
-                                <span>Download</span>
-                              </a>
-                            </>
-                          )}
+                              <div className="space-y-2">
+                                {slotFiles.map((fileItem, fIdx) => (
+                                  <div
+                                    key={fileItem.documentId || fIdx}
+                                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-emerald-50/60 rounded-xl p-3 border border-emerald-200"
+                                  >
+                                    <div className="flex items-center gap-2.5 overflow-hidden">
+                                      <FileCheck size={18} className="text-emerald-600 shrink-0" />
+                                      <div className="truncate">
+                                        <span className="text-xs font-semibold text-slate-900 truncate block">
+                                          {fileItem.fileName || `${slot.title} (File ${fIdx + 1})`}
+                                        </span>
+                                        <span className="text-[11px] text-slate-500 block">
+                                          {fileItem.fileSize
+                                            ? `${(fileItem.fileSize / 1024).toFixed(1)} KB &bull; `
+                                            : ""}
+                                          Uploaded on{" "}
+                                          {fileItem.uploadedAt
+                                            ? new Date(fileItem.uploadedAt).toLocaleDateString("en-IN", {
+                                                day: "numeric",
+                                                month: "short",
+                                                hour: "2-digit",
+                                                minute: "2-digit",
+                                              })
+                                            : "Today"}
+                                        </span>
+                                      </div>
+                                    </div>
 
-                          {/* Re-upload / Replace */}
-                          <label className="px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 border border-blue-200">
-                            <RefreshCw size={12} className={isUploading ? "animate-spin" : ""} />
-                            <span>{isUploading ? "Uploading..." : "Upload / Replace"}</span>
-                            <input
-                              type="file"
-                              multiple
-                              accept="image/*,application/pdf"
-                              disabled={isUploading}
-                              className="hidden"
-                              onChange={(e) => {
-                                if (e.target.files && e.target.files.length > 0) {
-                                  handleFileUpload(slot, e.target.files);
-                                }
-                              }}
-                            />
-                          </label>
-                        </div>
+                                    <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                                      {fileItem.fileUrl && (
+                                        <>
+                                          <a
+                                            href={getFileUrl(fileItem.fileUrl)}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="px-2.5 py-1.5 rounded-lg bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium transition-all flex items-center gap-1 border border-slate-300 shadow-sm"
+                                            title="View document in new tab"
+                                          >
+                                            <Eye size={12} />
+                                            <span>View</span>
+                                          </a>
+                                          <a
+                                            href={`${API_URL}/public/document-requests/${token}/documents/${fileItem.documentId || slot.id}/download`}
+                                            download={fileItem.fileName || `${slot.title}.pdf`}
+                                            className="px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold transition-all flex items-center gap-1 border border-blue-200 shadow-sm"
+                                            title="Download this document"
+                                          >
+                                            <Download size={12} />
+                                            <span>Download</span>
+                                          </a>
+                                        </>
+                                      )}
+
+                                      {fileItem.documentId && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDeleteFile(slot, fileItem.documentId)}
+                                          className="px-2.5 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs font-medium transition-all flex items-center gap-1 border border-red-200"
+                                          title="Remove this uploaded file"
+                                        >
+                                          <Trash2 size={12} />
+                                          <span>Remove</span>
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+
+                              {/* Action row: file count and + Add More Files/Images */}
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1.5">
+                                <span className="text-[11.5px] text-slate-500 font-medium">
+                                  {slotFiles.length} file{slotFiles.length > 1 ? "s" : ""} uploaded for this document
+                                </span>
+                                <label className="self-start sm:self-auto px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 shadow-sm">
+                                  <Plus size={14} className={isUploading ? "animate-spin" : ""} />
+                                  <span>{isUploading ? "Uploading..." : "+ Add More Image / PDF"}</span>
+                                  <input
+                                    type="file"
+                                    multiple
+                                    accept="image/*,application/pdf"
+                                    disabled={isUploading}
+                                    className="hidden"
+                                    onChange={(e) => {
+                                      if (e.target.files && e.target.files.length > 0) {
+                                        handleFileUpload(slot, e.target.files);
+                                      }
+                                    }}
+                                  />
+                                </label>
+                              </div>
+                            </>
+                          );
+                        })()}
                       </div>
                     ) : (
                       <div>
@@ -532,6 +603,66 @@ export default function CustomerDocumentUploadPortal() {
                 </div>
               );
             })}
+          </div>
+
+          {/* Upload Additional / Other Supporting Document */}
+          <div className="mt-4 bg-white border border-dashed border-blue-200 hover:border-blue-300 rounded-2xl p-4 transition-all">
+            {!showAddCustomDoc ? (
+              <button
+                type="button"
+                onClick={() => setShowAddCustomDoc(true)}
+                className="w-full flex items-center justify-center gap-2 py-2 text-xs font-bold text-blue-600 hover:text-blue-700"
+              >
+                <Plus size={15} />
+                <span>+ Upload Additional / Other Document (e.g. Utility Bill, Rent Agreement, Cheque)</span>
+              </button>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800">
+                    Upload Additional Document
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAddCustomDoc(false);
+                      setCustomDocTitle("");
+                    }}
+                    className="text-xs text-slate-400 hover:text-slate-600"
+                  >
+                    Cancel
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  placeholder="Document Title (e.g. Electricity Bill, Rent Agreement, Cancelled Cheque)"
+                  value={customDocTitle}
+                  onChange={(e) => setCustomDocTitle(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500"
+                />
+                <label className="flex items-center justify-center gap-1.5 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold cursor-pointer shadow-sm">
+                  <Upload size={14} />
+                  <span>Select &amp; Upload File(s) (Max 25MB each)</span>
+                  <input
+                    type="file"
+                    multiple
+                    accept="image/*,application/pdf"
+                    className="hidden"
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files.length > 0) {
+                        const title = customDocTitle.trim() || "Additional Document";
+                        handleFileUpload(
+                          { id: `custom_${Date.now()}`, title, docType: "OTHER" },
+                          e.target.files
+                        );
+                        setShowAddCustomDoc(false);
+                        setCustomDocTitle("");
+                      }
+                    }}
+                  />
+                </label>
+              </div>
+            )}
           </div>
         </div>
 

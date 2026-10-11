@@ -499,21 +499,44 @@ const publicUploadDocument = async (req, res, next) => {
 
     const primaryDoc = createdDocs[0];
 
-    // 2. Update the slot in requiredDocs JSON
+    // 2. Update the slot in requiredDocs JSON - Accumulate multiple files without replacing
     if (slotIndex !== -1) {
+      const existingSlot = requiredDocs[slotIndex];
+      const previousFiles = Array.isArray(existingSlot.allUploadedFiles) && existingSlot.allUploadedFiles.length > 0
+        ? existingSlot.allUploadedFiles
+        : (existingSlot.fileUrl ? [{
+            documentId: existingSlot.documentId,
+            fileName: existingSlot.fileName,
+            fileUrl: existingSlot.fileUrl,
+            fileSize: existingSlot.fileSize,
+            uploadedAt: existingSlot.uploadedAt,
+          }] : []);
+
+      const newUploadedFiles = createdDocs.map((d, idx) => ({
+        documentId: d.id,
+        fileName: d.fileName,
+        fileUrl: d.fileUrl,
+        fileSize: rawFiles[idx]?.size || null,
+        uploadedAt: d.createdAt || new Date().toISOString(),
+      }));
+
+      // Combine previous files and newly uploaded files
+      const mergedFiles = [...previousFiles];
+      for (const nf of newUploadedFiles) {
+        if (!mergedFiles.some((f) => (f.documentId && f.documentId === nf.documentId) || f.fileUrl === nf.fileUrl)) {
+          mergedFiles.push(nf);
+        }
+      }
+
       requiredDocs[slotIndex] = {
-        ...requiredDocs[slotIndex],
+        ...existingSlot,
         status: "UPLOADED",
         documentId: primaryDoc.id,
         fileName: primaryDoc.fileName,
         fileUrl: primaryDoc.fileUrl,
         fileSize: rawFiles[0].size,
         uploadedAt: new Date().toISOString(),
-        allUploadedFiles: createdDocs.map((d) => ({
-          documentId: d.id,
-          fileName: d.fileName,
-          fileUrl: d.fileUrl,
-        })),
+        allUploadedFiles: mergedFiles,
       };
     } else {
       // If slot wasn't predefined, add it to requiredDocs
@@ -529,10 +552,12 @@ const publicUploadDocument = async (req, res, next) => {
         fileUrl: primaryDoc.fileUrl,
         fileSize: rawFiles[0].size,
         uploadedAt: new Date().toISOString(),
-        allUploadedFiles: createdDocs.map((d) => ({
+        allUploadedFiles: createdDocs.map((d, idx) => ({
           documentId: d.id,
           fileName: d.fileName,
           fileUrl: d.fileUrl,
+          fileSize: rawFiles[idx]?.size || null,
+          uploadedAt: d.createdAt || new Date().toISOString(),
         })),
       });
     }
@@ -895,23 +920,30 @@ const publicDownloadRequestZip = async (req, res, next) => {
     let addedCount = 0;
     const addedNames = new Set();
 
-    for (const doc of uploadedDocs) {
-      const diskPath = resolveDiskFilePath(doc.fileUrl);
-      const ext = diskPath ? path.extname(diskPath) : (path.extname(doc.fileUrl || "") || ".pdf");
-      let entryName = doc.fileName || `${doc.title || doc.docType}${ext}`;
-      if (addedNames.has(entryName)) {
-        entryName = `${doc.docType || "Doc"}_${entryName}`;
-      }
-      addedNames.add(entryName);
+    for (const slot of request.requiredDocs || []) {
+      const filesForSlot = Array.isArray(slot.allUploadedFiles) && slot.allUploadedFiles.length > 0
+        ? slot.allUploadedFiles
+        : (slot.fileUrl ? [{ documentId: slot.documentId, fileName: slot.fileName, fileUrl: slot.fileUrl }] : []);
 
-      if (diskPath && fs.existsSync(diskPath)) {
-        archive.file(diskPath, { name: entryName });
-        addedCount++;
-      } else {
-        archive.append(
-          `Document: ${doc.title || doc.docType || "N/A"}\nFile Name: ${doc.fileName || "N/A"}\nNote: File registered in request (${doc.fileUrl || "no path"}) could not be located on server storage.`,
-          { name: `[NOTE]_${entryName}.txt` }
-        );
+      for (const fileItem of filesForSlot) {
+        if (!fileItem.fileUrl) continue;
+        const diskPath = resolveDiskFilePath(fileItem.fileUrl);
+        const ext = diskPath ? path.extname(diskPath) : (path.extname(fileItem.fileUrl || "") || ".pdf");
+        let entryName = fileItem.fileName || `${slot.title || slot.docType || "Document"}${ext}`;
+        if (addedNames.has(entryName)) {
+          entryName = `${slot.docType || "Doc"}_${fileItem.documentId || Date.now()}_${entryName}`;
+        }
+        addedNames.add(entryName);
+
+        if (diskPath && fs.existsSync(diskPath)) {
+          archive.file(diskPath, { name: entryName });
+          addedCount++;
+        } else {
+          archive.append(
+            `Document: ${slot.title || slot.docType || "N/A"}\nFile Name: ${fileItem.fileName || "N/A"}\nNote: File registered in request (${fileItem.fileUrl}) could not be located on server storage.`,
+            { name: `[NOTE]_${entryName}.txt` }
+          );
+        }
       }
     }
 
@@ -934,23 +966,118 @@ const publicDownloadRequestedDoc = async (req, res, next) => {
       return res.status(404).json({ message: "Document upload request not found" });
     }
 
-    const slot = (request.requiredDocs || []).find(
-      (d) => String(d.id) === String(docId) || String(d.documentId) === String(docId)
-    );
+    let targetFile = null;
+    const slots = request.requiredDocs || [];
 
-    if (!slot || !slot.fileUrl) {
+    for (const s of slots) {
+      if (Array.isArray(s.allUploadedFiles) && s.allUploadedFiles.length > 0) {
+        const found = s.allUploadedFiles.find((f) => String(f.documentId) === String(docId));
+        if (found) {
+          targetFile = found;
+          break;
+        }
+      }
+      if (String(s.documentId) === String(docId) || String(s.id) === String(docId)) {
+        targetFile = s;
+        break;
+      }
+    }
+
+    if (!targetFile || !targetFile.fileUrl) {
       return res.status(404).json({ message: "Requested document slot has no file" });
     }
 
-    const diskPath = resolveDiskFilePath(slot.fileUrl);
+    const diskPath = resolveDiskFilePath(targetFile.fileUrl);
     if (!diskPath || !fs.existsSync(diskPath)) {
       return res.status(404).json({ message: "File does not exist on server storage" });
     }
 
     const ext = path.extname(diskPath) || ".pdf";
-    const downloadFileName = slot.fileName || `${(slot.title || "document").replace(/\s+/g, "_")}${ext}`;
+    const downloadFileName = targetFile.fileName || `${(targetFile.title || "document").replace(/\s+/g, "_")}${ext}`;
 
     return res.download(diskPath, downloadFileName);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * @desc    Customer removes an individual file from a slot
+ * @route   DELETE /api/public/document-requests/:token/documents/:docId
+ */
+const publicDeleteRequestedDoc = async (req, res, next) => {
+  try {
+    const { token, docId } = req.params;
+    const request = await LeadDocumentRequest.findOne({ where: { token } });
+    if (!request) {
+      return res.status(404).json({ message: "Document request not found" });
+    }
+
+    if (request.status === "EXPIRED" || request.status === "CANCELLED") {
+      return res.status(400).json({ message: "This request is closed and cannot be modified" });
+    }
+
+    // Try to find and delete Document model record if docId is numeric
+    let docRecord = null;
+    if (!isNaN(parseInt(docId, 10))) {
+      docRecord = await Document.findOne({
+        where: { id: parseInt(docId, 10), customerRequestId: request.id },
+      });
+      if (docRecord) {
+        const diskPath = resolveDiskFilePath(docRecord.fileUrl);
+        if (diskPath && fs.existsSync(diskPath)) {
+          try { fs.unlinkSync(diskPath); } catch (e) {}
+        }
+        await docRecord.destroy();
+      }
+    }
+
+    const requiredDocs = Array.isArray(request.requiredDocs) ? [...request.requiredDocs] : [];
+    let modified = false;
+
+    for (let i = 0; i < requiredDocs.length; i++) {
+      const slot = { ...requiredDocs[i] };
+      let files = Array.isArray(slot.allUploadedFiles) ? [...slot.allUploadedFiles] : (slot.fileUrl ? [{ ...slot }] : []);
+
+      const matchIndex = files.findIndex(
+        (f) => String(f.documentId) === String(docId) || (docRecord && f.fileUrl === docRecord.fileUrl)
+      );
+
+      if (matchIndex !== -1) {
+        files.splice(matchIndex, 1);
+        slot.allUploadedFiles = files;
+
+        if (files.length > 0) {
+          const last = files[files.length - 1];
+          slot.documentId = last.documentId;
+          slot.fileName = last.fileName;
+          slot.fileUrl = last.fileUrl;
+          slot.status = "UPLOADED";
+        } else {
+          slot.status = "PENDING";
+          slot.documentId = null;
+          slot.fileName = null;
+          slot.fileUrl = null;
+          slot.allUploadedFiles = [];
+        }
+        requiredDocs[i] = slot;
+        modified = true;
+        break;
+      }
+    }
+
+    if (modified) {
+      const requiredPending = requiredDocs.filter((d) => d.isRequired && d.status !== "UPLOADED").length;
+      request.status = requiredPending === 0 ? "COMPLETED" : "PARTIALLY_UPLOADED";
+      request.requiredDocs = requiredDocs;
+      await request.save();
+    }
+
+    return res.json({
+      success: true,
+      message: "File removed successfully",
+      requiredDocs: request.requiredDocs,
+    });
   } catch (error) {
     next(error);
   }
@@ -967,5 +1094,6 @@ module.exports = {
   sendDocumentRequestEmail,
   publicDownloadRequestZip,
   publicDownloadRequestedDoc,
+  publicDeleteRequestedDoc,
 };
 
