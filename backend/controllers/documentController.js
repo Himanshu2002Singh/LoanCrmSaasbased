@@ -1,12 +1,11 @@
 const path = require("path");
 const fs = require("fs");
-const archiver = require("archiver");
 const { Op } = require("sequelize");
-const { Document, Customer, Lead, Application, User } = require("../models");
+const { Document, Customer, Lead, Application, User, LeadDocumentRequest } = require("../models");
 const { buildQuery, paginated } = require("../utils/query");
 const { logActivity, diffFields } = require("../utils/activity");
 const { companyScope, belongsToScope } = require("../middlewares/auth");
-const { resolveDiskFilePath, getPublicDocumentUrls } = require("../utils/documentHelper");
+const { createZipArchive, resolveDiskFilePath, getPublicDocumentUrls } = require("../utils/documentHelper");
 
 /**
  * @desc    Upload a new KYC / Loan document
@@ -306,24 +305,61 @@ const downloadAllLeadDocuments = async (req, res, next) => {
     });
     const appIds = leadApps.map((a) => a.id);
 
-    const docs = await Document.findAll({
-      where: {
-        [Op.or]: [
-          { leadId: parseInt(leadId, 10) },
-          ...(appIds.length > 0 ? [{ applicationId: { [Op.in]: appIds } }] : []),
-        ],
-      },
+    const docConditions = [
+      { leadId: parseInt(leadId, 10) },
+      ...(appIds.length > 0 ? [{ applicationId: { [Op.in]: appIds } }] : []),
+      ...(lead.customerId ? [{ customerId: lead.customerId }] : []),
+    ];
+
+    const dbDocs = await Document.findAll({
+      where: { [Op.or]: docConditions },
     });
 
-    if (!docs || docs.length === 0) {
+    // Build unified list of documents to include
+    const fileList = dbDocs.map((d) => ({
+      id: d.id,
+      docType: d.docType || "Document",
+      fileName: d.fileName,
+      fileUrl: d.fileUrl,
+      verificationStatus: d.verificationStatus,
+    }));
+
+    // Also include any customer request files uploaded via portal
+    if (LeadDocumentRequest) {
+      try {
+        const reqs = await LeadDocumentRequest.findAll({
+          where: { leadId: parseInt(leadId, 10) },
+        });
+        const existingUrls = new Set(fileList.map((f) => f.fileUrl).filter(Boolean));
+        for (const r of reqs) {
+          const reqDocs = Array.isArray(r.requiredDocs) ? r.requiredDocs : [];
+          for (const rd of reqDocs) {
+            if (rd.status === "UPLOADED" && rd.fileUrl && !existingUrls.has(rd.fileUrl)) {
+              fileList.push({
+                id: rd.documentId || `req_${r.id}`,
+                docType: rd.title || rd.docType || "Uploaded Document",
+                fileName: rd.fileName,
+                fileUrl: rd.fileUrl,
+                verificationStatus: "UPLOADED",
+              });
+              existingUrls.add(rd.fileUrl);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("[downloadAllLeadDocuments] Error reading LeadDocumentRequest:", err.message);
+      }
+    }
+
+    if (!fileList || fileList.length === 0) {
       return res.status(404).json({ message: "No documents found for this lead" });
     }
 
     const customerName = (lead.customer?.name || "Customer").replace(/[^a-zA-Z0-9_-]/g, "_");
-    const zipFileName = `Lead_${lead.id}_${customerName}_Documents.zip`;
+    const zipFileName = `Lead_${lead.id}_${customerName}_All_Documents.zip`;
 
     res.attachment(zipFileName);
-    const archive = archiver("zip", { zlib: { level: 9 } });
+    const archive = createZipArchive({ zlib: { level: 9 } });
 
     archive.on("error", (err) => {
       console.error("[archive error]", err);
@@ -335,23 +371,24 @@ const downloadAllLeadDocuments = async (req, res, next) => {
     let addedCount = 0;
     const addedNames = new Set();
 
-    for (const doc of docs) {
+    for (const doc of fileList) {
       const diskPath = resolveDiskFilePath(doc.fileUrl);
+      const ext = diskPath ? path.extname(diskPath) : (path.extname(doc.fileUrl || "") || ".pdf");
+      let entryName = doc.fileName || `${doc.docType || "Document"}${ext}`;
+      if (addedNames.has(entryName)) {
+        entryName = `${doc.docType || "Doc"}_${doc.id}_${entryName}`;
+      }
+      addedNames.add(entryName);
+
       if (diskPath && fs.existsSync(diskPath)) {
-        const ext = path.extname(diskPath) || ".pdf";
-        let entryName = doc.fileName || `${doc.docType}${ext}`;
-        // Prevent duplicate file name collisions in the zip
-        if (addedNames.has(entryName)) {
-          entryName = `${doc.docType}_${doc.id}_${entryName}`;
-        }
-        addedNames.add(entryName);
         archive.file(diskPath, { name: entryName });
         addedCount++;
+      } else {
+        archive.append(
+          `Document: ${doc.docType || "N/A"}\nFile Name: ${doc.fileName || "N/A"}\nStatus: ${doc.verificationStatus || "N/A"}\nNote: File was registered in database (${doc.fileUrl || "no path"}) but could not be located on server disk storage.`,
+          { name: `[NOTE]_${entryName}.txt` }
+        );
       }
-    }
-
-    if (addedCount === 0) {
-      archive.append("No readable document files found on disk.", { name: "README.txt" });
     }
 
     await archive.finalize();
@@ -378,29 +415,49 @@ const downloadAllApplicationDocuments = async (req, res, next) => {
       return res.status(404).json({ message: "Application not found" });
     }
 
-    let docs = application.documents || [];
-    if (docs.length === 0) {
-      // Fallback: check documents linked by applicationId
-      docs = await Document.findAll({
-        where: { applicationId: parseInt(applicationId, 10) },
-      });
-    }
+    const docConditions = [
+      { applicationId: parseInt(applicationId, 10) },
+      ...(application.leadId ? [{ leadId: application.leadId }] : []),
+      ...(application.customerId ? [{ customerId: application.customerId }] : []),
+    ];
 
-    if (application.leadId) {
-      // Also combine KYC documents linked by parent leadId
-      const leadDocs = await Document.findAll({
-        where: { leadId: application.leadId },
-      });
-      const seenIds = new Set(docs.map((d) => d.id));
-      for (const ld of leadDocs) {
-        if (!seenIds.has(ld.id)) {
-          docs.push(ld);
-          seenIds.add(ld.id);
+    const dbDocs = await Document.findAll({
+      where: { [Op.or]: docConditions },
+    });
+
+    const fileList = dbDocs.map((d) => ({
+      id: d.id,
+      docType: d.docType || "Document",
+      fileName: d.fileName,
+      fileUrl: d.fileUrl,
+      verificationStatus: d.verificationStatus,
+    }));
+
+    if (LeadDocumentRequest && application.leadId) {
+      try {
+        const reqs = await LeadDocumentRequest.findAll({
+          where: { leadId: application.leadId },
+        });
+        const existingUrls = new Set(fileList.map((f) => f.fileUrl).filter(Boolean));
+        for (const r of reqs) {
+          const reqDocs = Array.isArray(r.requiredDocs) ? r.requiredDocs : [];
+          for (const rd of reqDocs) {
+            if (rd.status === "UPLOADED" && rd.fileUrl && !existingUrls.has(rd.fileUrl)) {
+              fileList.push({
+                id: rd.documentId || `req_${r.id}`,
+                docType: rd.title || rd.docType || "Uploaded Document",
+                fileName: rd.fileName,
+                fileUrl: rd.fileUrl,
+                verificationStatus: "UPLOADED",
+              });
+              existingUrls.add(rd.fileUrl);
+            }
+          }
         }
-      }
+      } catch (err) {}
     }
 
-    if (!docs || docs.length === 0) {
+    if (!fileList || fileList.length === 0) {
       return res.status(404).json({ message: "No documents attached to this loan application" });
     }
 
@@ -408,7 +465,7 @@ const downloadAllApplicationDocuments = async (req, res, next) => {
     const zipFileName = `${appRef}_Docket_Documents.zip`;
 
     res.attachment(zipFileName);
-    const archive = archiver("zip", { zlib: { level: 9 } });
+    const archive = createZipArchive({ zlib: { level: 9 } });
 
     archive.on("error", (err) => {
       console.error("[archive error]", err);
@@ -420,22 +477,24 @@ const downloadAllApplicationDocuments = async (req, res, next) => {
     let addedCount = 0;
     const addedNames = new Set();
 
-    for (const doc of docs) {
+    for (const doc of fileList) {
       const diskPath = resolveDiskFilePath(doc.fileUrl);
+      const ext = diskPath ? path.extname(diskPath) : (path.extname(doc.fileUrl || "") || ".pdf");
+      let entryName = doc.fileName || `${doc.docType || "Document"}${ext}`;
+      if (addedNames.has(entryName)) {
+        entryName = `${doc.docType || "Doc"}_${doc.id}_${entryName}`;
+      }
+      addedNames.add(entryName);
+
       if (diskPath && fs.existsSync(diskPath)) {
-        const ext = path.extname(diskPath) || ".pdf";
-        let entryName = doc.fileName || `${doc.docType}${ext}`;
-        if (addedNames.has(entryName)) {
-          entryName = `${doc.docType}_${doc.id}_${entryName}`;
-        }
-        addedNames.add(entryName);
         archive.file(diskPath, { name: entryName });
         addedCount++;
+      } else {
+        archive.append(
+          `Document: ${doc.docType || "N/A"}\nFile Name: ${doc.fileName || "N/A"}\nStatus: ${doc.verificationStatus || "N/A"}\nNote: File was registered in database (${doc.fileUrl || "no path"}) but could not be located on server disk storage.`,
+          { name: `[NOTE]_${entryName}.txt` }
+        );
       }
-    }
-
-    if (addedCount === 0) {
-      archive.append("No readable document files found on disk.", { name: "README.txt" });
     }
 
     await archive.finalize();

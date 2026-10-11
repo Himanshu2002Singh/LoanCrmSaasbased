@@ -1,7 +1,6 @@
 const crypto = require("crypto");
 const path = require("path");
 const fs = require("fs");
-const archiver = require("archiver");
 const { Op } = require("sequelize");
 const {
   LeadDocumentRequest,
@@ -19,7 +18,7 @@ const { companyScope, belongsToScope } = require("../middlewares/auth");
 const { ROLES } = require("../constants/roles");
 const { logActivity } = require("../utils/activity");
 const { sendMail, interpolate } = require("../utils/emailService");
-const { resolveDiskFilePath, getPublicApiBaseUrl } = require("../utils/documentHelper");
+const { createZipArchive, resolveDiskFilePath, getPublicApiBaseUrl } = require("../utils/documentHelper");
 
 // Standard popular loan document templates for Indian NBFC / Bank loans
 const STANDARD_DOC_PRESETS = {
@@ -881,7 +880,7 @@ const publicDownloadRequestZip = async (req, res, next) => {
     const zipFileName = `${customerName}_Uploaded_Documents.zip`;
 
     res.attachment(zipFileName);
-    const archive = archiver("zip", { zlib: { level: 9 } });
+    const archive = createZipArchive({ zlib: { level: 9 } });
 
     archive.on("error", (err) => {
       console.error("[public zip archive error]", err);
@@ -895,20 +894,22 @@ const publicDownloadRequestZip = async (req, res, next) => {
 
     for (const doc of uploadedDocs) {
       const diskPath = resolveDiskFilePath(doc.fileUrl);
+      const ext = diskPath ? path.extname(diskPath) : (path.extname(doc.fileUrl || "") || ".pdf");
+      let entryName = doc.fileName || `${doc.title || doc.docType}${ext}`;
+      if (addedNames.has(entryName)) {
+        entryName = `${doc.docType || "Doc"}_${entryName}`;
+      }
+      addedNames.add(entryName);
+
       if (diskPath && fs.existsSync(diskPath)) {
-        const ext = path.extname(diskPath) || ".pdf";
-        let entryName = doc.fileName || `${doc.title || doc.docType}${ext}`;
-        if (addedNames.has(entryName)) {
-          entryName = `${doc.docType}_${entryName}`;
-        }
-        addedNames.add(entryName);
         archive.file(diskPath, { name: entryName });
         addedCount++;
+      } else {
+        archive.append(
+          `Document: ${doc.title || doc.docType || "N/A"}\nFile Name: ${doc.fileName || "N/A"}\nNote: File registered in request (${doc.fileUrl || "no path"}) could not be located on server storage.`,
+          { name: `[NOTE]_${entryName}.txt` }
+        );
       }
-    }
-
-    if (addedCount === 0) {
-      archive.append("No readable document files found on disk.", { name: "README.txt" });
     }
 
     await archive.finalize();

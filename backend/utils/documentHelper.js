@@ -1,9 +1,26 @@
 const path = require("path");
 const fs = require("fs");
+const archiver = require("archiver");
+
+/**
+ * Robust archiver zip creator compatible across archiver v6, v7, v8, CommonJS & ESM
+ */
+const createZipArchive = (options = { zlib: { level: 9 } }) => {
+  if (typeof archiver === "function") {
+    return archiver("zip", options);
+  }
+  if (archiver && archiver.ZipArchive) {
+    return new archiver.ZipArchive(options);
+  }
+  if (archiver && archiver.default && typeof archiver.default === "function") {
+    return archiver.default("zip", options);
+  }
+  throw new Error("Archiver zip is not supported in current environment");
+};
 
 /**
  * Robustly resolve the local filesystem path for any fileUrl or fileName
- * Checks across /uploads/documents, /uploads, /uploads/templates, /uploads/logos
+ * Checks across /uploads/documents, /uploads/docs, /uploads, /uploads/templates, /uploads/logos
  */
 const resolveDiskFilePath = (fileUrlOrPath) => {
   if (!fileUrlOrPath) return null;
@@ -31,13 +48,15 @@ const resolveDiskFilePath = (fileUrlOrPath) => {
     path.join(backendRoot, cleanRelative),
     // 2. uploads/documents/<baseName>
     path.join(backendRoot, "uploads", "documents", baseName),
-    // 3. uploads/<baseName>
+    // 3. uploads/docs/<baseName>
+    path.join(backendRoot, "uploads", "docs", baseName),
+    // 4. uploads/<baseName>
     path.join(backendRoot, "uploads", baseName),
-    // 4. uploads/templates/<baseName>
+    // 5. uploads/templates/<baseName>
     path.join(backendRoot, "uploads", "templates", baseName),
-    // 5. uploads/logos/<baseName>
+    // 6. uploads/logos/<baseName>
     path.join(backendRoot, "uploads", "logos", baseName),
-    // 6. Absolute path if passed as absolute
+    // 7. Absolute path if passed as absolute
     path.isAbsolute(raw) ? raw : null,
   ].filter(Boolean);
 
@@ -84,6 +103,7 @@ const getPublicDocumentUrls = (doc, req = null) => {
 };
 
 module.exports = {
+  createZipArchive,
   resolveDiskFilePath,
   getPublicApiBaseUrl,
   getPublicDocumentUrls,
