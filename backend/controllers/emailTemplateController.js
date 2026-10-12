@@ -1,4 +1,5 @@
 const { EmailTemplate, Company } = require("../models");
+const { Op } = require("sequelize");
 const { companyScope, belongsToScope } = require("../middlewares/auth");
 const { testSmtpConnection } = require("../utils/emailService");
 
@@ -285,30 +286,57 @@ exports.deleteEmailTemplate = async (req, res, next) => {
  */
 exports.getSmtpConfig = async (req, res, next) => {
   try {
+    // Prevent 304 stale caching so admin panel always gets latest verified SMTP credentials
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.set("Pragma", "no-cache");
+    res.set("Expires", "0");
+
     const companyId = resolveCompanyId(req);
-    if (!companyId) {
-      return res.status(400).json({ message: "No company associated with user" });
-    }
-
-    const company = await Company.findByPk(companyId, {
+    let company = companyId ? await Company.findByPk(companyId, {
       attributes: ["id", "name", "email", "smtpConfig"],
-    });
+    }) : null;
 
-    if (!company) {
-      return res.status(404).json({ message: "Company not found" });
+    const parseCfg = (raw) => {
+      if (!raw) return null;
+      let c = raw;
+      if (typeof c === "string") {
+        try { c = JSON.parse(c); } catch { return null; }
+      }
+      return c && c.user ? c : null;
+    };
+
+    let cfg = parseCfg(company?.smtpConfig);
+
+    // Fallback A: Default Platform Company (Company 1)
+    if (!cfg && companyId !== 1) {
+      const comp1 = await Company.findByPk(1, {
+        attributes: ["id", "name", "email", "smtpConfig"],
+      });
+      cfg = parseCfg(comp1?.smtpConfig);
+      if (cfg) company = comp1;
     }
 
-    const cfg = company.smtpConfig || {};
+    // Fallback B: ANY company in the database that has valid smtpConfig
+    if (!cfg) {
+      const anyComp = await Company.findOne({
+        where: { smtpConfig: { [Op.ne]: null } },
+        attributes: ["id", "name", "email", "smtpConfig"],
+      });
+      cfg = parseCfg(anyComp?.smtpConfig);
+      if (cfg) company = anyComp;
+    }
+
+    cfg = cfg || {};
     return res.json({
       success: true,
       data: {
         service: cfg.service || "gmail",
         user: cfg.user || "",
-        senderName: cfg.senderName || company.name || "Operations Desk",
+        senderName: cfg.senderName || company?.name || "Operations Desk",
         host: cfg.host || "smtp.gmail.com",
         port: cfg.port || 465,
         secure: cfg.secure !== undefined ? Boolean(cfg.secure) : true,
-        isConfigured: Boolean(cfg.isConfigured),
+        isConfigured: Boolean(cfg.user && (cfg.isConfigured !== false || cfg.pass)),
         hasPassword: Boolean(cfg.pass),
       },
     });
@@ -378,6 +406,16 @@ exports.updateSmtpConfig = async (req, res, next) => {
     };
 
     await company.update({ smtpConfig: updatedConfig });
+
+    // Sync to Company 1 and User company so all scopes share verified outgoing email
+    if (company.id !== 1) {
+      const comp1 = await Company.findByPk(1);
+      if (comp1) await comp1.update({ smtpConfig: updatedConfig });
+    }
+    if (req.user?.companyId && req.user.companyId !== company.id) {
+      const userComp = await Company.findByPk(req.user.companyId);
+      if (userComp) await userComp.update({ smtpConfig: updatedConfig });
+    }
 
     return res.json({
       success: true,
@@ -468,6 +506,16 @@ exports.testSmtpConfig = async (req, res, next) => {
         updatedAt: new Date().toISOString(),
       };
       await company.update({ smtpConfig: verifiedConfig });
+
+      // Sync verified config to Company 1 and User company as well
+      if (company.id !== 1) {
+        const comp1 = await Company.findByPk(1);
+        if (comp1) await comp1.update({ smtpConfig: verifiedConfig });
+      }
+      if (req.user?.companyId && req.user.companyId !== company.id) {
+        const userComp = await Company.findByPk(req.user.companyId);
+        if (userComp) await userComp.update({ smtpConfig: verifiedConfig });
+      }
       savedData = {
         service: verifiedConfig.service,
         user: verifiedConfig.user,

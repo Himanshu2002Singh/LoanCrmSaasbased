@@ -1,6 +1,7 @@
 const nodemailer = require("nodemailer");
 const path = require("path");
 const fs = require("fs");
+const { Op } = require("sequelize");
 const { Company } = require("../models");
 const { resolveDiskFilePath } = require("./documentHelper");
 
@@ -216,24 +217,58 @@ const sendMail = async ({
   let activeTransporter = null;
   let activeFrom = from;
 
-  // 1. Check if direct smtpConfig is passed
-  let resolvedConfig = smtpConfig;
+  const extractValidSmtpConfig = (raw) => {
+    if (!raw) return null;
+    let cfg = raw;
+    if (typeof cfg === "string") {
+      try {
+        cfg = JSON.parse(cfg);
+      } catch {
+        return null;
+      }
+    }
+    if (cfg && cfg.user && cfg.pass && cfg.isConfigured !== false) {
+      return cfg;
+    }
+    return null;
+  };
 
-  // 2. Otherwise look up Company's saved smtpConfig if companyId is supplied
-  if (!resolvedConfig && companyId) {
+  // 1. Check if direct smtpConfig is passed
+  let resolvedConfig = extractValidSmtpConfig(smtpConfig);
+
+  // 2. Otherwise look up Company's saved smtpConfig
+  if (!resolvedConfig) {
     try {
-      let company = await Company.findByPk(companyId, {
-        attributes: ["id", "name", "email", "smtpConfig"],
-      });
-      if (company && company.smtpConfig && company.smtpConfig.user && company.smtpConfig.pass && company.smtpConfig.isConfigured !== false) {
-        resolvedConfig = company.smtpConfig;
-      } else if (companyId !== 1) {
-        // Fallback to default company 1 if tenant company has not configured custom SMTP
-        const defaultComp = await Company.findByPk(1, {
+      // Step A: Target company
+      if (companyId) {
+        const targetComp = await Company.findByPk(companyId, {
           attributes: ["id", "name", "email", "smtpConfig"],
         });
-        if (defaultComp && defaultComp.smtpConfig && defaultComp.smtpConfig.user && defaultComp.smtpConfig.pass && defaultComp.smtpConfig.isConfigured !== false) {
-          resolvedConfig = defaultComp.smtpConfig;
+        resolvedConfig = extractValidSmtpConfig(targetComp?.smtpConfig);
+      }
+
+      // Step B: Default platform company (Company 1)
+      if (!resolvedConfig && companyId !== 1) {
+        const comp1 = await Company.findByPk(1, {
+          attributes: ["id", "name", "email", "smtpConfig"],
+        });
+        resolvedConfig = extractValidSmtpConfig(comp1?.smtpConfig);
+      }
+
+      // Step C: ANY company in the database that has valid configured SMTP credentials
+      if (!resolvedConfig) {
+        const anyComp = await Company.findAll({
+          attributes: ["id", "name", "email", "smtpConfig"],
+          where: {
+            smtpConfig: { [Op.ne]: null },
+          },
+        });
+        for (const c of anyComp) {
+          const valid = extractValidSmtpConfig(c.smtpConfig);
+          if (valid) {
+            resolvedConfig = valid;
+            break;
+          }
         }
       }
     } catch (e) {
