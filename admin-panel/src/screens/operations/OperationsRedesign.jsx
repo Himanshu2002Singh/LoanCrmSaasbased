@@ -681,6 +681,11 @@ export default function OperationsRedesign() {
   const [bankMailLoading, setBankMailLoading] = useState(false);
   const [bankMailSubmitting, setBankMailSubmitting] = useState(false);
   const [mailActiveTab, setMailActiveTab] = useState("compose"); // "compose" | "preview"
+  const [quickSmtpOpen, setQuickSmtpOpen] = useState(false);
+  const [quickSmtpUser, setQuickSmtpUser] = useState("");
+  const [quickSmtpPass, setQuickSmtpPass] = useState("");
+  const [quickSmtpSenderName, setQuickSmtpSenderName] = useState("");
+  const [quickSmtpLoading, setQuickSmtpLoading] = useState(false);
   const [mailForm, setMailForm] = useState({
     lenderId: "",
     toEmail: "",
@@ -693,6 +698,59 @@ export default function OperationsRedesign() {
   });
   const mailSubjectRef = useRef(null);
   const mailContentRef = useRef(null);
+
+  const refreshSmtpStatus = async () => {
+    try {
+      const res = await axios.get(`${API_URL}/email-templates/smtp/config`);
+      if (res.data?.data && res.data.data.user && (res.data.data.hasPassword || res.data.data.isConfigured)) {
+        setMailSmtpConfig(res.data.data);
+        toast.success(`SMTP verified! Sending from ${res.data.data.user}`);
+      } else {
+        setMailSmtpConfig(null);
+        toast.info("SMTP outgoing email is not configured yet.");
+      }
+    } catch {
+      toast.error("Could not check SMTP status");
+    }
+  };
+
+  const handleQuickSmtpSave = async (e) => {
+    e?.preventDefault();
+    if (!quickSmtpUser.trim()) {
+      toast.warning("Please enter your Gmail address");
+      return;
+    }
+    if (!quickSmtpPass.trim()) {
+      toast.warning("Please enter your 16-character Google App Password");
+      return;
+    }
+    setQuickSmtpLoading(true);
+    try {
+      const isGmail = quickSmtpUser.toLowerCase().endsWith("@gmail.com");
+      const cleanPass = isGmail ? quickSmtpPass.replace(/\s+/g, "") : quickSmtpPass.trim();
+      const res = await axios.post(`${API_URL}/email-templates/smtp/test`, {
+        service: "gmail",
+        user: quickSmtpUser.trim(),
+        pass: cleanPass,
+        senderName: quickSmtpSenderName.trim() || undefined,
+        testToEmail: quickSmtpUser.trim(),
+      });
+      if (res.data?.success) {
+        toast.success("✅ Gmail & App Password verified and saved successfully!");
+        setMailSmtpConfig(res.data.data || {
+          user: quickSmtpUser.trim(),
+          senderName: quickSmtpSenderName.trim() || "Operations Desk",
+          isConfigured: true,
+          hasPassword: true,
+        });
+        setQuickSmtpOpen(false);
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || err.message || "Failed to verify Gmail App Password");
+    } finally {
+      setQuickSmtpLoading(false);
+    }
+  };
 
   // Financial Years list (Indian FY starting April 1)
   const financialYears = useMemo(() => {
@@ -2245,10 +2303,14 @@ export default function OperationsRedesign() {
       const tpls = tplRes.data?.templates || tplRes.data?.data || [];
       setEmailTemplates(tpls);
 
-      if (smtpRes?.data?.data) {
+      if (smtpRes?.data?.data && smtpRes.data.data.user && (smtpRes.data.data.hasPassword || smtpRes.data.data.isConfigured)) {
         setMailSmtpConfig(smtpRes.data.data);
+        setQuickSmtpUser(smtpRes.data.data.user || "");
+        setQuickSmtpSenderName(smtpRes.data.data.senderName || "");
       } else {
         setMailSmtpConfig(null);
+        setQuickSmtpUser(localStorage.getItem("email") || "");
+        setQuickSmtpSenderName(localStorage.getItem("name") || "Operations Desk");
       }
 
       const currentLenderId = fullApp.lenderId || (lenders[0]?.lender_id || lenders[0]?.id || "");
@@ -2411,6 +2473,12 @@ export default function OperationsRedesign() {
     }
     if (!mailForm.content.trim()) {
       toast.warning("Email content cannot be empty");
+      return;
+    }
+
+    if (!mailSmtpConfig?.user && !mailSmtpConfig?.isConfigured) {
+      toast.warning("Sender email is not configured. Please set your Gmail ID & App Password below.");
+      setQuickSmtpOpen(true);
       return;
     }
 
@@ -4241,17 +4309,102 @@ export default function OperationsRedesign() {
                       <CheckCircle2 size={15} color="#059669" />
                       <span>Sending From: <strong>{mailSmtpConfig.senderName}</strong> (&lt;{mailSmtpConfig.user}&gt;)</span>
                     </div>
-                    <span style={{ fontSize: 11, background: "#d1fae5", color: "#047857", padding: "2px 7px", borderRadius: 5, fontWeight: 700 }}>Verified SMTP</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontSize: 11, background: "#d1fae5", color: "#047857", padding: "2px 7px", borderRadius: 5, fontWeight: 700 }}>Verified SMTP</span>
+                      <button
+                        type="button"
+                        onClick={refreshSmtpStatus}
+                        title="Recheck SMTP status"
+                        style={{ background: "transparent", border: "none", cursor: "pointer", color: "#047857", padding: "2px 5px" }}
+                      >
+                        <RefreshCw size={13} />
+                      </button>
+                    </div>
                   </div>
                 ) : (
-                  <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "9px 13px", marginBottom: 12, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#92400e" }}>
-                      <AlertCircle size={15} color="#d97706" />
-                      <span><strong>Sender Email Not Configured:</strong> Set your Gmail ID &amp; 16-digit App Password in Settings &gt; Email Templates.</span>
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "9px 13px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#92400e" }}>
+                        <AlertCircle size={15} color="#d97706" />
+                        <span><strong>Sender Email Not Configured:</strong> Set your Gmail ID &amp; 16-digit App Password to dispatch emails to Bank RM.</span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <button
+                          type="button"
+                          onClick={() => setQuickSmtpOpen((prev) => !prev)}
+                          style={{ fontSize: 11, background: "#f59e0b", color: "#ffffff", border: "none", padding: "4px 10px", borderRadius: 5, fontWeight: 700, cursor: "pointer" }}
+                        >
+                          {quickSmtpOpen ? "Hide Quick Setup" : "⚡ Quick Setup Gmail"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={refreshSmtpStatus}
+                          title="Refresh status if configured in Settings"
+                          style={{ fontSize: 11, background: "#fef3c7", color: "#92400e", border: "1px solid #fde68a", padding: "4px 8px", borderRadius: 5, cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}
+                        >
+                          <RefreshCw size={11} /> Refresh
+                        </button>
+                      </div>
                     </div>
-                    <a href="/email-templates" target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, background: "#fef3c7", color: "#b45309", padding: "3px 8px", borderRadius: 5, fontWeight: 700, textDecoration: "none", border: "1px solid #fcd34d", whiteSpace: "nowrap" }}>
-                      Setup SMTP →
-                    </a>
+
+                    {/* Quick Inline SMTP Setup Box */}
+                    {quickSmtpOpen && (
+                      <div style={{ background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: 8, padding: "14px 16px", marginTop: 8 }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 700, color: "#1e293b", marginBottom: 6 }}>
+                          🔑 1-Click Gmail &amp; App Password Configuration
+                        </div>
+                        <p style={{ fontSize: 11.5, color: "#64748b", margin: "0 0 10px 0" }}>
+                          Enter your company Gmail and Google 16-digit App Password. It will be verified and saved automatically so this docket can be emailed immediately.
+                        </p>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+                          <div>
+                            <label style={{ fontSize: 11, fontWeight: 600, color: "#475569", display: "block", marginBottom: 4 }}>Sender Gmail Address *</label>
+                            <input
+                              type="email"
+                              value={quickSmtpUser}
+                              onChange={(e) => setQuickSmtpUser(e.target.value)}
+                              placeholder="e.g. yourcompany@gmail.com"
+                              style={{ width: "100%", padding: "7px 10px", fontSize: 12, border: "1px solid #cbd5e1", borderRadius: 6 }}
+                              required
+                            />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: 11, fontWeight: 600, color: "#475569", display: "block", marginBottom: 4 }}>Gmail 16-Digit App Password *</label>
+                            <input
+                              type="password"
+                              value={quickSmtpPass}
+                              onChange={(e) => setQuickSmtpPass(e.target.value)}
+                              placeholder="16-character Google App Password"
+                              style={{ width: "100%", padding: "7px 10px", fontSize: 12, border: "1px solid #cbd5e1", borderRadius: 6 }}
+                              required
+                            />
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <span style={{ fontSize: 11, color: "#64748b" }}>
+                            Need an App Password? Generate it at <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer" style={{ color: "#2563eb", textDecoration: "underline" }}>myaccount.google.com/apppasswords</a>
+                          </span>
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <button
+                              type="button"
+                              onClick={() => setQuickSmtpOpen(false)}
+                              style={{ padding: "6px 12px", fontSize: 12, background: "#f1f5f9", border: "1px solid #cbd5e1", borderRadius: 6, cursor: "pointer", color: "#475569" }}
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleQuickSmtpSave}
+                              disabled={quickSmtpLoading}
+                              style={{ padding: "6px 14px", fontSize: 12, background: "#059669", color: "#ffffff", border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}
+                            >
+                              {quickSmtpLoading ? <RefreshCw className="cc-spin" size={13} /> : <Check size={13} />}
+                              {quickSmtpLoading ? "Verifying & Saving..." : "Verify & Save Settings"}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 

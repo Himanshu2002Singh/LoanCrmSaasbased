@@ -362,10 +362,13 @@ exports.updateSmtpConfig = async (req, res, next) => {
     const finalPort = port ? parseInt(port, 10) : isGmail ? 465 : 587;
     const finalSecure = secure !== undefined ? Boolean(secure) : finalPort === 465;
 
+    // Clean Google 16-character App Password whitespace (e.g. 'abcd efgh ijkl mnop' -> 'abcdefghijklmnop')
+    const sanitizedPassword = isGmail && finalPassword ? finalPassword.replace(/\s+/g, "") : (finalPassword || "").trim();
+
     const updatedConfig = {
       service: isGmail ? "gmail" : service || "custom",
       user: user ? user.trim() : "",
-      pass: finalPassword || "",
+      pass: sanitizedPassword,
       senderName: senderName ? senderName.trim() : company.name || "Operations Desk",
       host: finalHost,
       port: finalPort,
@@ -397,7 +400,8 @@ exports.updateSmtpConfig = async (req, res, next) => {
 
 /**
  * POST /api/email-templates/smtp/test
- * Test the SMTP / Gmail credentials and optionally send a test email
+ * Test the SMTP / Gmail credentials and optionally send a test email.
+ * If credentials authenticate and test email succeeds, auto-saves the configuration!
  */
 exports.testSmtpConfig = async (req, res, next) => {
   try {
@@ -417,12 +421,12 @@ exports.testSmtpConfig = async (req, res, next) => {
     } = req.body;
 
     const finalUser = user && user.trim() ? user.trim() : existingConfig.user;
-    const finalPass = pass && pass.trim() ? pass.trim() : existingConfig.pass;
+    const rawPass = pass && pass.trim() ? pass.trim() : existingConfig.pass;
 
     if (!finalUser) {
       return res.status(400).json({ message: "Sender email is required to test connection" });
     }
-    if (!finalPass) {
+    if (!rawPass) {
       return res.status(400).json({ message: "Password / App Password is required to test connection" });
     }
 
@@ -431,10 +435,13 @@ exports.testSmtpConfig = async (req, res, next) => {
     const finalPort = port ? parseInt(port, 10) : isGmail ? 465 : 587;
     const finalSecure = secure !== undefined ? Boolean(secure) : finalPort === 465;
 
+    // Clean Google App Password spaces if present
+    const sanitizedPass = isGmail ? rawPass.replace(/\s+/g, "") : rawPass.trim();
+
     const testConfig = {
       service: isGmail ? "gmail" : service,
       user: finalUser,
-      pass: finalPass,
+      pass: sanitizedPass,
       senderName: senderName || company?.name || "Operations Desk",
       host: finalHost,
       port: finalPort,
@@ -444,10 +451,41 @@ exports.testSmtpConfig = async (req, res, next) => {
     const targetRecipient = testToEmail && testToEmail.trim() ? testToEmail.trim() : finalUser;
     const result = await testSmtpConnection(testConfig, targetRecipient);
 
+    // AUTO-SAVE VERIFIED CONFIGURATION:
+    // If the test succeeded, these credentials are verified to be working.
+    // Automatically persist to Company so the user never gets "SMTP not configured" even if they close the test modal!
+    let savedData = null;
+    if (company) {
+      const verifiedConfig = {
+        service: isGmail ? "gmail" : service || "custom",
+        user: finalUser,
+        pass: sanitizedPass,
+        senderName: (senderName || company.name || "Operations Desk").trim(),
+        host: finalHost,
+        port: finalPort,
+        secure: finalSecure,
+        isConfigured: true,
+        updatedAt: new Date().toISOString(),
+      };
+      await company.update({ smtpConfig: verifiedConfig });
+      savedData = {
+        service: verifiedConfig.service,
+        user: verifiedConfig.user,
+        senderName: verifiedConfig.senderName,
+        host: verifiedConfig.host,
+        port: verifiedConfig.port,
+        secure: verifiedConfig.secure,
+        isConfigured: true,
+        hasPassword: true,
+      };
+    }
+
     return res.json({
       success: true,
       message: `Authentication verified successfully! A test email was sent to ${targetRecipient}`,
       result,
+      isSaved: Boolean(company),
+      data: savedData,
     });
   } catch (error) {
     console.error("[emailTemplateController] testSmtpConfig error:", error);

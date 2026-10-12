@@ -231,7 +231,11 @@ export default function EmailTemplatesRedesign() {
 
     setSmtpSaving(true);
     try {
-      const res = await axios.put(`${API_URL}/email-templates/smtp/config`, smtpForm);
+      const isGmail = smtpForm.service === "gmail" || (smtpForm.user && smtpForm.user.toLowerCase().endsWith("@gmail.com"));
+      const cleanPass = isGmail && smtpForm.pass ? smtpForm.pass.replace(/\s+/g, "") : smtpForm.pass;
+      const payload = { ...smtpForm, pass: cleanPass };
+
+      const res = await axios.put(`${API_URL}/email-templates/smtp/config`, payload);
       if (res.data?.success) {
         setSmtpConfig(res.data.data);
         toast.success("Outgoing email & password saved successfully!");
@@ -258,18 +262,26 @@ export default function EmailTemplatesRedesign() {
     setSmtpTesting(true);
     setTestFeedback(null);
     try {
+      const isGmail = smtpForm.service === "gmail" || (smtpForm.user && smtpForm.user.toLowerCase().endsWith("@gmail.com"));
+      const cleanPass = isGmail && smtpForm.pass ? smtpForm.pass.replace(/\s+/g, "") : smtpForm.pass;
+
       const res = await axios.post(`${API_URL}/email-templates/smtp/test`, {
         ...smtpForm,
+        pass: cleanPass,
         testToEmail: testEmail.trim() || smtpForm.user.trim(),
       });
       if (res.data?.success) {
+        if (res.data.data) {
+          setSmtpConfig(res.data.data);
+        } else {
+          fetchSmtpConfig();
+        }
         setTestFeedback({
           type: "success",
           message:
-            res.data.message ||
-            `Authentication successful! A test email was delivered to ${testEmail || smtpForm.user}`,
+            `${res.data.message || "Authentication successful!"} Your credentials are verified and saved automatically to your account.`,
         });
-        toast.success("SMTP connection verified!");
+        toast.success("✅ SMTP connection verified & credentials saved successfully!");
       }
     } catch (err) {
       console.error("Test SMTP error:", err);

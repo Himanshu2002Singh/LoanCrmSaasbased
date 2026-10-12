@@ -70,13 +70,17 @@ const createTransporterFromConfig = (config) => {
   const port = parseInt(config.port || (isGmail ? "465" : "587"), 10);
   const secure = config.secure !== undefined ? Boolean(config.secure) : port === 465;
 
+  const user = config.user.trim();
+  // Strip whitespace in Gmail 16-character App Password (e.g. 'abcd efgh ijkl mnop' -> 'abcdefghijklmnop')
+  const pass = isGmail ? config.pass.replace(/\s+/g, "") : config.pass.trim();
+
   return nodemailer.createTransport({
     host,
     port,
     secure,
     auth: {
-      user: config.user.trim(),
-      pass: config.pass.trim(),
+      user,
+      pass,
     },
     tls: {
       rejectUnauthorized: false,
@@ -218,11 +222,19 @@ const sendMail = async ({
   // 2. Otherwise look up Company's saved smtpConfig if companyId is supplied
   if (!resolvedConfig && companyId) {
     try {
-      const company = await Company.findByPk(companyId, {
+      let company = await Company.findByPk(companyId, {
         attributes: ["id", "name", "email", "smtpConfig"],
       });
-      if (company && company.smtpConfig && company.smtpConfig.isConfigured && company.smtpConfig.user && company.smtpConfig.pass) {
+      if (company && company.smtpConfig && company.smtpConfig.user && company.smtpConfig.pass && company.smtpConfig.isConfigured !== false) {
         resolvedConfig = company.smtpConfig;
+      } else if (companyId !== 1) {
+        // Fallback to default company 1 if tenant company has not configured custom SMTP
+        const defaultComp = await Company.findByPk(1, {
+          attributes: ["id", "name", "email", "smtpConfig"],
+        });
+        if (defaultComp && defaultComp.smtpConfig && defaultComp.smtpConfig.user && defaultComp.smtpConfig.pass && defaultComp.smtpConfig.isConfigured !== false) {
+          resolvedConfig = defaultComp.smtpConfig;
+        }
       }
     } catch (e) {
       console.warn("[EmailService] Failed to load company SMTP config:", e.message);
