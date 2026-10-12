@@ -46,10 +46,43 @@ app.use((err, req, res, next) => {
   });
 });
 
+const ensureSchemaMigrations = async (sequelize) => {
+  try {
+    // 1. Ensure users.role ENUM includes FINANCE and all canonical roles
+    await sequelize.query(`
+      ALTER TABLE \`users\` MODIFY COLUMN \`role\` ENUM('SUPERADMIN', 'COMPANY_ADMIN', 'MANAGER', 'EMPLOYEE', 'OPS', 'BANKER', 'FINANCE') NOT NULL DEFAULT 'EMPLOYEE';
+    `);
+    console.log("[Migration] users.role ENUM verified (includes FINANCE).");
+  } catch (err) {
+    console.warn("[Migration] users.role alter notice:", err.message);
+  }
+
+  try {
+    // 2. Ensure companies has smtp_config column
+    await sequelize.query(`
+      ALTER TABLE \`companies\` ADD COLUMN \`smtp_config\` JSON NULL;
+    `);
+    console.log("[Migration] Added smtp_config column to companies.");
+  } catch (err) {
+    // Column already exists
+  }
+
+  try {
+    // 3. Ensure companies has role_permissions column
+    await sequelize.query(`
+      ALTER TABLE \`companies\` ADD COLUMN \`role_permissions\` JSON NULL;
+    `);
+    console.log("[Migration] Added role_permissions column to companies.");
+  } catch (err) {
+    // Column already exists
+  }
+};
+
 const start = async () => {
   try {
     await db.sequelize.authenticate();
     console.log("Database connection established.");
+    await ensureSchemaMigrations(db.sequelize);
   } catch (error) {
     console.error("Database connection failed:", error.message);
   }

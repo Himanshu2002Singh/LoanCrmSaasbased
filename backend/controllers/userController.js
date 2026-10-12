@@ -315,6 +315,23 @@ exports.createUser = async (req, res) => {
     if (error.name === "SequelizeUniqueConstraintError") {
       return res.status(409).json({ message: "A user with these details already exists" });
     }
+    // Auto-heal for ENUM column truncation if database column was missing new role (e.g. FINANCE)
+    if (
+      (error.name === "SequelizeDatabaseError" || error.original?.code === "WARN_DATA_TRUNCATED" || error.original?.code === "ER_TRUNCATED_WRONG_VALUE_FOR_FIELD") &&
+      String(error.message || "").toLowerCase().includes("role")
+    ) {
+      try {
+        console.warn("[users] Auto-healing users.role column in database to include FINANCE...");
+        await User.sequelize.query(`
+          ALTER TABLE \`users\` MODIFY COLUMN \`role\` ENUM('SUPERADMIN', 'COMPANY_ADMIN', 'MANAGER', 'EMPLOYEE', 'OPS', 'BANKER', 'FINANCE') NOT NULL DEFAULT 'EMPLOYEE';
+        `);
+        const user = await User.create({ ...data, companyId, password });
+        const created = await User.findByPk(user.id, { include: WITH_RELATIONS });
+        return res.status(201).json({ message: "User created", data: created });
+      } catch (retryErr) {
+        console.error("[users] Auto-heal retry failed:", retryErr);
+      }
+    }
     console.error("[users] createUser error:", error);
     return res.status(500).json({ message: "Internal Server Error", error: error.message });
   }
@@ -378,6 +395,23 @@ exports.updateUser = async (req, res) => {
   } catch (error) {
     if (error.name === "SequelizeUniqueConstraintError") {
       return res.status(409).json({ message: "A user with these details already exists" });
+    }
+    // Auto-heal for ENUM column truncation if database column was missing new role (e.g. FINANCE)
+    if (
+      (error.name === "SequelizeDatabaseError" || error.original?.code === "WARN_DATA_TRUNCATED" || error.original?.code === "ER_TRUNCATED_WRONG_VALUE_FOR_FIELD") &&
+      String(error.message || "").toLowerCase().includes("role")
+    ) {
+      try {
+        console.warn("[users] Auto-healing users.role column in database to include FINANCE...");
+        await User.sequelize.query(`
+          ALTER TABLE \`users\` MODIFY COLUMN \`role\` ENUM('SUPERADMIN', 'COMPANY_ADMIN', 'MANAGER', 'EMPLOYEE', 'OPS', 'BANKER', 'FINANCE') NOT NULL DEFAULT 'EMPLOYEE';
+        `);
+        await user.update(data);
+        const updated = await User.findByPk(user.id, { include: WITH_RELATIONS });
+        return res.status(200).json({ message: "User updated", data: updated });
+      } catch (retryErr) {
+        console.error("[users] Auto-heal retry failed:", retryErr);
+      }
     }
     console.error("[users] updateUser error:", error);
     return res.status(500).json({ message: "Internal Server Error", error: error.message });
