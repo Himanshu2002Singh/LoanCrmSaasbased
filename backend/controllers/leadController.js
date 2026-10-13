@@ -350,15 +350,26 @@ const visibilityScope = async (req) => {
     };
   }
   if (req.user.role === ROLES.OPS) {
-    if (req.query.assignedOnly === "true") {
-      return {
-        [Op.or]: [
-          { assignedEmployeeId: req.user.id },
-          { assignedManagerId: req.user.id },
-        ],
-      };
+    if (req.query.team === "operations") {
+      if (req.query.assignedOnly === "true") {
+        return {
+          [Op.or]: [
+            { assignedEmployeeId: req.user.id },
+            { assignedManagerId: req.user.id },
+          ],
+        };
+      }
+      return {};
     }
-    return {};
+    if (req.permissions?.viewAllLeads) {
+      return {};
+    }
+    return {
+      [Op.or]: [
+        { assignedEmployeeId: req.user.id },
+        { assignedManagerId: req.user.id },
+      ],
+    };
   }
   if (req.user.role === ROLES.MANAGER) {
     if (req.permissions?.viewAllLeads) {

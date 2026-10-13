@@ -76,6 +76,15 @@ const ensureSchemaMigrations = async (sequelize) => {
   } catch (err) {
     // Column already exists
   }
+
+  try {
+    if (db.Application) {
+      await db.Application.sync({ alter: { drop: false } });
+      console.log("[Migration] Application schema synchronized successfully.");
+    }
+  } catch (err) {
+    console.warn("[Migration] Application sync notice:", err.message);
+  }
 };
 
 const start = async () => {

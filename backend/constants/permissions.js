@@ -262,7 +262,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
   OPS: {
     viewDashboard: true,
     viewLeads: true,
-    viewAllLeads: true,
+    viewAllLeads: false, // by default only assigned leads on Leads page; admin can toggle ON in Permissions
     manageLeads: true,
     createLead: false, // admin can grant create lead permission to Ops
     editLead: true, // sales, manager, operations, and admin can edit leads
