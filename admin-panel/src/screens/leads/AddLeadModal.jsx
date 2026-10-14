@@ -14,6 +14,7 @@ import {
   ChevronDown,
   ChevronUp,
   CheckCircle2,
+  AlertCircle,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import API_URL from "../../config";
@@ -36,6 +37,8 @@ export default function AddLeadModal({ open, onClose, onCreated }) {
   const [file, setFile] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [showFormatGuide, setShowFormatGuide] = useState(false);
+  const [duplicateAlert, setDuplicateAlert] = useState(null);
+  const [checkingDuplicate, setCheckingDuplicate] = useState(false);
   const fileInputRef = useRef(null);
 
   const userRole = localStorage.getItem("userRole") || "";
@@ -79,6 +82,45 @@ export default function AddLeadModal({ open, onClose, onCreated }) {
     fetchSources();
   }, [open]);
 
+  // Live duplicate phone check on 10 digits
+  useEffect(() => {
+    if (!open) return;
+    const cleanNumber = (contact || "").replace(/\D/g, "").slice(-10);
+    if (cleanNumber.length < 10) {
+      setDuplicateAlert(null);
+      setCheckingDuplicate(false);
+      return;
+    }
+
+    let active = true;
+    setCheckingDuplicate(true);
+    const timer = setTimeout(async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await axios.get(`${API_URL}/leads/check-duplicate`, {
+          params: { number: cleanNumber },
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (active) {
+          if (res.data?.isDuplicate) {
+            setDuplicateAlert(res.data);
+          } else {
+            setDuplicateAlert(null);
+          }
+        }
+      } catch (err) {
+        console.error("Duplicate check error:", err);
+      } finally {
+        if (active) setCheckingDuplicate(false);
+      }
+    }, 300);
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [contact, open]);
+
   if (!open) return null;
 
   const handleSourceChange = (val) => {
@@ -111,6 +153,8 @@ export default function AddLeadModal({ open, onClose, onCreated }) {
     setExcelDefaultCommission("");
     setFile(null);
     setMode("manual");
+    setDuplicateAlert(null);
+    setCheckingDuplicate(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -125,6 +169,12 @@ export default function AddLeadModal({ open, onClose, onCreated }) {
       toast.error("Name and contact number are required");
       return;
     }
+
+    if (duplicateAlert) {
+      toast.error("Bhai number same hai! Repeated number par lead add nahi ho sakti.");
+      return;
+    }
+
     setSubmitting(true);
     try {
       const token = localStorage.getItem("token");
@@ -147,6 +197,11 @@ export default function AddLeadModal({ open, onClose, onCreated }) {
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
+        if (res.status === 409 || errData.isDuplicate) {
+          setDuplicateAlert(errData);
+          toast.error(errData.message || "Bhai number same hai! Repeated number par lead add nahi hogi.");
+          return;
+        }
         throw new Error(errData.message || "Failed to add lead");
       }
       await res.json();
@@ -318,16 +373,82 @@ export default function AddLeadModal({ open, onClose, onCreated }) {
               />
             </label>
             <label className="cc-modal-field">
-              <span>
-                <Phone size={12} /> Contact number <span style={{ color: "#ef4444" }}>*</span>
+              <span style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span>
+                  <Phone size={12} color={duplicateAlert ? "#dc2626" : undefined} /> Contact number <span style={{ color: "#ef4444" }}>*</span>
+                </span>
+                {checkingDuplicate && (
+                  <span style={{ fontSize: "11px", color: "#64748b", fontWeight: 500 }}>
+                    Checking number...
+                  </span>
+                )}
               </span>
               <input
                 type="tel"
                 value={contact}
-                onChange={(event) => setContact(event.target.value)}
+                onChange={(event) => {
+                  setContact(event.target.value);
+                  if (duplicateAlert) setDuplicateAlert(null);
+                }}
                 placeholder="10-digit phone number"
                 required
+                style={{
+                  border: duplicateAlert ? "2px solid #ef4444" : undefined,
+                  background: duplicateAlert ? "#fef2f2" : undefined,
+                  color: duplicateAlert ? "#b91c1c" : undefined,
+                  fontWeight: duplicateAlert ? 700 : undefined,
+                }}
               />
+              {duplicateAlert && (
+                <div
+                  style={{
+                    background: "#fef2f2",
+                    border: "1.5px solid #f87171",
+                    borderRadius: "8px",
+                    padding: "10px 12px",
+                    marginTop: "6px",
+                    color: "#991b1b",
+                    fontSize: "12px",
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: "8px",
+                    boxShadow: "0 2px 6px rgba(239, 68, 68, 0.15)",
+                  }}
+                >
+                  <AlertCircle size={18} color="#dc2626" style={{ flexShrink: 0, marginTop: "2px" }} />
+                  <div>
+                    <div style={{ fontWeight: 800, color: "#b91c1c", fontSize: "13px" }}>
+                      ⚠️ Bhai number same hai! Repeated Number!
+                    </div>
+                    <div style={{ marginTop: "2px", color: "#7f1d1d", fontSize: "12px" }}>
+                      Yeh phone number pehle se system mein exist karta hai. Same number par duplicate lead add nahi ho sakti (Creation Blocked).
+                    </div>
+                    {duplicateAlert.customer && (
+                      <div
+                        style={{
+                          marginTop: "6px",
+                          background: "#fee2e2",
+                          borderRadius: "6px",
+                          padding: "6px 8px",
+                          fontSize: "11.5px",
+                          color: "#991b1b",
+                        }}
+                      >
+                        <strong>Registered Customer:</strong> {duplicateAlert.customer.name} ({duplicateAlert.customer.mobile})
+                        {duplicateAlert.lead && (
+                          <>
+                            <br />
+                            <strong>Existing Lead:</strong> Lead #{duplicateAlert.lead.id} &bull; Status:{" "}
+                            <strong>{duplicateAlert.lead.status}</strong> &bull; Product:{" "}
+                            {duplicateAlert.lead.loanType} &bull; Assigned:{" "}
+                            {duplicateAlert.lead.assignedTo || "Unassigned"}
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </label>
 
             <div style={{ display: "grid", gridTemplateColumns: canViewCommission ? "1.3fr 1fr" : "1fr", gap: "10px" }}>
@@ -387,8 +508,26 @@ export default function AddLeadModal({ open, onClose, onCreated }) {
               <button type="button" className="cc-modal-btn ghost" onClick={closeAll}>
                 Cancel
               </button>
-              <button type="submit" className="cc-modal-btn primary" disabled={submitting}>
-                {submitting ? "Saving..." : "Add lead"}
+              <button
+                type="submit"
+                className="cc-modal-btn primary"
+                disabled={submitting || checkingDuplicate || Boolean(duplicateAlert)}
+                style={{
+                  ...(duplicateAlert
+                    ? {
+                        background: "#ef4444",
+                        borderColor: "#ef4444",
+                        cursor: "not-allowed",
+                        opacity: 0.9,
+                      }
+                    : {}),
+                }}
+              >
+                {duplicateAlert
+                  ? "Blocked: Number Same Hai"
+                  : submitting
+                  ? "Saving..."
+                  : "Add lead"}
               </button>
             </div>
           </form>

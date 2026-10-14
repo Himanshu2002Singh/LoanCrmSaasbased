@@ -67,6 +67,16 @@ export default function CompanyProfileScreen() {
           name: profile.name || "",
           email: profile.email || "",
           phone: profile.phone || "",
+          gstNumber: profile.gstNumber || profile.gst_number || "",
+          panNumber: profile.panNumber || profile.pan_number || "",
+          address: profile.address || "",
+          city: profile.city || "",
+          state: profile.state || "",
+          pincode: profile.pincode || "",
+          bankName: profile.bankName || profile.bank_name || "",
+          accountNumber: profile.accountNumber || profile.account_number || "",
+          ifscCode: profile.ifscCode || profile.ifsc_code || "",
+          bankBranch: profile.bankBranch || profile.bank_branch || "",
         });
         if (profile.logoUrl) {
           localStorage.setItem("companyLogo", profile.logoUrl);
@@ -98,6 +108,16 @@ export default function CompanyProfileScreen() {
         name: editForm.name.trim(),
         email: editForm.email ? editForm.email.trim() : null,
         phone: editForm.phone ? editForm.phone.trim() : null,
+        gstNumber: editForm.gstNumber ? editForm.gstNumber.trim().toUpperCase() : null,
+        panNumber: editForm.panNumber ? editForm.panNumber.trim().toUpperCase() : null,
+        address: editForm.address ? editForm.address.trim() : null,
+        city: editForm.city ? editForm.city.trim() : null,
+        state: editForm.state ? editForm.state.trim() : null,
+        pincode: editForm.pincode ? editForm.pincode.trim() : null,
+        bankName: editForm.bankName ? editForm.bankName.trim() : null,
+        accountNumber: editForm.accountNumber ? editForm.accountNumber.trim() : null,
+        ifscCode: editForm.ifscCode ? editForm.ifscCode.trim().toUpperCase() : null,
+        bankBranch: editForm.bankBranch ? editForm.bankBranch.trim() : null,
       });
       toast.success("Company details updated successfully!");
       setEditModalOpen(false);
@@ -574,6 +594,28 @@ export default function CompanyProfileScreen() {
                 </span>
               </div>
               <div className="cc-info-row">
+                <span className="cc-info-label">GST Number (GSTIN)</span>
+                <span className="cc-info-val">
+                  {data?.gstNumber || data?.gst_number ? (
+                    <strong style={{ color: "#047857" }}>{data.gstNumber || data.gst_number}</strong>
+                  ) : (
+                    <span style={{ color: "#b45309", fontSize: 12 }}>⚠️ Not Set (Configure in Settings)</span>
+                  )}
+                </span>
+              </div>
+              <div className="cc-info-row">
+                <span className="cc-info-label">Company PAN</span>
+                <span className="cc-info-val">
+                  <strong>{data?.panNumber || data?.pan_number || (data?.gstNumber ? data.gstNumber.substring(2, 12) : "Not specified")}</strong>
+                </span>
+              </div>
+              <div className="cc-info-row">
+                <span className="cc-info-label">Registered Office Address</span>
+                <span className="cc-info-val">
+                  {[data?.address, data?.city, data?.state ? `${data.state}${data?.pincode ? ` - ${data.pincode}` : ""}` : ""].filter(Boolean).join(", ") || (data?.address || "Not specified")}
+                </span>
+              </div>
+              <div className="cc-info-row">
                 <span className="cc-info-label">Official Email</span>
                 <span className="cc-info-val">{data?.email || "Not specified"}</span>
               </div>
@@ -739,6 +781,68 @@ export default function CompanyProfileScreen() {
                   placeholder="10-digit phone number"
                 />
               </label>
+
+              <label className="cc-modal-label">
+                <span>GST Number (GSTIN)</span>
+                <input
+                  type="text"
+                  maxLength={15}
+                  value={editForm.gstNumber || ""}
+                  onChange={(e) => setEditForm((p) => ({ ...p, gstNumber: e.target.value.toUpperCase().trim() }))}
+                  placeholder="e.g. 08AABCT1234F1Z5"
+                />
+              </label>
+
+              <label className="cc-modal-label">
+                <span>PAN Number</span>
+                <input
+                  type="text"
+                  maxLength={10}
+                  value={editForm.panNumber || ""}
+                  onChange={(e) => setEditForm((p) => ({ ...p, panNumber: e.target.value.toUpperCase().trim() }))}
+                  placeholder="e.g. AABCT1234F"
+                />
+              </label>
+
+              <label className="cc-modal-label">
+                <span>Registered Office Address</span>
+                <textarea
+                  rows={2}
+                  value={editForm.address || ""}
+                  onChange={(e) => setEditForm((p) => ({ ...p, address: e.target.value }))}
+                  placeholder="Building, Street, Landmark"
+                />
+              </label>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                <label className="cc-modal-label">
+                  <span>City</span>
+                  <input
+                    type="text"
+                    value={editForm.city || ""}
+                    onChange={(e) => setEditForm((p) => ({ ...p, city: e.target.value }))}
+                    placeholder="City"
+                  />
+                </label>
+                <label className="cc-modal-label">
+                  <span>State</span>
+                  <input
+                    type="text"
+                    value={editForm.state || ""}
+                    onChange={(e) => setEditForm((p) => ({ ...p, state: e.target.value }))}
+                    placeholder="State"
+                  />
+                </label>
+                <label className="cc-modal-label">
+                  <span>PIN Code</span>
+                  <input
+                    type="text"
+                    value={editForm.pincode || ""}
+                    onChange={(e) => setEditForm((p) => ({ ...p, pincode: e.target.value }))}
+                    placeholder="PIN Code"
+                  />
+                </label>
+              </div>
 
               <p className="cc-modal-note">
                 Note: Subscription tier, renewal date, and allowed employee seat limits are managed by

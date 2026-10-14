@@ -209,6 +209,24 @@ export default function CasePayoutsScreen() {
   const [invoiceLoading, setInvoiceLoading] = useState(false);
   const [invoiceViewType, setInvoiceViewType] = useState("BANK"); // "BANK" | "CONNECTOR"
 
+  // GSTR Reflection Modal
+  const [gstrModalOpen, setGstrModalOpen] = useState(false);
+  const [gstrTargetCase, setGstrTargetCase] = useState(null);
+  const [gstrForm, setGstrForm] = useState({
+    gstrStatus: "PENDING",
+    gstrAmount: 0,
+    gstrReceivedAmount: 0,
+    notes: "",
+  });
+  const [savingGstr, setSavingGstr] = useState(false);
+
+  // Payment History Modal
+  const [paymentHistoryModalOpen, setPaymentHistoryModalOpen] = useState(false);
+  const [historyTargetCase, setHistoryTargetCase] = useState(null);
+  const [historyData, setHistoryData] = useState(null);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [historyTab, setHistoryTab] = useState("ALL"); // "ALL" | "BANK" | "PARTY"
+
   // Financial Years
   const financialYears = useMemo(() => {
     const currentYear = new Date().getFullYear();
@@ -366,11 +384,19 @@ export default function CasePayoutsScreen() {
     const bankPct = item.bankCommissionPercent !== undefined && item.bankCommissionPercent !== null ? parseFloat(item.bankCommissionPercent) : 2.0;
     const baseAmt = item.baseAmount !== undefined && item.baseAmount !== null ? parseFloat(item.baseAmount) : Math.round((loanAmt * bankPct) / 100);
 
+    // Corporate DSA Charge deducted from Gross Bank Commission Base:
+    const corpDsaPct = item.corporateDsaPercent !== undefined && item.corporateDsaPercent !== null ? parseFloat(item.corporateDsaPercent) : 0.0;
+    const corpDsaAmt = item.corporateDsaAmount !== undefined && item.corporateDsaAmount !== null ? parseFloat(item.corporateDsaAmount) : Math.round((baseAmt * corpDsaPct) / 100);
+    // Actual Amount after Corporate DSA Charge:
+    const actualAmt = item.actualAmount !== undefined && item.actualAmount !== null && parseFloat(item.actualAmount) > 0 ? parseFloat(item.actualAmount) : Math.max(0, baseAmt - corpDsaAmt);
+
     const bGstPct = item.bankGstPercent !== undefined && item.bankGstPercent !== null ? parseFloat(item.bankGstPercent) : 18;
-    const bGstAmt = item.bankGstAmount !== undefined && item.bankGstAmount !== null ? parseFloat(item.bankGstAmount) : Math.round((baseAmt * bGstPct) / 100);
+    const bGstAmt = item.bankGstAmount !== undefined && item.bankGstAmount !== null ? parseFloat(item.bankGstAmount) : Math.round((actualAmt * bGstPct) / 100);
     const bTdsPct = item.bankTdsPercent !== undefined && item.bankTdsPercent !== null ? parseFloat(item.bankTdsPercent) : 5;
-    const bTdsAmt = item.bankTdsAmount !== undefined && item.bankTdsAmount !== null ? parseFloat(item.bankTdsAmount) : Math.round((baseAmt * bTdsPct) / 100);
-    const bankNet = item.bankNetReceivable !== undefined && item.bankNetReceivable !== null ? parseFloat(item.bankNetReceivable) : Math.max(0, baseAmt - bGstAmt - bTdsAmt);
+    const bTdsAmt = item.bankTdsAmount !== undefined && item.bankTdsAmount !== null ? parseFloat(item.bankTdsAmount) : Math.round((actualAmt * bTdsPct) / 100);
+
+    // Bank Net Receivable = Actual Amount - bTdsAmt (GST is separate, NOT subtracted from net receivable!)
+    const bankNet = Math.max(0, actualAmt - bTdsAmt);
 
     const isSelfCase =
       item.payoutType === "SELF" ||
@@ -380,20 +406,23 @@ export default function CasePayoutsScreen() {
     const pType = isSelfCase ? "SELF" : "VENDOR";
 
     const partyPct = item.partyCommissionPercent !== undefined && item.partyCommissionPercent !== null ? parseFloat(item.partyCommissionPercent) : (isSelfCase ? 0 : 50.0);
-    // Party Commission is calculated on bankNet (after Bank GST & TDS)
-    const partyGross = isSelfCase ? 0 : (item.partyCommissionDue !== undefined && item.partyCommissionDue !== null ? parseFloat(item.partyCommissionDue) : Math.round((bankNet * partyPct) / 100));
+    const partyGross = isSelfCase ? 0 : (item.partyCommissionDue !== undefined && item.partyCommissionDue !== null ? parseFloat(item.partyCommissionDue) : Math.round((baseAmt * partyPct) / 100));
+
     const tdsPct = isSelfCase ? 0 : (item.partyTdsPercent !== undefined && item.partyTdsPercent !== null ? parseFloat(item.partyTdsPercent) : 0);
     const tdsAmt = isSelfCase ? 0 : (item.partyTdsAmount !== undefined && item.partyTdsAmount !== null ? parseFloat(item.partyTdsAmount) : Math.round((partyGross * tdsPct) / 100));
     const gstPct = isSelfCase ? 0 : (item.partyGstPercent !== undefined && item.partyGstPercent !== null ? parseFloat(item.partyGstPercent) : 0);
     const gstAmt = isSelfCase ? 0 : (item.partyGstAmount !== undefined && item.partyGstAmount !== null ? parseFloat(item.partyGstAmount) : Math.round((partyGross * gstPct) / 100));
     const extra = item.extraCharges !== undefined && item.extraCharges !== null ? parseFloat(item.extraCharges) : 0;
     const netPayable = isSelfCase ? 0 : (item.partyNetPayable !== undefined && item.partyNetPayable !== null ? parseFloat(item.partyNetPayable) : Math.max(0, partyGross - tdsAmt - gstAmt - extra));
-    const margin = isSelfCase ? Math.round(bankNet - extra) : Math.round(bankNet - netPayable);
+    const margin = Math.round(bankNet - (isSelfCase ? 0 : netPayable) - extra);
 
     setEditForm({
       loanAmount: loanAmt,
       bankCommissionPercent: bankPct,
       baseAmount: baseAmt,
+      corporateDsaPercent: corpDsaPct,
+      corporateDsaAmount: corpDsaAmt,
+      actualAmount: actualAmt,
       disbursalDate: item.disbursalDate || "",
       bankGstPercent: bGstPct,
       bankGstAmount: bGstAmt,
@@ -411,6 +440,9 @@ export default function CasePayoutsScreen() {
       extraCharges: extra,
       partyNetPayable: netPayable,
       netMargin: margin,
+      gstrStatus: item.gstrStatus || "PENDING",
+      gstrAmount: parseFloat(item.gstrAmount || bGstAmt),
+      gstrReceivedAmount: parseFloat(item.gstrReceivedAmount || 0),
       invoiceNumber: item.invoiceNumber || "",
       invoiceDate: item.invoiceDate || "",
       notes: item.notes || "",
@@ -434,30 +466,40 @@ export default function CasePayoutsScreen() {
         base = parseFloat(updates.baseAmount) || 0;
       }
 
-      // 2. Bank Deductions: GST & TDS deducted from Bank Commission
+      // 2. Corporate DSA Charge (%) and Amount (₹)
+      const corpDsaPct = parseFloat(merged.corporateDsaPercent) || 0;
+      let corpDsaAmt = parseFloat(merged.corporateDsaAmount) || 0;
+      if (updates.corporateDsaPercent !== undefined || updates.loanAmount !== undefined || updates.bankCommissionPercent !== undefined || updates.baseAmount !== undefined) {
+        corpDsaAmt = Math.round((base * corpDsaPct) / 100);
+      } else if (updates.corporateDsaAmount !== undefined) {
+        corpDsaAmt = parseFloat(updates.corporateDsaAmount) || 0;
+      }
+
+      // 3. Actual Amount after Corporate DSA Charge
+      const actualAmt = Math.max(0, base - corpDsaAmt);
+
+      // 4. On this Actual Amount, calculate Bank TDS and GST:
       const bGstPct = parseFloat(merged.bankGstPercent) || 0;
       let bGstAmt = parseFloat(merged.bankGstAmount) || 0;
-      if (updates.bankGstPercent !== undefined || updates.baseAmount !== undefined || updates.loanAmount !== undefined || updates.bankCommissionPercent !== undefined) {
-        bGstAmt = Math.round((base * bGstPct) / 100);
+      if (updates.bankGstPercent !== undefined || updates.baseAmount !== undefined || updates.loanAmount !== undefined || updates.bankCommissionPercent !== undefined || updates.corporateDsaPercent !== undefined || updates.corporateDsaAmount !== undefined) {
+        bGstAmt = Math.round((actualAmt * bGstPct) / 100);
       } else if (updates.bankGstAmount !== undefined) {
         bGstAmt = parseFloat(updates.bankGstAmount) || 0;
       }
 
       const bTdsPct = parseFloat(merged.bankTdsPercent) || 0;
       let bTdsAmt = parseFloat(merged.bankTdsAmount) || 0;
-      if (updates.bankTdsPercent !== undefined || updates.baseAmount !== undefined || updates.loanAmount !== undefined || updates.bankCommissionPercent !== undefined) {
-        bTdsAmt = Math.round((base * bTdsPct) / 100);
+      if (updates.bankTdsPercent !== undefined || updates.baseAmount !== undefined || updates.loanAmount !== undefined || updates.bankCommissionPercent !== undefined || updates.corporateDsaPercent !== undefined || updates.corporateDsaAmount !== undefined) {
+        bTdsAmt = Math.round((actualAmt * bTdsPct) / 100);
       } else if (updates.bankTdsAmount !== undefined) {
         bTdsAmt = parseFloat(updates.bankTdsAmount) || 0;
       }
 
-      // Bank Net Payable/Receivable: (Bank Gross - Bank GST - Bank TDS)
-      const bankNet = Math.max(0, base - bGstAmt - bTdsAmt);
+      // 5. Final Bank Net Receivable: Actual Amount - bTdsAmt (GST is separate, NOT subtracted from net!)
+      const bankNet = Math.max(0, actualAmt - bTdsAmt);
 
-      // 3. Payout Mode: SELF vs VENDOR
+      // 6. Payout Mode: SELF vs VENDOR
       const isSelf = merged.payoutType === "SELF";
-
-      // 4. Manpower Cost:
       const manpower = parseFloat(merged.extraCharges) || 0;
 
       let pPct = 0;
@@ -467,24 +509,14 @@ export default function CasePayoutsScreen() {
       let pGstPct = 0;
       let pGstAmt = 0;
       let partyNet = 0;
-      let margin = 0;
 
       if (isSelf) {
-        // SELF CASE:
-        // No vendor payout, only manpower cost is deducted from bank net inflow!
         pPct = 0;
         partyGross = 0;
-        pTdsPct = 0;
-        pTdsAmt = 0;
-        pGstPct = 0;
-        pGstAmt = 0;
         partyNet = 0;
-        margin = Math.round(bankNet - manpower);
       } else {
-        // VENDOR CASE:
         pPct = parseFloat(merged.partyCommissionPercent) || 0;
-        // Party Commission is calculated on Bank Net Receivable (after Bank GST & TDS)
-        partyGross = Math.round((bankNet * pPct) / 100);
+        partyGross = Math.round((base * pPct) / 100);
 
         pTdsPct = parseFloat(merged.partyTdsPercent) || 0;
         pTdsAmt = parseFloat(merged.partyTdsAmount) || 0;
@@ -503,12 +535,16 @@ export default function CasePayoutsScreen() {
         }
 
         partyNet = Math.max(0, partyGross - pTdsAmt - pGstAmt - manpower);
-        margin = Math.round(bankNet - partyNet);
       }
+
+      const margin = Math.round(bankNet - (isSelf ? 0 : partyNet) - manpower);
 
       return {
         ...merged,
         baseAmount: base,
+        corporateDsaPercent: corpDsaPct,
+        corporateDsaAmount: corpDsaAmt,
+        actualAmount: actualAmt,
         bankGstAmount: bGstAmt,
         bankTdsAmount: bTdsAmt,
         bankNetReceivable: bankNet,
@@ -520,6 +556,7 @@ export default function CasePayoutsScreen() {
         partyGstAmount: pGstAmt,
         partyNetPayable: partyNet,
         netMargin: margin,
+        gstrAmount: bGstAmt,
       };
     });
   };
@@ -555,6 +592,9 @@ export default function CasePayoutsScreen() {
       loanAmount: "",
       bankCommissionPercent: 2.0,
       baseAmount: "",
+      corporateDsaPercent: 0,
+      corporateDsaAmount: 0,
+      actualAmount: 0,
       bankGstPercent: 18,
       bankGstAmount: 0,
       bankTdsPercent: 5,
@@ -594,6 +634,7 @@ export default function CasePayoutsScreen() {
       const loan = parseFloat(merged.loanAmount) || 0;
       const bankPct = parseFloat(merged.bankCommissionPercent) || 0;
 
+      // 1. Bank Gross Base Commission
       let base = 0;
       if (
         updates.loanAmount !== undefined ||
@@ -608,36 +649,42 @@ export default function CasePayoutsScreen() {
         base = parseFloat(merged.baseAmount) || Math.round((loan * bankPct) / 100);
       }
 
+      // 2. Corporate DSA Charge (%) and Amount (₹)
+      const corpDsaPct = parseFloat(merged.corporateDsaPercent) || 0;
+      let corpDsaAmt = parseFloat(merged.corporateDsaAmount) || 0;
+      if (updates.corporateDsaPercent !== undefined || updates.loanAmount !== undefined || updates.bankCommissionPercent !== undefined || updates.baseAmount !== undefined) {
+        corpDsaAmt = Math.round((base * corpDsaPct) / 100);
+      } else if (updates.corporateDsaAmount !== undefined) {
+        corpDsaAmt = parseFloat(updates.corporateDsaAmount) || 0;
+      }
+
+      // 3. Actual Amount after Corporate DSA Charge
+      const actualAmt = Math.max(0, base - corpDsaAmt);
+
+      // 4. On this Actual Amount, calculate Bank TDS and GST:
       const bGstPct = parseFloat(merged.bankGstPercent ?? 18) || 0;
-      const bGstAmt = Math.round((base * bGstPct) / 100);
+      const bGstAmt = Math.round((actualAmt * bGstPct) / 100);
 
       const bTdsPct = parseFloat(merged.bankTdsPercent ?? 5) || 0;
-      const bTdsAmt = Math.round((base * bTdsPct) / 100);
+      const bTdsAmt = Math.round((actualAmt * bTdsPct) / 100);
 
-      const bankNet = Math.max(0, base - bGstAmt - bTdsAmt);
+      // 5. Final Net Receivable = Actual Amount - bTdsAmt (GST is separate, NOT subtracted!)
+      const bankNet = Math.max(0, actualAmt - bTdsAmt);
+
       const isSelf = merged.payoutType === "SELF";
       const manpower = parseFloat(merged.extraCharges) || 0;
 
-      let partyCommPct = 0;
-      let partyCommDue = 0;
-      let partyNet = 0;
-      let margin = 0;
-
-      if (isSelf) {
-        partyCommPct = 0;
-        partyCommDue = 0;
-        partyNet = 0;
-        margin = Math.round(bankNet - manpower);
-      } else {
-        partyCommPct = parseFloat(merged.partyCommissionPercent ?? 50) || 0;
-        partyCommDue = Math.round((bankNet * partyCommPct) / 100);
-        partyNet = Math.max(0, partyCommDue - manpower);
-        margin = Math.round(bankNet - partyNet);
-      }
+      let partyCommPct = isSelf ? 0 : (parseFloat(merged.partyCommissionPercent ?? 50) || 0);
+      let partyCommDue = isSelf ? 0 : Math.round((base * partyCommPct) / 100);
+      let partyNet = isSelf ? 0 : Math.max(0, partyCommDue - manpower);
+      let margin = Math.round(bankNet - (isSelf ? 0 : partyNet) - manpower);
 
       return {
         ...merged,
         baseAmount: base,
+        corporateDsaPercent: corpDsaPct,
+        corporateDsaAmount: corpDsaAmt,
+        actualAmount: actualAmt,
         bankGstAmount: bGstAmt,
         bankTdsAmount: bTdsAmt,
         bankNetReceivable: bankNet,
@@ -708,6 +755,9 @@ export default function CasePayoutsScreen() {
         loanAmount: loanAmt,
         bankCommissionPercent: parseFloat(addForm.bankCommissionPercent) || 2.0,
         baseAmount: addForm.baseAmount ? parseFloat(addForm.baseAmount) : undefined,
+        corporateDsaPercent: parseFloat(addForm.corporateDsaPercent) || 0,
+        corporateDsaAmount: parseFloat(addForm.corporateDsaAmount) || 0,
+        actualAmount: parseFloat(addForm.actualAmount) || 0,
         bankGstPercent: parseFloat(addForm.bankGstPercent) || 18,
         bankTdsPercent: parseFloat(addForm.bankTdsPercent) || 5,
         disbursalDate: addForm.disbursalDate || new Date().toISOString().split("T")[0],
@@ -730,17 +780,22 @@ export default function CasePayoutsScreen() {
     }
   };
 
-  // Open Bank Receipt Modal
+  // Open Bank Receipt Modal with exact max calculation
   const openBankReceiptModal = (item) => {
     setReceiptTargetCase(item);
-    const remaining = Math.max(0, parseFloat(item.bankRemainingDue || 0));
-    const gstAmt = Math.round((remaining * parseFloat(item.bankGstPercent || 18)) / 100);
-    const tdsAmt = Math.round((remaining * parseFloat(item.bankTdsPercent || 5)) / 100);
+    const baseComm = parseFloat(item.baseAmount || 0);
+    const corpDsaCharge = parseFloat(item.corporateDsaAmount) || Math.round((baseComm * (parseFloat(item.corporateDsaPercent) || 0)) / 100);
+    const actualAmt = parseFloat(item.actualAmount) || Math.max(0, baseComm - corpDsaCharge);
+    const tdsAmt = parseFloat(item.bankTdsAmount || 0);
+    const maxNetReceivable = Math.max(0, actualAmt - tdsAmt);
+    const alreadyReceived = parseFloat(item.bankReceivedAmount || 0);
+    const remaining = Math.max(0, maxNetReceivable - alreadyReceived);
+    const gstAmt = parseFloat(item.bankGstAmount || 0);
 
     setReceiptForm({
       grossAmount: remaining > 0 ? remaining : "",
-      gstAmount: remaining > 0 ? gstAmt : 0,
-      tdsAmount: remaining > 0 ? tdsAmt : 0,
+      gstAmount: gstAmt,
+      tdsAmount: tdsAmt,
       receiptDate: new Date().toISOString().split("T")[0],
       paymentMode: "NEFT",
       referenceNumber: "",
@@ -749,24 +804,92 @@ export default function CasePayoutsScreen() {
     setBankReceiptModalOpen(true);
   };
 
-  // Submit Bank Receipt
+  // Submit Bank Receipt with strict validation check
   const handleBankReceiptSubmit = async (e) => {
     e.preventDefault();
     if (!receiptTargetCase || !receiptForm.grossAmount || parseFloat(receiptForm.grossAmount) <= 0) {
       toast.warning("Please enter a valid receipt amount");
       return;
     }
+    const baseComm = parseFloat(receiptTargetCase.baseAmount || 0);
+    const isSelfCase = receiptTargetCase.payoutType === "SELF" || (receiptTargetCase.partyName || "").toLowerCase() === "self" || (receiptTargetCase.partyName || "").toLowerCase() === "direct";
+    const corpDsaComm = isSelfCase ? 0 : parseFloat(receiptTargetCase.partyCommissionDue || 0);
+    const tdsAmt = parseFloat(receiptTargetCase.bankTdsAmount || 0);
+    const maxNetReceivable = Math.max(0, baseComm - corpDsaComm - tdsAmt);
+    const alreadyReceived = parseFloat(receiptTargetCase.bankReceivedAmount || 0);
+    const maxAllowedNow = Math.max(0, maxNetReceivable - alreadyReceived);
+
+    if (parseFloat(receiptForm.grossAmount) > maxAllowedNow + 0.01) {
+      toast.error(`Amount cannot exceed maximum eligible receivable of ₹${Math.round(maxAllowedNow).toLocaleString("en-IN")}`);
+      return;
+    }
+
     setRecordingReceipt(true);
     try {
       await axios.post(`${API_URL}/payouts/cases/${receiptTargetCase.id}/bank-receipt`, receiptForm);
       toast.success("Bank commission receipt recorded successfully!");
       setBankReceiptModalOpen(false);
       fetchCasePayouts();
+      if (paymentHistoryModalOpen && historyTargetCase?.id === receiptTargetCase.id) {
+        openPaymentHistoryModal(receiptTargetCase);
+      }
     } catch (err) {
       console.error("Error recording bank receipt:", err);
       toast.error(err.response?.data?.message || "Failed to record bank receipt");
     } finally {
       setRecordingReceipt(false);
+    }
+  };
+
+  // Open GSTR Status Modal
+  const openGstrModal = (item) => {
+    setGstrTargetCase(item);
+    const bGstAmt = parseFloat(item.bankGstAmount) || 0;
+    const gstrAmt = parseFloat(item.gstrAmount) || bGstAmt;
+    setGstrForm({
+      gstrStatus: item.gstrStatus || "PENDING",
+      gstrAmount: gstrAmt,
+      gstrReceivedAmount: parseFloat(item.gstrReceivedAmount || 0),
+      notes: item.notes || "",
+    });
+    setGstrModalOpen(true);
+  };
+
+  // Submit GSTR Status Update
+  const handleGstrSubmit = async (e) => {
+    e.preventDefault();
+    if (!gstrTargetCase) return;
+    setSavingGstr(true);
+    try {
+      await axios.put(`${API_URL}/payouts/cases/${gstrTargetCase.id}/gstr-status`, gstrForm);
+      toast.success("GST status updated successfully!");
+      setGstrModalOpen(false);
+      fetchCasePayouts();
+      if (paymentHistoryModalOpen && historyTargetCase?.id === gstrTargetCase.id) {
+        openPaymentHistoryModal(gstrTargetCase);
+      }
+    } catch (err) {
+      console.error("Error updating GST status:", err);
+      toast.error(err.response?.data?.message || "Failed to update GST status");
+    } finally {
+      setSavingGstr(false);
+    }
+  };
+
+  // Open Payment History Modal
+  const openPaymentHistoryModal = async (item) => {
+    setHistoryTargetCase(item);
+    setPaymentHistoryModalOpen(true);
+    setLoadingHistory(true);
+    setHistoryData(null);
+    try {
+      const res = await axios.get(`${API_URL}/payouts/cases/${item.id}/payment-history`);
+      setHistoryData(res.data);
+    } catch (err) {
+      console.error("Error fetching payment history:", err);
+      toast.error("Failed to load payment history for this lead");
+    } finally {
+      setLoadingHistory(false);
     }
   };
 
@@ -1303,9 +1426,10 @@ export default function CasePayoutsScreen() {
                   <th>Loan Amount (₹)</th>
                   <th>Bank %</th>
                   <th className="th-credit">Bank Gross Base (₹)</th>
-                  <th>Bank Deduct &amp; Net (₹)</th>
+                  <th>Bank Net Receivable (₹)</th>
+                  <th>GST Status</th>
                   <th>Vendor / Type</th>
-                  <th>Vendor % (on Bank Net)</th>
+                  <th>Vendor %</th>
                   <th>Vendor Gross (₹)</th>
                   <th className="th-deduct">Deductions (Taxes/Staff)</th>
                   <th className="th-net">Party Net Payable (₹)</th>
@@ -1318,14 +1442,14 @@ export default function CasePayoutsScreen() {
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={15} style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
+                    <td colSpan={16} style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
                       <RefreshCw size={24} className="cc-spin" style={{ marginBottom: 10 }} />
                       <p>Loading disbursed cases &amp; payout balances...</p>
                     </td>
                   </tr>
                 ) : cases.length === 0 ? (
                   <tr>
-                    <td colSpan={15} style={{ textAlign: "center", padding: "40px", color: "#94a3b8" }}>
+                    <td colSpan={16} style={{ textAlign: "center", padding: "40px", color: "#94a3b8" }}>
                       No completed or disbursed loan cases match the selected filters.
                     </td>
                   </tr>
@@ -1336,9 +1460,13 @@ export default function CasePayoutsScreen() {
                       (c.partyName || "").toLowerCase() === "self" ||
                       (c.partyName || "").toLowerCase() === "direct";
 
-                    const bGstAmt = parseFloat(c.bankGstAmount) || Math.round(((parseFloat(c.baseAmount) || 0) * (parseFloat(c.bankGstPercent) || 0)) / 100);
-                    const bTdsAmt = parseFloat(c.bankTdsAmount) || Math.round(((parseFloat(c.baseAmount) || 0) * (parseFloat(c.bankTdsPercent) || 0)) / 100);
-                    const bNet = parseFloat(c.bankNetReceivable) || Math.max(0, (parseFloat(c.baseAmount) || 0) - bGstAmt - bTdsAmt);
+                    const baseComm = parseFloat(c.baseAmount || 0);
+                    const corpDsaChargePct = parseFloat(c.corporateDsaPercent || 0);
+                    const corpDsaChargeAmt = parseFloat(c.corporateDsaAmount) || Math.round((baseComm * corpDsaChargePct) / 100);
+                    const actualAmt = parseFloat(c.actualAmount) || Math.max(0, baseComm - corpDsaChargeAmt);
+                    const bGstAmt = parseFloat(c.bankGstAmount) || Math.round((actualAmt * (parseFloat(c.bankGstPercent) || 18)) / 100);
+                    const bTdsAmt = parseFloat(c.bankTdsAmount) || Math.round((actualAmt * (parseFloat(c.bankTdsPercent) || 5)) / 100);
+                    const bNet = parseFloat(c.bankNetReceivable) || Math.max(0, actualAmt - bTdsAmt);
 
                     const totalDeductions = isSelfCase
                       ? (parseFloat(c.extraCharges) || 0)
@@ -1419,16 +1547,27 @@ export default function CasePayoutsScreen() {
                           <div style={{ fontSize: 10.5, color: "#059669" }}>
                             Gross ({c.bankCommissionPercent}%)
                           </div>
+                          {corpDsaChargeAmt > 0 && (
+                            <div style={{ fontSize: 10, color: "#dc2626", marginTop: 2 }}>
+                              - Corp DSA ({corpDsaChargePct}%): ₹{numberFormatter.format(corpDsaChargeAmt)}
+                            </div>
+                          )}
+                          <div style={{ fontSize: 10.5, color: "#166534", fontWeight: 700, marginTop: 2 }}>
+                            Actual: {currencyFormatter.format(actualAmt)}
+                          </div>
                         </td>
 
-                        {/* 6. Bank Deduct (GST+TDS) & Net Due / Received */}
+                        {/* 6. Bank Net Receivable: (Actual Amount - TDS = Net Inflow, GST Separate) */}
                         <td>
-                          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                            <span style={{ fontSize: 10, color: "#64748b" }}>Net:</span>
-                            <strong style={{ fontSize: 13, color: "#047857" }}>{currencyFormatter.format(bNet)}</strong>
+                          <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+                            <span style={{ fontSize: 10.5, color: "#64748b" }}>Net:</span>
+                            <strong style={{ fontSize: 13.5, color: "#047857" }}>{currencyFormatter.format(bNet)}</strong>
                           </div>
                           <div style={{ fontSize: 10, color: "#dc2626", marginTop: 1 }}>
-                            -(GST {c.bankGstPercent || 18}%: ₹{numberFormatter.format(bGstAmt)} + TDS {c.bankTdsPercent || 5}%: ₹{numberFormatter.format(bTdsAmt)})
+                            ₹{numberFormatter.format(actualAmt)} − TDS ₹{numberFormatter.format(bTdsAmt)} ({c.bankTdsPercent || 5}%)
+                          </div>
+                          <div style={{ fontSize: 10, color: "#0369a1", fontWeight: 700, marginTop: 2, background: "#f0f9ff", border: "1px solid #bae6fd", padding: "1px 5px", borderRadius: 4, display: "inline-block" }}>
+                            GST: ₹{numberFormatter.format(bGstAmt)} ({c.bankGstPercent || 18}%) <span style={{ color: "#64748b", fontWeight: 400 }}>[Separate]</span>
                           </div>
                           <div style={{ fontSize: 10.5, marginTop: 3 }}>
                             <span style={{ color: "#059669" }}>Rec: <strong>{currencyFormatter.format(c.bankReceivedAmount)}</strong></span>
@@ -1437,7 +1576,88 @@ export default function CasePayoutsScreen() {
                           </div>
                         </td>
 
-                        {/* 7. Vendor / Connector / Self */}
+                        {/* 7. GST Status */}
+                        <td>
+                          <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+                            {c.gstrStatus === "COMPLETE" ? (
+                              <span
+                                style={{
+                                  background: "#ecfdf5",
+                                  color: "#047857",
+                                  border: "1px solid #a7f3d0",
+                                  fontSize: 11,
+                                  fontWeight: 700,
+                                  padding: "2px 7px",
+                                  borderRadius: 6,
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: 3,
+                                }}
+                              >
+                                <CheckCircle2 size={11} /> Complete
+                              </span>
+                            ) : c.gstrStatus === "PARTIALLY_COMPLETE" ? (
+                              <span
+                                style={{
+                                  background: "#eff6ff",
+                                  color: "#1d4ed8",
+                                  border: "1px solid #bfdbfe",
+                                  fontSize: 11,
+                                  fontWeight: 700,
+                                  padding: "2px 7px",
+                                  borderRadius: 6,
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: 3,
+                                }}
+                              >
+                                <Clock size={11} /> Partial
+                              </span>
+                            ) : (
+                              <span
+                                style={{
+                                  background: "#fffbeb",
+                                  color: "#b45309",
+                                  border: "1px solid #fde68a",
+                                  fontSize: 11,
+                                  fontWeight: 700,
+                                  padding: "2px 7px",
+                                  borderRadius: 6,
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: 3,
+                                }}
+                              >
+                                <AlertCircle size={11} /> Pending
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              className="cc-inline-edit-btn"
+                              onClick={() => openGstrModal(c)}
+                              title="Update GST Status & Reflected Amount"
+                            >
+                              <Edit3 size={11} />
+                            </button>
+                          </div>
+                          <div style={{ fontSize: 10, color: "#475569", marginTop: 3 }}>
+                            {c.gstrStatus === "PARTIALLY_COMPLETE" ? (
+                              <span>
+                                ₹{numberFormatter.format(c.gstrReceivedAmount || 0)} / ₹{numberFormatter.format(c.gstrAmount || bGstAmt)}
+                              </span>
+                            ) : c.gstrStatus === "COMPLETE" ? (
+                              <span style={{ color: "#047857", fontWeight: 600 }}>
+                                Full ₹{numberFormatter.format(c.gstrReceivedAmount || c.gstrAmount || bGstAmt)}
+                              </span>
+                            ) : (
+                              <span style={{ color: "#94a3b8" }}>
+                                Exp: ₹{numberFormatter.format(c.gstrAmount || bGstAmt)}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* 8. Vendor / Connector / Self */}
                         <td>
                           {isSelfCase ? (
                             <span className="cc-party-pill" style={{ background: "#e0e7ff", color: "#3730a3", border: "1px solid #c7d2fe", fontWeight: 700 }}>
@@ -1451,7 +1671,7 @@ export default function CasePayoutsScreen() {
                           )}
                         </td>
 
-                        {/* 8. Vendor % (Applied on Base Value) */}
+                        {/* 9. Vendor % */}
                         <td>
                           {isSelfCase ? (
                             <span style={{ color: "#94a3b8", fontSize: 11 }}>—</span>
@@ -1469,13 +1689,13 @@ export default function CasePayoutsScreen() {
                                 </button>
                               </div>
                               <small style={{ color: "#7c3aed", fontSize: 10, display: "block", marginTop: 2 }}>
-                                on Bank Net
+                                on Gross
                               </small>
                             </>
                           )}
                         </td>
 
-                        {/* 9. Gross Vendor Commission */}
+                        {/* 10. Gross Vendor Commission */}
                         <td>
                           {isSelfCase ? (
                             <span style={{ color: "#94a3b8", fontSize: 11 }}>₹0 (Self)</span>
@@ -1486,7 +1706,7 @@ export default function CasePayoutsScreen() {
                           )}
                         </td>
 
-                        {/* 10. Deductions (TDS, GST, Manpower) */}
+                        {/* 11. Deductions (TDS, GST, Manpower) */}
                         <td className="cell-deduct">
                           {isSelfCase ? (
                             parseFloat(c.extraCharges) > 0 ? (
@@ -1522,7 +1742,7 @@ export default function CasePayoutsScreen() {
                           )}
                         </td>
 
-                        {/* 11. Final Net Payable to Vendor */}
+                        {/* 12. Final Net Payable to Vendor */}
                         <td className="cell-net">
                           {isSelfCase ? (
                             <div>
@@ -1541,7 +1761,7 @@ export default function CasePayoutsScreen() {
                           )}
                         </td>
 
-                        {/* 12. Vendor Paid & Remaining Due */}
+                        {/* 13. Vendor Paid & Remaining Due */}
                         <td>
                           {isSelfCase ? (
                             <span style={{ color: "#94a3b8", fontSize: 11 }}>N/A (Self)</span>
@@ -1557,7 +1777,7 @@ export default function CasePayoutsScreen() {
                           )}
                         </td>
 
-                        {/* 13. Net Company Margin */}
+                        {/* 14. Net Company Margin */}
                         <td className="cell-margin">
                           <strong
                             style={{
@@ -1572,7 +1792,7 @@ export default function CasePayoutsScreen() {
                           </small>
                         </td>
 
-                        {/* 14. Invoice / Taxes */}
+                        {/* 15. Invoice / Taxes */}
                         <td>
                           <div style={{ fontSize: 11, color: "#475569" }}>
                             GST: {c.bankGstPercent}% • TDS: {c.bankTdsPercent}%
@@ -1582,7 +1802,7 @@ export default function CasePayoutsScreen() {
                           </small>
                         </td>
 
-                        {/* 15. Actions */}
+                        {/* 16. Actions */}
                         <td>
                           <div style={{ display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap" }}>
                             <button
@@ -1618,6 +1838,27 @@ export default function CasePayoutsScreen() {
                               title="View & Download Bank Tax Invoice / Connector Voucher"
                             >
                               <Printer size={12} />
+                            </button>
+                            <button
+                              type="button"
+                              className="cc-action-btn"
+                              style={{
+                                background: "#f0fdf4",
+                                border: "1px solid #bbf7d0",
+                                color: "#166534",
+                                fontWeight: 600,
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 3,
+                                padding: "4px 7px",
+                                borderRadius: 6,
+                                fontSize: 11,
+                                cursor: "pointer",
+                              }}
+                              onClick={() => openPaymentHistoryModal(c)}
+                              title="View Payment History & Ledger for this Lead"
+                            >
+                              <Receipt size={12} /> History
                             </button>
                           </div>
                         </td>
@@ -1657,6 +1898,14 @@ export default function CasePayoutsScreen() {
                       </div>
                       <div style={{ color: "#b45309", fontWeight: 700, fontSize: 11 }}>
                         Due: {currencyFormatter.format(grandTotals.totalBankRemainingDue)}
+                      </div>
+                    </td>
+                    <td>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#0369a1" }}>
+                        GST: {currencyFormatter.format(grandTotals.totalGstrAmount || grandTotals.totalBankGst || 0)}
+                      </div>
+                      <div style={{ fontSize: 10.5, color: "#047857" }}>
+                        Reflected: {currencyFormatter.format(grandTotals.totalGstrReceived || 0)}
                       </div>
                     </td>
                     <td>—</td>
@@ -1877,29 +2126,73 @@ export default function CasePayoutsScreen() {
             </div>
 
             <form onSubmit={handleBankReceiptSubmit} className="cc-modal-form">
-              {/* Summary Card */}
-              <div className="cc-modal-summary-banner">
-                <div>
-                  <small>Customer &amp; Loan</small>
-                  <strong>{receiptTargetCase.customerName}</strong> ({receiptTargetCase.loanProduct})
-                </div>
-                <div>
-                  <small>Disbursed Loan</small>
-                  <strong>{currencyFormatter.format(receiptTargetCase.loanAmount || receiptTargetCase.baseAmount)}</strong>
-                </div>
-                <div>
-                  <small>Credit Base Due</small>
-                  <strong style={{ color: "#047857" }}>
-                    {currencyFormatter.format(receiptTargetCase.baseAmount || receiptTargetCase.bankCommissionDue)}
-                  </strong>
-                </div>
-                <div>
-                  <small>Remaining Due</small>
-                  <strong style={{ color: "#b45309" }}>
-                    {currencyFormatter.format(receiptTargetCase.bankRemainingDue)}
-                  </strong>
-                </div>
-              </div>
+              {/* Summary Card & Calculation Breakdown */}
+              {(() => {
+                const baseComm = parseFloat(receiptTargetCase.baseAmount || receiptTargetCase.bankCommissionDue || 0);
+                const isSelfCase = receiptTargetCase.payoutType === "SELF" || (receiptTargetCase.partyName || "").toLowerCase() === "self" || (receiptTargetCase.partyName || "").toLowerCase() === "direct";
+                const corpDsaComm = isSelfCase ? 0 : parseFloat(receiptTargetCase.partyCommissionDue || 0);
+                const remainingAfterDsa = Math.max(0, baseComm - corpDsaComm);
+                const tdsAmt = parseFloat(receiptTargetCase.bankTdsAmount || 0);
+                const gstAmt = parseFloat(receiptTargetCase.bankGstAmount || receiptTargetCase.gstrAmount || 0);
+                const maxNetReceivable = Math.max(0, remainingAfterDsa - tdsAmt);
+                const alreadyReceived = parseFloat(receiptTargetCase.bankReceivedAmount || 0);
+                const maxAllowedNow = Math.max(0, maxNetReceivable - alreadyReceived);
+                const enteredGross = parseFloat(receiptForm.grossAmount || 0);
+                const isExceeded = enteredGross > maxAllowedNow + 0.01;
+
+                return (
+                  <>
+                    <div className="cc-modal-summary-banner" style={{ gridTemplateColumns: "1.2fr 1fr 1fr 1fr" }}>
+                      <div>
+                        <small>Customer &amp; Loan</small>
+                        <strong>{receiptTargetCase.customerName}</strong>
+                        <span style={{ fontSize: 11, color: "#64748b" }}>{receiptTargetCase.loanProduct}</span>
+                      </div>
+                      <div>
+                        <small>Disbursed Loan</small>
+                        <strong>{currencyFormatter.format(receiptTargetCase.loanAmount || 0)}</strong>
+                      </div>
+                      <div>
+                        <small>Gross Bank Comm</small>
+                        <strong style={{ color: "#047857" }}>
+                          {currencyFormatter.format(baseComm)}
+                        </strong>
+                      </div>
+                      <div>
+                        <small>Corp DSA Comm</small>
+                        <strong style={{ color: "#7c3aed" }}>
+                          {corpDsaComm > 0 ? `-${currencyFormatter.format(corpDsaComm)}` : "₹0 (Self/Direct)"}
+                        </strong>
+                      </div>
+                    </div>
+
+                    {/* Formula Explanation Banner */}
+                    <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, padding: "10px 14px", fontSize: 12 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                        <span style={{ fontWeight: 700, color: "#166534" }}>Calculation Formula: (Bank Comm − DSA Comm) − TDS</span>
+                        <span style={{ fontWeight: 800, color: "#15803d", fontSize: 13 }}>
+                          ₹{Math.round(remainingAfterDsa).toLocaleString("en-IN")} − ₹{Math.round(tdsAmt).toLocaleString("en-IN")} = ₹{Math.round(maxNetReceivable).toLocaleString("en-IN")} (Net X)
+                        </span>
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1.2fr", gap: 8, color: "#166534", fontSize: 11.5, borderTop: "1px dashed #86efac", paddingTop: 6 }}>
+                        <div>Already Received: <strong>₹{Math.round(alreadyReceived).toLocaleString("en-IN")}</strong></div>
+                        <div>GST [Separate] (Y): <strong style={{ color: "#0284c7" }}>₹{Math.round(gstAmt).toLocaleString("en-IN")}</strong></div>
+                        <div style={{ textAlign: "right" }}>Max Allowed Now: <strong style={{ color: isExceeded ? "#dc2626" : "#166534", fontSize: 13 }}>₹{Math.round(maxAllowedNow).toLocaleString("en-IN")}</strong></div>
+                      </div>
+                    </div>
+
+                    {/* Validation Alert */}
+                    {isExceeded && (
+                      <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 12px", color: "#b91c1c", fontSize: 12, display: "flex", alignItems: "center", gap: 8 }}>
+                        <AlertCircle size={18} style={{ flexShrink: 0 }} />
+                        <span>
+                          <strong>Validation Restriction:</strong> You entered ₹{Math.round(enteredGross).toLocaleString("en-IN")}, which exceeds the maximum eligible balance of <strong>₹{Math.round(maxAllowedNow).toLocaleString("en-IN")}</strong>. You cannot record more than the eligible net receivable!
+                        </span>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
 
               {/* Gross Amount & Receipt Date */}
               <div className="cc-form-row">
@@ -1909,6 +2202,15 @@ export default function CasePayoutsScreen() {
                     type="number"
                     step="0.01"
                     min="1"
+                    max={(() => {
+                      const baseComm = parseFloat(receiptTargetCase.baseAmount || 0);
+                      const isSelfCase = receiptTargetCase.payoutType === "SELF" || (receiptTargetCase.partyName || "").toLowerCase() === "self" || (receiptTargetCase.partyName || "").toLowerCase() === "direct";
+                      const corpDsaComm = isSelfCase ? 0 : parseFloat(receiptTargetCase.partyCommissionDue || 0);
+                      const tdsAmt = parseFloat(receiptTargetCase.bankTdsAmount || 0);
+                      const maxNetReceivable = Math.max(0, baseComm - corpDsaComm - tdsAmt);
+                      const alreadyReceived = parseFloat(receiptTargetCase.bankReceivedAmount || 0);
+                      return Math.max(0, maxNetReceivable - alreadyReceived);
+                    })()}
                     required
                     placeholder="e.g. 25000"
                     value={receiptForm.grossAmount}
@@ -1940,7 +2242,7 @@ export default function CasePayoutsScreen() {
               {/* GST & TDS Row */}
               <div className="cc-form-row">
                 <div className="cc-fgroup">
-                  <label>GST Added ({receiptTargetCase.bankGstPercent}%) ₹</label>
+                  <label>GST ({receiptTargetCase.bankGstPercent || 18}%) ₹ [Separate]</label>
                   <input
                     type="number"
                     step="0.01"
@@ -1949,7 +2251,7 @@ export default function CasePayoutsScreen() {
                   />
                 </div>
                 <div className="cc-fgroup">
-                  <label>TDS Deducted ({receiptTargetCase.bankTdsPercent}%) ₹</label>
+                  <label>TDS Deducted ({receiptTargetCase.bankTdsPercent || 5}%) ₹</label>
                   <input
                     type="number"
                     step="0.01"
@@ -2013,7 +2315,25 @@ export default function CasePayoutsScreen() {
                 >
                   Cancel
                 </button>
-                <button type="submit" className="cc-pbtn primary" disabled={recordingReceipt}>
+                <button
+                  type="submit"
+                  className="cc-pbtn primary"
+                  disabled={
+                    recordingReceipt ||
+                    !receiptForm.grossAmount ||
+                    parseFloat(receiptForm.grossAmount) <= 0 ||
+                    (() => {
+                      const baseComm = parseFloat(receiptTargetCase.baseAmount || 0);
+                      const isSelfCase = receiptTargetCase.payoutType === "SELF" || (receiptTargetCase.partyName || "").toLowerCase() === "self" || (receiptTargetCase.partyName || "").toLowerCase() === "direct";
+                      const corpDsaComm = isSelfCase ? 0 : parseFloat(receiptTargetCase.partyCommissionDue || 0);
+                      const tdsAmt = parseFloat(receiptTargetCase.bankTdsAmount || 0);
+                      const maxNetReceivable = Math.max(0, baseComm - corpDsaComm - tdsAmt);
+                      const alreadyReceived = parseFloat(receiptTargetCase.bankReceivedAmount || 0);
+                      const maxAllowedNow = Math.max(0, maxNetReceivable - alreadyReceived);
+                      return parseFloat(receiptForm.grossAmount || 0) > maxAllowedNow + 0.01;
+                    })()
+                  }
+                >
                   {recordingReceipt ? "Recording..." : "Save Bank Receipt & Update Balance"}
                 </button>
               </div>
@@ -2240,7 +2560,7 @@ export default function CasePayoutsScreen() {
                     </strong>
                   </div>
                   <span style={{ fontSize: 11, color: "#15803d", fontWeight: 600 }}>
-                    Bank comm me se GST &amp; TDS cut hokar net receivable aayega
+                    Gross me se Corporate DSA cut hoga, Actual Amount pe TDS minus hokar Net aayega (GST alag rahega)
                   </span>
                 </div>
 
@@ -2285,27 +2605,63 @@ export default function CasePayoutsScreen() {
                   </div>
                 </div>
 
-                {/* Bank Deductions Row: GST & TDS */}
+                {/* Corporate DSA Deductions Row */}
                 <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed #86efac" }}>
                   <span style={{ fontSize: 11.5, fontWeight: 700, color: "#166534", display: "block", marginBottom: 6 }}>
-                    Bank Deductions (Deducted directly from Bank Gross Commission):
+                    Corporate DSA Deductions (Deducted directly from Gross Bank Commission):
                   </span>
-                  <div className="cc-form-row" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+                  <div className="cc-form-row" style={{ gridTemplateColumns: "1fr 1fr 1.2fr" }}>
                     <div className="cc-fgroup">
-                      <label>Bank GST %</label>
+                      <label>Corporate DSA Charge %</label>
                       <input
                         type="number"
                         step="0.01"
-                        value={editForm.bankGstPercent}
-                        onChange={(e) => recomputeEditForm({ bankGstPercent: e.target.value })}
+                        min="0"
+                        max="100"
+                        value={editForm.corporateDsaPercent}
+                        onChange={(e) => recomputeEditForm({ corporateDsaPercent: e.target.value })}
                       />
                       <small style={{ color: "#dc2626", fontSize: 10.5, fontWeight: 600 }}>
-                        - GST: ₹{numberFormatter.format(editForm.bankGstAmount || 0)}
+                        - DSA Charge: ₹{numberFormatter.format(editForm.corporateDsaAmount || 0)}
                       </small>
                     </div>
 
                     <div className="cc-fgroup">
-                      <label>Bank TDS %</label>
+                      <label>Corporate DSA Charge (₹)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={editForm.corporateDsaAmount}
+                        onChange={(e) => recomputeEditForm({ corporateDsaAmount: e.target.value })}
+                      />
+                      <small style={{ color: "#64748b", fontSize: 10 }}>Gross × Corp DSA %</small>
+                    </div>
+
+                    <div className="cc-fgroup">
+                      <label style={{ color: "#047857", fontWeight: 700 }}>Actual Amount (₹) *</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        readOnly
+                        style={{ fontWeight: 800, color: "#047857", background: "#dcfce7", borderColor: "#86efac" }}
+                        value={editForm.actualAmount}
+                      />
+                      <small style={{ color: "#15803d", fontSize: 10, fontWeight: 600 }}>
+                        Gross ₹{numberFormatter.format(editForm.baseAmount || 0)} − DSA ₹{numberFormatter.format(editForm.corporateDsaAmount || 0)}
+                      </small>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Bank Deductions Row: TDS & GST on Actual Amount */}
+                <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed #86efac" }}>
+                  <span style={{ fontSize: 11.5, fontWeight: 700, color: "#166534", display: "block", marginBottom: 6 }}>
+                    Bank Taxes (Applicable on Actual Amount: ₹{numberFormatter.format(editForm.actualAmount || 0)}):
+                  </span>
+                  <div className="cc-form-row" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+                    <div className="cc-fgroup">
+                      <label>Bank TDS % (Deducted)</label>
                       <input
                         type="number"
                         step="0.01"
@@ -2314,6 +2670,19 @@ export default function CasePayoutsScreen() {
                       />
                       <small style={{ color: "#dc2626", fontSize: 10.5, fontWeight: 600 }}>
                         - TDS: ₹{numberFormatter.format(editForm.bankTdsAmount || 0)}
+                      </small>
+                    </div>
+
+                    <div className="cc-fgroup">
+                      <label>GST % (Kept Separate)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={editForm.bankGstPercent}
+                        onChange={(e) => recomputeEditForm({ bankGstPercent: e.target.value })}
+                      />
+                      <small style={{ color: "#2563eb", fontSize: 10.5, fontWeight: 600 }}>
+                        GST Amount: ₹{numberFormatter.format(editForm.bankGstAmount || 0)} (Alag rahega)
                       </small>
                     </div>
 
@@ -2347,9 +2716,12 @@ export default function CasePayoutsScreen() {
                     <span style={{ fontSize: 11, color: "#166534", fontWeight: 700, display: "block" }}>
                       BANK NET PAYABLE / RECEIVABLE AMOUNT:
                     </span>
-                    <span style={{ fontSize: 11, color: "#15803d" }}>
-                      Gross ₹{numberFormatter.format(editForm.baseAmount || 0)} − Bank GST ₹{numberFormatter.format(editForm.bankGstAmount || 0)} − Bank TDS ₹{numberFormatter.format(editForm.bankTdsAmount || 0)}
+                    <span style={{ fontSize: 11.5, color: "#15803d", fontWeight: 600 }}>
+                      Actual Amount ₹{numberFormatter.format(editForm.actualAmount || 0)} − Bank TDS ₹{numberFormatter.format(editForm.bankTdsAmount || 0)} = ₹{numberFormatter.format(editForm.bankNetReceivable || 0)}
                     </span>
+                    <div style={{ fontSize: 11, color: "#2563eb", fontWeight: 600, marginTop: 3 }}>
+                      GST Amount (Separate): ₹{numberFormatter.format(editForm.bankGstAmount || 0)} (Net inflow me se minus nahi kiya gaya hai)
+                    </div>
                   </div>
                   <div style={{ textAlign: "right" }}>
                     <strong style={{ fontSize: 18, color: "#047857" }}>
@@ -2565,17 +2937,33 @@ export default function CasePayoutsScreen() {
                   </strong>
                 </div>
                 <div>
-                  <small>Bank Deduct (GST+TDS)</small>
+                  <small>Corp DSA Deduct</small>
                   <strong style={{ color: "#dc2626" }}>
-                    -{currencyFormatter.format(
-                      (parseFloat(editForm.bankGstAmount) || 0) + (parseFloat(editForm.bankTdsAmount) || 0)
-                    )}
+                    -{currencyFormatter.format(parseFloat(editForm.corporateDsaAmount) || 0)}
+                  </strong>
+                </div>
+                <div>
+                  <small>Actual Amount</small>
+                  <strong style={{ color: "#047857" }}>
+                    {currencyFormatter.format(parseFloat(editForm.actualAmount) || 0)}
+                  </strong>
+                </div>
+                <div>
+                  <small>Bank TDS (5%)</small>
+                  <strong style={{ color: "#dc2626" }}>
+                    -{currencyFormatter.format(parseFloat(editForm.bankTdsAmount) || 0)}
                   </strong>
                 </div>
                 <div>
                   <small>Bank Net Inflow</small>
                   <strong style={{ color: "#047857", fontSize: 13 }}>
                     {currencyFormatter.format(parseFloat(editForm.bankNetReceivable) || 0)}
+                  </strong>
+                </div>
+                <div>
+                  <small>GST (Separate)</small>
+                  <strong style={{ color: "#2563eb" }}>
+                    {currencyFormatter.format(parseFloat(editForm.bankGstAmount) || 0)}
                   </strong>
                 </div>
                 <div>
@@ -2682,6 +3070,12 @@ export default function CasePayoutsScreen() {
             </div>
 
             <div className="cc-invoice-content-wrap">
+              {invoiceData && (!invoiceData.company?.gstin || invoiceData.company.gstin === "GSTIN Not Specified" || !invoiceData.company?.address || invoiceData.company.address.includes("Address Not Configured")) && (
+                <div style={{ background: "#fffbeb", border: "1px solid #fde68a", padding: "8px 14px", borderRadius: 8, marginBottom: 12, fontSize: 12, color: "#92400e", display: "flex", alignItems: "center", justifyContent: "space-between" }} className="no-print">
+                  <span>⚠️ Company GSTIN or Registered Address is not configured. Update your legal company details in Settings.</span>
+                  <a href="/settings" style={{ color: "#047857", fontWeight: 700, textDecoration: "underline" }}>Open Settings</a>
+                </div>
+              )}
               {invoiceLoading || !invoiceData ? (
                 <div style={{ textAlign: "center", padding: "50px", color: "#64748b" }}>
                   <RefreshCw size={24} className="cc-spin" style={{ marginBottom: 10 }} />
@@ -2841,6 +3235,11 @@ export default function CasePayoutsScreen() {
                       <h2 className="cc-inv-company-name">{invoiceData.company?.name}</h2>
                       <p className="cc-inv-company-sub">Channel Partner &amp; Connector Payout Voucher</p>
                       <p className="cc-inv-meta-line">{invoiceData.company?.address}</p>
+                      {invoiceData.company?.gstin && (
+                        <p className="cc-inv-meta-line">
+                          GSTIN: <strong>{invoiceData.company?.gstin}</strong> | PAN: <strong>{invoiceData.company?.pan}</strong>
+                        </p>
+                      )}
                     </div>
                     <div style={{ textAlign: "right" }}>
                       <div className="cc-inv-title-badge" style={{ background: "#7c3aed" }}>
@@ -3180,18 +3579,18 @@ export default function CasePayoutsScreen() {
                 </div>
               </div>
 
-              {/* SECTION 2: BANK COMMISSION & DEDUCTIONS */}
+              {/* SECTION 2: BANK COMMISSION, CORPORATE DSA & NET INFLOW */}
               <div style={{ background: "#f0fdf4", padding: "14px", borderRadius: 10, border: "1px solid #bbf7d0", marginBottom: 14 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
                   <strong style={{ fontSize: 13, color: "#166534", display: "flex", alignItems: "center", gap: 6 }}>
-                    <Building2 size={15} color="#166534" /> 2. Bank Commission &amp; Net Receivable Inflow
+                    <Building2 size={15} color="#166534" /> 2. Bank Commission, Corporate DSA &amp; Net Inflow
                   </strong>
                   <span style={{ fontSize: 11, color: "#15803d", fontWeight: 600 }}>
-                    GST (18%) &amp; TDS (5%) will be deducted from Bank Commission
+                    Gross me se Corporate DSA cut hoga, Actual Amount pe TDS minus hokar Net aayega (GST alag rahega)
                   </span>
                 </div>
 
-                <div className="cc-form-row" style={{ gridTemplateColumns: "1fr 1.2fr 0.8fr 0.8fr 1.2fr" }}>
+                <div className="cc-form-row" style={{ gridTemplateColumns: "0.8fr 1.2fr 1fr 1fr 1.2fr" }}>
                   <div className="cc-fgroup">
                     <label>Bank Comm (%)</label>
                     <input
@@ -3205,7 +3604,7 @@ export default function CasePayoutsScreen() {
                   </div>
 
                   <div className="cc-fgroup">
-                    <label>Bank Gross Base (₹)</label>
+                    <label>Gross Base (₹)</label>
                     <input
                       type="number"
                       step="0.01"
@@ -3215,25 +3614,58 @@ export default function CasePayoutsScreen() {
                   </div>
 
                   <div className="cc-fgroup">
-                    <label>GST (18%)</label>
-                    <div style={{ fontSize: 12.5, fontWeight: 700, color: "#dc2626", padding: "8px 0" }}>
-                      -{currencyFormatter.format(addForm.bankGstAmount || 0)}
+                    <label>Corp DSA %</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="100"
+                      value={addForm.corporateDsaPercent}
+                      onChange={(e) => recomputeAddForm({ corporateDsaPercent: e.target.value })}
+                    />
+                    <small style={{ color: "#dc2626", fontSize: 10.5, fontWeight: 600 }}>
+                      -₹{numberFormatter.format(addForm.corporateDsaAmount || 0)}
+                    </small>
+                  </div>
+
+                  <div className="cc-fgroup">
+                    <label style={{ color: "#166534", fontWeight: 700 }}>Actual Amount (₹)</label>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: "#166534", padding: "6px 0" }}>
+                      {currencyFormatter.format(addForm.actualAmount || 0)}
                     </div>
                   </div>
 
                   <div className="cc-fgroup">
-                    <label>TDS (5%)</label>
-                    <div style={{ fontSize: 12.5, fontWeight: 700, color: "#dc2626", padding: "8px 0" }}>
+                    <label>TDS (5%) Deduct</label>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: "#dc2626", padding: "6px 0" }}>
                       -{currencyFormatter.format(addForm.bankTdsAmount || 0)}
                     </div>
                   </div>
+                </div>
 
-                  <div className="cc-fgroup">
-                    <label>Bank Net Receivable</label>
-                    <div style={{ fontSize: 14, fontWeight: 800, color: "#166534", padding: "7px 0" }}>
-                      {currencyFormatter.format(addForm.bankNetReceivable || 0)}
-                    </div>
+                <div
+                  style={{
+                    marginTop: 10,
+                    padding: "8px 12px",
+                    background: "#dcfce7",
+                    border: "1px solid #86efac",
+                    borderRadius: 6,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    gap: 6,
+                  }}
+                >
+                  <div style={{ fontSize: 11.5, color: "#166534" }}>
+                    <strong>Net Inflow: </strong> Actual ₹{numberFormatter.format(addForm.actualAmount || 0)} − TDS ₹{numberFormatter.format(addForm.bankTdsAmount || 0)}
+                    <span style={{ marginLeft: 10, color: "#2563eb", fontWeight: 600 }}>
+                      | GST (Separate): ₹{numberFormatter.format(addForm.bankGstAmount || 0)}
+                    </span>
                   </div>
+                  <strong style={{ fontSize: 15, color: "#047857" }}>
+                    {currencyFormatter.format(addForm.bankNetReceivable || 0)}
+                  </strong>
                 </div>
               </div>
 
@@ -3390,6 +3822,589 @@ export default function CasePayoutsScreen() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 5: UPDATE GST STATUS */}
+      {gstrModalOpen && gstrTargetCase && (
+        <div className="cc-modal-overlay" onClick={() => setGstrModalOpen(false)}>
+          <div className="cc-modal-box" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 540 }}>
+            <div className="cc-modal-header" style={{ borderBottom: "1px solid #e2e8f0" }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 17, color: "#0f172a", display: "flex", alignItems: "center", gap: 8 }}>
+                  <FileSpreadsheet size={19} color="#059669" /> GST Status
+                </h3>
+                <p style={{ margin: "3px 0 0", fontSize: 12.5, color: "#64748b" }}>
+                  Track GST reflection for Lead #{gstrTargetCase.leadId} &bull; {gstrTargetCase.customerName}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="cc-modal-close"
+                onClick={() => setGstrModalOpen(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleGstrSubmit} className="cc-modal-form" style={{ padding: "18px 20px" }}>
+              {/* Summary info card */}
+              <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "12px 14px", marginBottom: 14 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, fontSize: 12.5 }}>
+                  <div>
+                    <span style={{ color: "#64748b", fontSize: 10.5, textTransform: "uppercase", fontWeight: 700 }}>Bank / Lender</span>
+                    <div style={{ fontWeight: 600, color: "#1e293b" }}>{gstrTargetCase.bankName || "—"}</div>
+                  </div>
+                  <div>
+                    <span style={{ color: "#64748b", fontSize: 10.5, textTransform: "uppercase", fontWeight: 700 }}>Disbursed Loan</span>
+                    <div style={{ fontWeight: 600, color: "#1e293b" }}>{currencyFormatter.format(gstrTargetCase.loanAmount || 0)}</div>
+                  </div>
+                  <div>
+                    <span style={{ color: "#64748b", fontSize: 10.5, textTransform: "uppercase", fontWeight: 700 }}>Actual Amount (Bank − Corp DSA)</span>
+                    <div style={{ fontWeight: 600, color: "#1e293b" }}>
+                      {currencyFormatter.format(
+                        gstrTargetCase.actualAmount !== undefined && gstrTargetCase.actualAmount !== null
+                          ? parseFloat(gstrTargetCase.actualAmount)
+                          : Math.max(0, parseFloat(gstrTargetCase.baseAmount || 0) - parseFloat(gstrTargetCase.corporateDsaAmount || 0))
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <span style={{ color: "#64748b", fontSize: 10.5, textTransform: "uppercase", fontWeight: 700 }}>GST Amount (Y Amount)</span>
+                    <div style={{ fontWeight: 800, color: "#0284c7" }}>
+                      {currencyFormatter.format(gstrForm.gstrAmount || gstrTargetCase.bankGstAmount || 0)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Status Select */}
+              <div className="cc-fgroup" style={{ marginBottom: 14 }}>
+                <label style={{ fontWeight: 700, fontSize: 13, color: "#334155", marginBottom: 4 }}>
+                  GST Reflection Status *
+                </label>
+                <select
+                  value={gstrForm.gstrStatus}
+                  onChange={(e) => {
+                    const st = e.target.value;
+                    const fullAmt = parseFloat(gstrForm.gstrAmount) || 0;
+                    setGstrForm((prev) => ({
+                      ...prev,
+                      gstrStatus: st,
+                      gstrReceivedAmount: st === "COMPLETE" ? fullAmt : (st === "PENDING" ? 0 : prev.gstrReceivedAmount),
+                    }));
+                  }}
+                  style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #cbd5e1", fontSize: 13.5 }}
+                >
+                  <option value="PENDING">⏳ Pending (Not reflected yet on portal)</option>
+                  <option value="PARTIALLY_COMPLETE">⚠️ Partially Complete (Partial GST reflected)</option>
+                  <option value="COMPLETE">✅ Complete (Full GST reflected on portal)</option>
+                </select>
+              </div>
+
+              {/* Partially complete received amount */}
+              {gstrForm.gstrStatus === "PARTIALLY_COMPLETE" && (
+                <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "12px 14px", marginBottom: 14 }}>
+                  <div className="cc-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    <div className="cc-fgroup">
+                      <label style={{ fontWeight: 700, fontSize: 12, color: "#92400e" }}>
+                        Received / Reflected GST Amount (₹) *
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        max={gstrForm.gstrAmount}
+                        required
+                        value={gstrForm.gstrReceivedAmount}
+                        onChange={(e) => setGstrForm((prev) => ({ ...prev, gstrReceivedAmount: e.target.value }))}
+                        style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #f59e0b", fontSize: 13 }}
+                      />
+                    </div>
+                    <div className="cc-fgroup">
+                      <label style={{ fontWeight: 700, fontSize: 12, color: "#92400e" }}>
+                        Pending GST to Reflect (₹)
+                      </label>
+                      <div style={{ padding: "8px 0", fontWeight: 700, color: "#b45309", fontSize: 13.5 }}>
+                        {currencyFormatter.format(Math.max(0, (parseFloat(gstrForm.gstrAmount) || 0) - (parseFloat(gstrForm.gstrReceivedAmount) || 0)))}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 11, color: "#78350f", marginTop: 4 }}>
+                    Enter the partial amount of GST claimed or reflected on the portal so far.
+                  </div>
+                </div>
+              )}
+
+              {/* GST Expected Amount */}
+              <div className="cc-fgroup" style={{ marginBottom: 14 }}>
+                <label style={{ fontWeight: 600, fontSize: 12.5, color: "#475569" }}>
+                  GST Amount (Y Amount) ₹
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={gstrForm.gstrAmount}
+                  onChange={(e) => setGstrForm((prev) => ({ ...prev, gstrAmount: e.target.value }))}
+                  style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #cbd5e1", fontSize: 13 }}
+                />
+              </div>
+
+              {/* Notes */}
+              <div className="cc-fgroup" style={{ marginBottom: 16 }}>
+                <label style={{ fontWeight: 600, fontSize: 12.5, color: "#475569" }}>
+                  GST Reference / Remarks
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="e.g. Reflected in GSTR-2B for Oct 2026 / Portal ARN..."
+                  value={gstrForm.notes}
+                  onChange={(e) => setGstrForm((prev) => ({ ...prev, notes: e.target.value }))}
+                  style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #cbd5e1", fontSize: 13 }}
+                />
+              </div>
+
+              {/* Actions */}
+              <div className="cc-modal-actions" style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                <button
+                  type="button"
+                  className="cc-pbtn secondary"
+                  onClick={() => setGstrModalOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="cc-pbtn primary"
+                  disabled={savingGstr}
+                  style={{ background: "#059669", color: "#fff", borderColor: "#059669", fontWeight: 700 }}
+                >
+                  {savingGstr ? "Updating..." : "Save GST Status"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 6: PAYMENT HISTORY & TRANSACTION LEDGER */}
+      {paymentHistoryModalOpen && historyTargetCase && (
+        <div className="cc-modal-overlay" onClick={() => setPaymentHistoryModalOpen(false)}>
+          <div className="cc-modal-box cc-history-modal-box" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 940, width: "95%" }}>
+            {/* Modal Header */}
+            <div className="cc-modal-header" style={{ borderBottom: "1px solid #e2e8f0", padding: "16px 20px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 38, height: 38, borderRadius: 8, background: "#ecfdf5", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <Receipt size={20} color="#059669" />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 17, color: "#0f172a" }}>
+                    Payment History &amp; Ledger &bull; Lead #{historyTargetCase.leadId}
+                  </h3>
+                  <p style={{ margin: "2px 0 0", fontSize: 12.5, color: "#64748b" }}>
+                    <strong>{historyTargetCase.customerName}</strong> &bull; {historyTargetCase.loanProduct} &bull; {historyTargetCase.bankName || "Bank"}
+                  </p>
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <button
+                  type="button"
+                  className="cc-pbtn secondary"
+                  style={{ padding: "6px 10px", fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}
+                  onClick={() => openPaymentHistoryModal(historyTargetCase)}
+                  title="Refresh payment records"
+                >
+                  <RefreshCw size={13} className={loadingHistory ? "cc-spin" : ""} /> Refresh
+                </button>
+                <button
+                  type="button"
+                  className="cc-modal-close"
+                  onClick={() => setPaymentHistoryModalOpen(false)}
+                >
+                  <X size={19} />
+                </button>
+              </div>
+            </div>
+
+            <div style={{ padding: "18px 20px", maxHeight: "80vh", overflowY: "auto" }}>
+              {/* Formula & Calculation Breakdown Summary */}
+              {(() => {
+                const calc = historyData?.calculations || {
+                  loanAmount: parseFloat(historyTargetCase.loanAmount || 0),
+                  bankCommission: parseFloat(historyTargetCase.baseAmount || 0),
+                  bankCommissionPercent: parseFloat(historyTargetCase.bankCommissionPercent || 0),
+                  corporateDsaPercent: parseFloat(historyTargetCase.corporateDsaPercent || 0),
+                  corporateDsaCommission: parseFloat(historyTargetCase.corporateDsaAmount || 0),
+                  corporateDsaAmount: parseFloat(historyTargetCase.corporateDsaAmount || 0),
+                  partyCommissionPercent: parseFloat(historyTargetCase.partyCommissionPercent || 0),
+                  actualAmount: parseFloat(historyTargetCase.actualAmount || Math.max(0, parseFloat(historyTargetCase.baseAmount || 0) - parseFloat(historyTargetCase.corporateDsaAmount || 0))),
+                  remainingAfterDsa: parseFloat(historyTargetCase.actualAmount || Math.max(0, parseFloat(historyTargetCase.baseAmount || 0) - parseFloat(historyTargetCase.corporateDsaAmount || 0))),
+                  tdsPercent: parseFloat(historyTargetCase.bankTdsPercent || 5),
+                  tdsAmount: parseFloat(historyTargetCase.bankTdsAmount || 0),
+                  netReceivable: parseFloat(historyTargetCase.bankNetReceivable || Math.max(0, (parseFloat(historyTargetCase.actualAmount || historyTargetCase.baseAmount || 0) - parseFloat(historyTargetCase.corporateDsaAmount || 0)) - parseFloat(historyTargetCase.bankTdsAmount || 0))),
+                  gstPercent: parseFloat(historyTargetCase.bankGstPercent || 18),
+                  gstAmount: parseFloat(historyTargetCase.bankGstAmount || historyTargetCase.gstrAmount || 0),
+                  bankReceivedAmount: parseFloat(historyTargetCase.bankReceivedAmount || 0),
+                  bankRemainingDue: Math.max(0, parseFloat(historyTargetCase.bankRemainingDue || 0)),
+                  partyNetPayable: parseFloat(historyTargetCase.partyNetPayable || 0),
+                  partyPaidAmount: parseFloat(historyTargetCase.partyPaidAmount || 0),
+                  partyRemainingDue: parseFloat(historyTargetCase.partyRemainingDue || 0),
+                  gstrStatus: historyTargetCase.gstrStatus || "PENDING",
+                  gstrAmount: parseFloat(historyTargetCase.gstrAmount || historyTargetCase.bankGstAmount || 0),
+                  gstrReceivedAmount: parseFloat(historyTargetCase.gstrReceivedAmount || 0),
+                };
+
+                return (
+                  <>
+                    {/* Calculation Steps Grid */}
+                    <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "14px", marginBottom: 16 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                        <strong style={{ fontSize: 13, color: "#1e293b", display: "flex", alignItems: "center", gap: 6 }}>
+                          <IndianRupee size={15} color="#059669" /> Commission &amp; Tax Calculation Breakdown
+                        </strong>
+                        <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>
+                          Rule: (Gross Bank Comm − Corp DSA Charge) − TDS = Net X &bull; GST (Y) Kept Separate
+                        </span>
+                      </div>
+
+                      <div style={{ display: "grid", gridTemplateColumns: "1.2fr auto 1.2fr auto 1.2fr auto 1.2fr auto 1.4fr 1.4fr", alignItems: "center", gap: 6, textAlign: "center" }}>
+                        {/* Step 1: Gross Bank Comm */}
+                        <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 6px" }}>
+                          <div style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", fontWeight: 700 }}>1. Bank Gross</div>
+                          <div style={{ fontSize: 14, fontWeight: 800, color: "#047857" }}>
+                            {currencyFormatter.format(calc.bankCommission)}
+                          </div>
+                          <div style={{ fontSize: 10, color: "#64748b" }}>{calc.bankCommissionPercent}%</div>
+                        </div>
+
+                        <span style={{ fontSize: 16, fontWeight: 800, color: "#94a3b8" }}>−</span>
+
+                        {/* Step 2: Corp DSA Comm */}
+                        <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 6px" }}>
+                          <div style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", fontWeight: 700 }}>2. Corp DSA</div>
+                          <div style={{ fontSize: 14, fontWeight: 800, color: "#7c3aed" }}>
+                            {currencyFormatter.format(calc.corporateDsaAmount || calc.corporateDsaCommission || 0)}
+                          </div>
+                          <div style={{ fontSize: 10, color: "#64748b" }}>{calc.corporateDsaPercent || 0}%</div>
+                        </div>
+
+                        <span style={{ fontSize: 16, fontWeight: 800, color: "#94a3b8" }}>=</span>
+
+                        {/* Step 3: Actual Amount */}
+                        <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 6px" }}>
+                          <div style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", fontWeight: 700 }}>3. Actual Amount</div>
+                          <div style={{ fontSize: 14, fontWeight: 800, color: "#0f172a" }}>
+                            {currencyFormatter.format(calc.actualAmount || calc.remainingAfterDsa || 0)}
+                          </div>
+                          <div style={{ fontSize: 10, color: "#64748b" }}>Bank − DSA</div>
+                        </div>
+
+                        <span style={{ fontSize: 16, fontWeight: 800, color: "#94a3b8" }}>−</span>
+
+                        {/* Step 4: TDS Deducted */}
+                        <div style={{ background: "#fff", border: "1px solid #fecaca", borderRadius: 8, padding: "8px 6px" }}>
+                          <div style={{ fontSize: 10, color: "#b91c1c", textTransform: "uppercase", fontWeight: 700 }}>4. TDS ({calc.tdsPercent}%)</div>
+                          <div style={{ fontSize: 14, fontWeight: 800, color: "#dc2626" }}>
+                            -{currencyFormatter.format(calc.tdsAmount)}
+                          </div>
+                          <div style={{ fontSize: 10, color: "#b91c1c" }}>Deducted</div>
+                        </div>
+
+                        <span style={{ fontSize: 16, fontWeight: 800, color: "#94a3b8" }}>=</span>
+
+                        {/* Step 5: Net Bank Receivable (X) */}
+                        <div style={{ background: "#ecfdf5", border: "2px solid #86efac", borderRadius: 8, padding: "8px 6px" }}>
+                          <div style={{ fontSize: 10, color: "#047857", textTransform: "uppercase", fontWeight: 800 }}>Net Receivable (X)</div>
+                          <div style={{ fontSize: 15, fontWeight: 900, color: "#047857" }}>
+                            {currencyFormatter.format(calc.netReceivable)}
+                          </div>
+                          <div style={{ fontSize: 10, color: "#15803d", fontWeight: 700 }}>Actual − TDS</div>
+                        </div>
+
+                        {/* Step 6: GST (Y) [Separate] */}
+                        <div style={{ background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 8, padding: "8px 6px" }}>
+                          <div style={{ fontSize: 10, color: "#0369a1", textTransform: "uppercase", fontWeight: 800 }}>GST [Separate] (Y)</div>
+                          <div style={{ fontSize: 15, fontWeight: 900, color: "#0284c7" }}>
+                            {currencyFormatter.format(calc.gstAmount)}
+                          </div>
+                          <div style={{ fontSize: 10, color: "#0284c7" }}>
+                            {calc.gstrStatus === "COMPLETE" ? "GST Complete" : calc.gstrStatus === "PARTIALLY_COMPLETE" ? `Partial ₹${Math.round(calc.gstrReceivedAmount)}` : "GST Pending"}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Settlement Balances & Quick Actions (2 Cards) */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 18 }}>
+                      {/* Bank Inflow Card */}
+                      <div style={{ background: "#fff", border: "1px solid #bbf7d0", borderRadius: 10, padding: "14px", position: "relative" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                          <div>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: "#166534", textTransform: "uppercase", display: "flex", alignItems: "center", gap: 5 }}>
+                              <ArrowDownLeft size={14} color="#166534" /> Bank Inward (Commission Received)
+                            </span>
+                            <div style={{ fontSize: 18, fontWeight: 800, color: "#047857", marginTop: 2 }}>
+                              {currencyFormatter.format(calc.bankReceivedAmount)}
+                              <span style={{ fontSize: 12, fontWeight: 500, color: "#64748b" }}> / {currencyFormatter.format(calc.netReceivable)}</span>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="cc-pbtn primary"
+                            style={{ padding: "6px 10px", fontSize: 11.5, background: "#059669", borderColor: "#059669", display: "flex", alignItems: "center", gap: 4 }}
+                            onClick={() => {
+                              openBankReceiptModal(historyTargetCase);
+                            }}
+                          >
+                            <Plus size={13} /> Record Receipt
+                          </button>
+                        </div>
+                        {/* Progress Bar */}
+                        <div style={{ width: "100%", background: "#e2e8f0", height: 6, borderRadius: 3, overflow: "hidden", marginBottom: 6 }}>
+                          <div
+                            style={{
+                              width: `${Math.min(100, (calc.bankReceivedAmount / (calc.netReceivable || 1)) * 100)}%`,
+                              background: "#059669",
+                              height: "100%",
+                            }}
+                          />
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: "#475569" }}>
+                          <span>Pending from Bank: <strong style={{ color: calc.bankRemainingDue > 0 ? "#b45309" : "#047857" }}>{currencyFormatter.format(calc.bankRemainingDue)}</strong></span>
+                          <span>{calc.bankRemainingDue <= 0 ? "✅ Fully Received" : "⏳ Balance Pending"}</span>
+                        </div>
+                      </div>
+
+                      {/* Connector Outflow Card */}
+                      <div style={{ background: "#fff", border: "1px solid #e9d5ff", borderRadius: 10, padding: "14px" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                          <div>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: "#6b21a8", textTransform: "uppercase", display: "flex", alignItems: "center", gap: 5 }}>
+                              <ArrowUpRight size={14} color="#6b21a8" /> Connector / DSA Outflow ({historyTargetCase.partyName || "Connector"})
+                            </span>
+                            <div style={{ fontSize: 18, fontWeight: 800, color: "#7c3aed", marginTop: 2 }}>
+                              {currencyFormatter.format(calc.partyPaidAmount)}
+                              <span style={{ fontSize: 12, fontWeight: 500, color: "#64748b" }}> / {currencyFormatter.format(calc.partyNetPayable)}</span>
+                            </div>
+                          </div>
+                          {historyTargetCase.payoutType !== "SELF" && (
+                            <button
+                              type="button"
+                              className="cc-pbtn primary"
+                              style={{ padding: "6px 10px", fontSize: 11.5, background: "#7c3aed", borderColor: "#7c3aed", display: "flex", alignItems: "center", gap: 4 }}
+                              onClick={() => {
+                                openPartyPayoutModal(historyTargetCase);
+                              }}
+                            >
+                              <Plus size={13} /> Record Payout
+                            </button>
+                          )}
+                        </div>
+                        {/* Progress Bar */}
+                        <div style={{ width: "100%", background: "#e2e8f0", height: 6, borderRadius: 3, overflow: "hidden", marginBottom: 6 }}>
+                          <div
+                            style={{
+                              width: `${Math.min(100, (calc.partyPaidAmount / (calc.partyNetPayable || 1)) * 100)}%`,
+                              background: "#7c3aed",
+                              height: "100%",
+                            }}
+                          />
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: "#475569" }}>
+                          <span>Pending to Pay: <strong style={{ color: calc.partyRemainingDue > 0 ? "#b45309" : "#047857" }}>{currencyFormatter.format(calc.partyRemainingDue)}</strong></span>
+                          <span>{calc.partyRemainingDue <= 0 ? "✅ Fully Settled" : "⏳ Payout Due"}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
+
+              {/* Transactions History Header & Tabs */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => setHistoryTab("ALL")}
+                    style={{
+                      padding: "6px 12px",
+                      borderRadius: 6,
+                      fontSize: 12,
+                      fontWeight: 700,
+                      border: "1px solid",
+                      cursor: "pointer",
+                      background: historyTab === "ALL" ? "#0f172a" : "#fff",
+                      color: historyTab === "ALL" ? "#fff" : "#475569",
+                      borderColor: historyTab === "ALL" ? "#0f172a" : "#cbd5e1",
+                    }}
+                  >
+                    All Transactions ({historyData?.transactions?.length || 0})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHistoryTab("BANK")}
+                    style={{
+                      padding: "6px 12px",
+                      borderRadius: 6,
+                      fontSize: 12,
+                      fontWeight: 700,
+                      border: "1px solid",
+                      cursor: "pointer",
+                      background: historyTab === "BANK" ? "#059669" : "#fff",
+                      color: historyTab === "BANK" ? "#fff" : "#059669",
+                      borderColor: historyTab === "BANK" ? "#059669" : "#cbd5e1",
+                    }}
+                  >
+                    Bank Receipts ({historyData?.bankReceipts?.length || 0})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHistoryTab("PARTY")}
+                    style={{
+                      padding: "6px 12px",
+                      borderRadius: 6,
+                      fontSize: 12,
+                      fontWeight: 700,
+                      border: "1px solid",
+                      cursor: "pointer",
+                      background: historyTab === "PARTY" ? "#7c3aed" : "#fff",
+                      color: historyTab === "PARTY" ? "#fff" : "#7c3aed",
+                      borderColor: historyTab === "PARTY" ? "#7c3aed" : "#cbd5e1",
+                    }}
+                  >
+                    Connector Payouts ({historyData?.partyPayments?.length || 0})
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => openGstrModal(historyTargetCase)}
+                  className="cc-pbtn secondary"
+                  style={{ padding: "5px 10px", fontSize: 11.5, display: "flex", alignItems: "center", gap: 5 }}
+                >
+                  <FileSpreadsheet size={13} color="#059669" /> Update GST Status
+                </button>
+              </div>
+
+              {/* Transactions Ledger Table */}
+              {loadingHistory ? (
+                <div style={{ padding: "40px 0", textAlign: "center", color: "#64748b" }}>
+                  <RefreshCw size={24} className="cc-spin" style={{ margin: "0 auto 10px" }} />
+                  <p style={{ margin: 0, fontSize: 13 }}>Loading payment transactions for Lead #{historyTargetCase.leadId}...</p>
+                </div>
+              ) : (() => {
+                const txList = (historyData?.transactions || []).filter((tx) => {
+                  if (historyTab === "BANK") return tx.category === "BANK_RECEIPT";
+                  if (historyTab === "PARTY") return tx.category === "PARTY_PAYOUT";
+                  return true;
+                });
+
+                if (txList.length === 0) {
+                  return (
+                    <div style={{ padding: "36px 0", textAlign: "center", background: "#f8fafc", borderRadius: 8, border: "1px dashed #cbd5e1" }}>
+                      <Clock size={28} color="#94a3b8" style={{ margin: "0 auto 8px" }} />
+                      <div style={{ fontWeight: 700, color: "#475569", fontSize: 14 }}>No Payment Records Found</div>
+                      <p style={{ margin: "4px 0 12px", fontSize: 12, color: "#64748b" }}>
+                        No transactions have been recorded yet for this case payout.
+                      </p>
+                      <button
+                        type="button"
+                        className="cc-pbtn primary"
+                        style={{ fontSize: 12, padding: "6px 12px", background: "#059669", borderColor: "#059669" }}
+                        onClick={() => openBankReceiptModal(historyTargetCase)}
+                      >
+                        Record First Bank Receipt
+                      </button>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div style={{ overflowX: "auto", border: "1px solid #e2e8f0", borderRadius: 8 }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, textAlign: "left" }}>
+                      <thead>
+                        <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0", color: "#475569" }}>
+                          <th style={{ padding: "9px 12px" }}>Date</th>
+                          <th style={{ padding: "9px 12px" }}>Category &bull; Type</th>
+                          <th style={{ padding: "9px 12px" }}>Party / Bank</th>
+                          <th style={{ padding: "9px 12px" }}>Payment Mode &bull; UTR</th>
+                          <th style={{ padding: "9px 12px", textAlign: "right" }}>Gross (₹)</th>
+                          <th style={{ padding: "9px 12px", textAlign: "right" }}>Taxes / Deductions</th>
+                          <th style={{ padding: "9px 12px", textAlign: "right" }}>Net Amount (₹)</th>
+                          <th style={{ padding: "9px 12px" }}>Logged By</th>
+                          <th style={{ padding: "9px 12px" }}>Remarks</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {txList.map((tx) => {
+                          const isInward = tx.category === "BANK_RECEIPT";
+                          return (
+                            <tr key={tx.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                              <td style={{ padding: "9px 12px", whiteSpace: "nowrap", fontWeight: 600 }}>
+                                {tx.date ? new Date(tx.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
+                              </td>
+                              <td style={{ padding: "9px 12px", whiteSpace: "nowrap" }}>
+                                {isInward ? (
+                                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "#ecfdf5", color: "#047857", border: "1px solid #a7f3d0", padding: "2px 7px", borderRadius: 4, fontWeight: 700, fontSize: 11 }}>
+                                    <ArrowDownLeft size={12} /> Bank Inflow
+                                  </span>
+                                ) : (
+                                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "#faf5ff", color: "#7c3aed", border: "1px solid #e9d5ff", padding: "2px 7px", borderRadius: 4, fontWeight: 700, fontSize: 11 }}>
+                                    <ArrowUpRight size={12} /> Connector Payout
+                                  </span>
+                                )}
+                              </td>
+                              <td style={{ padding: "9px 12px", fontWeight: 600, color: "#1e293b" }}>
+                                {tx.partyOrBank}
+                              </td>
+                              <td style={{ padding: "9px 12px" }}>
+                                <div style={{ fontWeight: 600, color: "#334155" }}>{tx.paymentMode || "NEFT"}</div>
+                                <div style={{ fontSize: 11, color: "#64748b" }}>{tx.referenceNumber && tx.referenceNumber !== "—" ? `Ref: ${tx.referenceNumber}` : "No UTR"}</div>
+                              </td>
+                              <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 700 }}>
+                                {currencyFormatter.format(tx.amount)}
+                              </td>
+                              <td style={{ padding: "9px 12px", textAlign: "right", fontSize: 11, color: "#64748b" }}>
+                                {isInward ? (
+                                  <>
+                                    {tx.gstAmount > 0 && <span style={{ color: "#0284c7" }}>+₹{Math.round(tx.gstAmount)} GST </span>}
+                                    {tx.tdsAmount > 0 && <span style={{ color: "#dc2626" }}>-₹{Math.round(tx.tdsAmount)} TDS</span>}
+                                    {!tx.gstAmount && !tx.tdsAmount && "—"}
+                                  </>
+                                ) : (
+                                  "—"
+                                )}
+                              </td>
+                              <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 800, color: isInward ? "#047857" : "#7c3aed" }}>
+                                {currencyFormatter.format(tx.netAmount)}
+                              </td>
+                              <td style={{ padding: "9px 12px", color: "#64748b", fontSize: 11.5 }}>
+                                {tx.recordedBy}
+                              </td>
+                              <td style={{ padding: "9px 12px", color: "#475569", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={tx.notes}>
+                                {tx.notes || "—"}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="cc-modal-actions" style={{ padding: "12px 20px", borderTop: "1px solid #e2e8f0", display: "flex", justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                className="cc-pbtn secondary"
+                onClick={() => setPaymentHistoryModalOpen(false)}
+              >
+                Close Ledger
+              </button>
+            </div>
           </div>
         </div>
       )}
