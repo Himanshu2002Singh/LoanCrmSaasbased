@@ -85,6 +85,15 @@ const ensureSchemaMigrations = async (sequelize) => {
   } catch (err) {
     console.warn("[Migration] Application sync notice:", err.message);
   }
+
+  try {
+    if (db.CasePayout) {
+      await db.CasePayout.sync({ alter: { drop: false } });
+      console.log("[Migration] CasePayout schema synchronized successfully.");
+    }
+  } catch (err) {
+    console.warn("[Migration] CasePayout sync notice:", err.message);
+  }
 };
 
 const start = async () => {

@@ -75,6 +75,63 @@ const Company = sequelize.define(
       field: "smtp_config",
       comment: "Company outgoing mail configuration { host, port, secure, user, pass, senderName, isConfigured }",
     },
+    gstNumber: {
+      type: DataTypes.STRING(30),
+      allowNull: true,
+      field: "gst_number",
+      comment: "Company GSTIN for official billing and tax invoices",
+    },
+    panNumber: {
+      type: DataTypes.STRING(30),
+      allowNull: true,
+      field: "pan_number",
+      comment: "Company PAN for tax deductions and invoicing",
+    },
+    address: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      field: "address",
+      comment: "Registered office street address for invoice headers",
+    },
+    city: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+      field: "city",
+    },
+    state: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+      field: "state",
+    },
+    pincode: {
+      type: DataTypes.STRING(20),
+      allowNull: true,
+      field: "pincode",
+    },
+    bankName: {
+      type: DataTypes.STRING(150),
+      allowNull: true,
+      field: "bank_name",
+      comment: "Company bank name for commission remittance",
+    },
+    accountNumber: {
+      type: DataTypes.STRING(50),
+      allowNull: true,
+      field: "account_number",
+      comment: "Company bank account number for remittance",
+    },
+    ifscCode: {
+      type: DataTypes.STRING(30),
+      allowNull: true,
+      field: "ifsc_code",
+      comment: "Company bank IFSC code",
+    },
+    bankBranch: {
+      type: DataTypes.STRING(150),
+      allowNull: true,
+      field: "bank_branch",
+      comment: "Company bank branch name",
+    },
   },
   {
     tableName: "companies",

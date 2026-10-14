@@ -12,14 +12,48 @@ const { ROLES, USER_STATUSES } = require("../constants/roles");
  */
 const SEARCHABLE = ["name", "slug", "email", "phone"];
 const SORTABLE = ["name", "status", "createdAt", "subscriptionExpiresAt"];
-const EDITABLE = ["name", "email", "phone", "logoUrl", "planId", "maxUsers", "subscriptionExpiresAt", "status"];
+const EDITABLE = [
+  "name",
+  "email",
+  "phone",
+  "logoUrl",
+  "planId",
+  "maxUsers",
+  "subscriptionExpiresAt",
+  "status",
+  "gstNumber",
+  "panNumber",
+  "address",
+  "city",
+  "state",
+  "pincode",
+  "bankName",
+  "accountNumber",
+  "ifscCode",
+  "bankBranch",
+];
 const STATUSES = ["active", "trial", "suspended"];
 
-const pick = (body, fields) => {
+const COMPANY_ALIASES = {
+  gst_number: "gstNumber",
+  pan_number: "panNumber",
+  bank_name: "bankName",
+  account_number: "accountNumber",
+  ifsc_code: "ifscCode",
+  bank_branch: "bankBranch",
+};
+
+const pick = (body, fields, aliases = COMPANY_ALIASES) => {
   const data = {};
+  const source = { ...body };
+  if (aliases) {
+    for (const [from, to] of Object.entries(aliases)) {
+      if (source[from] !== undefined && source[to] === undefined) source[to] = source[from];
+    }
+  }
   for (const field of fields) {
-    if (body[field] === undefined) continue;
-    data[field] = typeof body[field] === "string" ? body[field].trim() : body[field];
+    if (source[field] === undefined) continue;
+    data[field] = typeof source[field] === "string" ? source[field].trim() : source[field];
   }
   return data;
 };
@@ -586,8 +620,26 @@ exports.updateMyCompanyProfile = async (req, res) => {
     const company = await Company.findByPk(companyId);
     if (!company) return res.status(404).json({ message: "Company not found" });
 
-    const EDITABLE_BY_ADMIN = ["name", "email", "phone", "logoUrl"];
+    const EDITABLE_BY_ADMIN = [
+      "name",
+      "email",
+      "phone",
+      "logoUrl",
+      "gstNumber",
+      "panNumber",
+      "address",
+      "city",
+      "state",
+      "pincode",
+      "bankName",
+      "accountNumber",
+      "ifscCode",
+      "bankBranch",
+    ];
     const data = pick(req.body, EDITABLE_BY_ADMIN);
+    if (data.gstNumber) data.gstNumber = data.gstNumber.toUpperCase();
+    if (data.panNumber) data.panNumber = data.panNumber.toUpperCase();
+    if (data.ifscCode) data.ifscCode = data.ifscCode.toUpperCase();
 
     if (data.name !== undefined && !String(data.name).trim()) {
       return res.status(400).json({ message: "Company name cannot be empty" });

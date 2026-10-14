@@ -716,6 +716,75 @@ exports.getLeadById = async (req, res) => {
 };
 
 /**
+ * GET /api/leads/check-duplicate
+ * Checks if a contact/phone number is repeated / already registered under this company.
+ */
+exports.checkDuplicateMobile = async (req, res) => {
+  try {
+    const companyId = req.user.companyId || parseInt(req.query.companyId, 10);
+    if (!companyId) {
+      return res.status(400).json({ message: "companyId is required" });
+    }
+
+    const raw = req.query.number || req.query.mobile || req.query.contact || "";
+    const mobile = normaliseMobile(raw);
+
+    if (!mobile || mobile.length < 10) {
+      return res.status(200).json({ exists: false, isDuplicate: false });
+    }
+
+    const customer = await Customer.findOne({
+      where: {
+        companyId,
+        [Op.or]: [{ mobile }, { alternateMobile: mobile }],
+      },
+      include: [
+        {
+          model: Lead,
+          as: "leads",
+          include: [
+            { model: User, as: "assignedEmployee", attributes: ["id", "name", "email"] },
+          ],
+          order: [["id", "DESC"]],
+          limit: 1,
+        },
+      ],
+    });
+
+    if (!customer) {
+      return res.status(200).json({ exists: false, isDuplicate: false });
+    }
+
+    const existingLead = customer.leads && customer.leads.length > 0 ? customer.leads[0] : null;
+
+    return res.status(200).json({
+      exists: true,
+      isDuplicate: true,
+      message: "Bhai number same hai! Yeh number pehle se exist karta hai (Repeated Number).",
+      customer: {
+        id: customer.id,
+        name: customer.name,
+        mobile: customer.mobile,
+        city: customer.city || null,
+      },
+      lead: existingLead
+        ? {
+            id: existingLead.id,
+            loanType: existingLead.loanType || "Loan",
+            leadSource: existingLead.leadSource || "—",
+            status: existingLead.status || "Active",
+            assignedTo: existingLead.assignedEmployee?.name || "Unassigned",
+            createdAt: existingLead.createdAt,
+          }
+        : null,
+    });
+  } catch (error) {
+    console.error("[leads] checkDuplicateMobile error:", error);
+    return res.status(500).json({ message: "Failed to check duplicate number", error: error.message });
+  }
+};
+
+/**
  * POST /api/leads
  * Accepts the flat body the app already sends: the customer half is split off
  * and matched on mobile, so a repeat enquiry reuses the existing customer.
@@ -730,11 +799,61 @@ exports.createLead = async (req, res) => {
     }
 
     const body = req.body;
+    const rawNumber = body.number || body.mobile || body.contact;
+    const mobile = normaliseMobile(rawNumber);
+    if (!mobile || mobile.length < 10) {
+      await transaction.rollback();
+      return res.status(400).json({ message: "Valid 10-digit mobile number is required" });
+    }
+
+    // Check duplicate: if customer/lead with this phone number already exists, block creation
+    const existingCustomer = await Customer.findOne({
+      where: {
+        companyId,
+        [Op.or]: [{ mobile }, { alternateMobile: mobile }],
+      },
+      include: [
+        {
+          model: Lead,
+          as: "leads",
+          include: [
+            { model: User, as: "assignedEmployee", attributes: ["id", "name"] },
+          ],
+          order: [["id", "DESC"]],
+          limit: 1,
+        },
+      ],
+      transaction,
+    });
+
+    if (existingCustomer) {
+      await transaction.rollback();
+      const existingLead = existingCustomer.leads && existingCustomer.leads.length > 0 ? existingCustomer.leads[0] : null;
+      const leadInfo = existingLead ? `(Lead #${existingLead.id} - ${existingCustomer.name}, Status: ${existingLead.status})` : `(${existingCustomer.name})`;
+      return res.status(409).json({
+        message: `Bhai number same hai! Yeh number pehle se exist karta hai (Repeated Number) ${leadInfo}. Duplicate lead add nahi ho sakti.`,
+        isDuplicate: true,
+        customer: {
+          id: existingCustomer.id,
+          name: existingCustomer.name,
+          mobile: existingCustomer.mobile,
+        },
+        lead: existingLead
+          ? {
+              id: existingLead.id,
+              loanType: existingLead.loanType,
+              status: existingLead.status,
+              assignedTo: existingLead.assignedEmployee?.name || "Unassigned",
+            }
+          : null,
+      });
+    }
+
     const { customer } = await findOrCreateCustomer(
       companyId,
       {
         name: body.name,
-        mobile: body.number || body.mobile,
+        mobile,
         alternateMobile: body.alternate_number || body.alternateMobile,
         email: body.email,
         city: body.city,
@@ -1628,6 +1747,23 @@ exports.importLeadsFromExcel = async (req, res) => {
             : !number
             ? "Missing mobile number"
             : "Invalid mobile number (must be at least 10 digits)",
+        });
+        continue;
+      }
+
+      // Check duplicate mobile: block if phone number already exists in company
+      const existingCust = await Customer.findOne({
+        where: {
+          companyId,
+          [Op.or]: [{ mobile: number }, { alternateMobile: number }],
+        },
+      });
+
+      if (existingCust) {
+        skipped += 1;
+        errors.push({
+          row: rowNumber,
+          reason: `Repeated number: ${number} pehle se registered hai (Customer: ${existingCust.name}). Duplicate lead blocked.`,
         });
         continue;
       }

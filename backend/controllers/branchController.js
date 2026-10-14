@@ -1,4 +1,4 @@
-const { Branch, User } = require("../models");
+const { Branch, User, Company } = require("../models");
 const { buildQuery, paginated } = require("../utils/query");
 const { logActivity, diffFields } = require("../utils/activity");
 const { companyScope, belongsToScope } = require("../middlewares/auth");
@@ -221,11 +221,30 @@ exports.getSettings = async (req, res) => {
       return res.status(404).json({ message: "No branch configured" });
     }
 
+    const companyId = req.user.companyId || (branch ? branch.companyId : 1);
+    const company = await Company.findByPk(companyId);
+
     return res.status(200).json({
       success: true,
       data: {
         branch_id: branch.id,
         branch_name: branch.name,
+        company_details: {
+          id: company?.id,
+          name: company?.name || "",
+          gst_number: company?.gstNumber || "",
+          pan_number: company?.panNumber || "",
+          address: company?.address || "",
+          city: company?.city || "",
+          state: company?.state || "",
+          pincode: company?.pincode || "",
+          email: company?.email || "",
+          phone: company?.phone || "",
+          bank_name: company?.bankName || "",
+          account_number: company?.accountNumber || "",
+          ifsc_code: company?.ifscCode || "",
+          bank_branch: company?.bankBranch || "",
+        },
         office_location: {
           lat: branch.officeLat,
           lng: branch.officeLng,
@@ -250,7 +269,7 @@ exports.getSettings = async (req, res) => {
  */
 exports.updateSettings = async (req, res) => {
   try {
-    const { office_location: location, office_timings: timings, branch_id: bodyBranchId } = req.body;
+    const { office_location: location, office_timings: timings, branch_id: bodyBranchId, company_details: companyInput } = req.body;
 
     const branchId = parseInt(bodyBranchId, 10) || req.user.branchId;
     const branch = branchId
@@ -259,6 +278,45 @@ exports.updateSettings = async (req, res) => {
 
     if (!branch || !belongsToScope(req, branch)) {
       return res.status(404).json({ message: "No branch configured" });
+    }
+
+    // Update Company GST, Address, and Remittance details if provided
+    const companyPayload = companyInput || req.body;
+    const companyId = req.user.companyId || (branch ? branch.companyId : 1);
+    const company = await Company.findByPk(companyId);
+    let updatedCompany = company;
+    if (company && companyPayload) {
+      const compData = {};
+      if (companyPayload.company_name !== undefined) compData.name = companyPayload.company_name;
+      if (companyPayload.gst_number !== undefined || companyPayload.gstNumber !== undefined) {
+        compData.gstNumber = (companyPayload.gst_number || companyPayload.gstNumber || "").trim().toUpperCase();
+      }
+      if (companyPayload.pan_number !== undefined || companyPayload.panNumber !== undefined) {
+        compData.panNumber = (companyPayload.pan_number || companyPayload.panNumber || "").trim().toUpperCase();
+      }
+      if (companyPayload.address !== undefined) compData.address = companyPayload.address;
+      if (companyPayload.city !== undefined && companyInput) compData.city = companyPayload.city;
+      if (companyPayload.state !== undefined && companyInput) compData.state = companyPayload.state;
+      if (companyPayload.pincode !== undefined) compData.pincode = companyPayload.pincode;
+      if (companyPayload.email !== undefined && companyInput) compData.email = companyPayload.email;
+      if (companyPayload.phone !== undefined && companyInput) compData.phone = companyPayload.phone;
+      if (companyPayload.bank_name !== undefined || companyPayload.bankName !== undefined) {
+        compData.bankName = companyPayload.bank_name || companyPayload.bankName;
+      }
+      if (companyPayload.account_number !== undefined || companyPayload.accountNumber !== undefined) {
+        compData.accountNumber = companyPayload.account_number || companyPayload.accountNumber;
+      }
+      if (companyPayload.ifsc_code !== undefined || companyPayload.ifscCode !== undefined) {
+        compData.ifscCode = (companyPayload.ifsc_code || companyPayload.ifscCode || "").trim().toUpperCase();
+      }
+      if (companyPayload.bank_branch !== undefined || companyPayload.bankBranch !== undefined) {
+        compData.bankBranch = companyPayload.bank_branch || companyPayload.bankBranch;
+      }
+
+      if (Object.keys(compData).length > 0) {
+        await company.update(compData);
+        updatedCompany = company;
+      }
     }
 
     const data = {};
@@ -278,7 +336,9 @@ exports.updateSettings = async (req, res) => {
     if (geoError) return res.status(400).json({ success: false, message: geoError });
 
     const before = { ...branch.get({ plain: true }) };
-    await branch.update(data);
+    if (Object.keys(data).length > 0) {
+      await branch.update(data);
+    }
 
     const diff = diffFields(before, { ...branch.get({ plain: true }) }, EDITABLE);
     if (diff) {
@@ -296,6 +356,22 @@ exports.updateSettings = async (req, res) => {
       success: true,
       message: "Settings updated successfully",
       data: {
+        company_details: {
+          id: updatedCompany?.id,
+          name: updatedCompany?.name || "",
+          gst_number: updatedCompany?.gstNumber || "",
+          pan_number: updatedCompany?.panNumber || "",
+          address: updatedCompany?.address || "",
+          city: updatedCompany?.city || "",
+          state: updatedCompany?.state || "",
+          pincode: updatedCompany?.pincode || "",
+          email: updatedCompany?.email || "",
+          phone: updatedCompany?.phone || "",
+          bank_name: updatedCompany?.bankName || "",
+          account_number: updatedCompany?.accountNumber || "",
+          ifsc_code: updatedCompany?.ifscCode || "",
+          bank_branch: updatedCompany?.bankBranch || "",
+        },
         office_timings: {
           in_time: branch.workStartTime || WORK_START_TIME,
           out_time: branch.workEndTime || WORK_END_TIME,

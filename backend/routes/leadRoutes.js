@@ -39,6 +39,7 @@ router.get("/sample-excel", leadController.downloadSampleExcel);
 router.get("/unassigned", leadController.getUnassignedLeads);
 router.get("/followups", leadController.getFollowups);
 router.get("/counts", leadController.getLeadCounts);
+router.get("/check-duplicate", leadController.checkDuplicateMobile);
 router.post("/import", canAssign, upload.single("file"), leadController.importLeadsFromExcel);
 router.post("/reassign", canAssign, leadController.reassignLeadsBulk);
 router.post("/assign/:userId", canAssign, leadController.assignUnassignedLeads);

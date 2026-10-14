@@ -38,12 +38,31 @@ const serialize = (row) => ({
 });
 
 /**
- * The working day is measured in IST regardless of where the server runs, so
- * a check-in just before midnight lands on the right date.
+ * Determine calendar date in IST (YYYY-MM-DD) without shifting Date objects.
  */
-const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-const istNow = () => new Date(Date.now() + IST_OFFSET_MS);
-const istDateString = (date = istNow()) => date.toISOString().slice(0, 10);
+const istDateString = (date = new Date()) => {
+  try {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(date);
+  } catch (e) {
+    return date.toISOString().slice(0, 10);
+  }
+};
+
+const getMinutesOfDayInIst = (date = new Date()) => {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Kolkata",
+      hour: "numeric",
+      minute: "numeric",
+      hour12: false,
+    }).formatToParts(date);
+    const hour = parseInt(parts.find((p) => p.type === "hour")?.value || "0", 10);
+    const minute = parseInt(parts.find((p) => p.type === "minute")?.value || "0", 10);
+    return (hour % 24) * 60 + minute;
+  } catch (e) {
+    return date.getHours() * 60 + date.getMinutes();
+  }
+};
 
 /**
  * Great-circle distance in metres. Used to decide whether a check-in falls
@@ -64,8 +83,8 @@ const distanceMeters = (lat1, lng1, lat2, lng2) => {
  * Late is measured against branch's start time + late buffer if configured,
  * otherwise fallback to the deployment-wide global start time + buffer.
  */
-const classifyCheckIn = (checkInAt, branch = null) => {
-  const actualMinutes = checkInAt.getUTCHours() * 60 + checkInAt.getUTCMinutes();
+const classifyCheckIn = (checkInAt = new Date(), branch = null) => {
+  const actualMinutes = getMinutesOfDayInIst(checkInAt);
   let cutoff = lateCutoffMinutes();
   if (branch?.workStartTime) {
     const startM = parseMinutes(branch.workStartTime);
@@ -125,7 +144,7 @@ exports.checkIn = async (req, res) => {
       }
     }
 
-    const now = istNow();
+    const now = new Date();
     const attendance = await Attendance.create({
       companyId: req.user.companyId,
       userId: req.user.id,
@@ -174,8 +193,9 @@ exports.checkOut = async (req, res) => {
       branch = await Branch.findOne({ where: { companyId: req.user.companyId } });
     }
 
-    const now = istNow();
-    const hours = (now - new Date(attendance.checkInTime)) / 3600000;
+    const now = new Date();
+    const checkInMs = new Date(attendance.checkInTime).getTime();
+    const hours = (now.getTime() - checkInMs) / 3600000;
     const halfDayThreshold =
       branch?.halfDayHours !== null && branch?.halfDayHours !== undefined
         ? Number(branch.halfDayHours)

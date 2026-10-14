@@ -217,15 +217,14 @@ const autoSyncDisbursedCases = async (companyId) => {
         : 2.0;
 
       // Base Amount = Gross Credit / Commission from Bank = (Loan Amount × Bank Comm %) / 100
+      // Base Amount = Gross Credit / Commission from Bank = (Loan Amount × Bank Comm %) / 100
       const baseAmount = Math.round((loanAmount * bankCommPct) / 100);
-      const bankGstPct = 18.0;
-      const bankTdsPct = 5.0;
-      const bankGstAmount = Math.round((baseAmount * bankGstPct) / 100);
-      const bankTdsAmount = Math.round((baseAmount * bankTdsPct) / 100);
 
-      // Bank Net Payable / Receivable = Base Gross - Bank GST - Bank TDS
-      const bankNetReceivable = Math.max(0, baseAmount - bankGstAmount - bankTdsAmount);
-      const bankCommDue = bankNetReceivable;
+      // Corporate DSA Charge (%) and Amount (₹):
+      const corporateDsaPercent = 0.0;
+      const corporateDsaAmount = Math.round((baseAmount * corporateDsaPercent) / 100);
+      // Actual Amount after Corporate DSA Charge:
+      const actualAmount = Math.max(0, baseAmount - corporateDsaAmount);
 
       // Check if lead is Self / Direct sourced
       const isSelf =
@@ -235,8 +234,18 @@ const autoSyncDisbursedCases = async (companyId) => {
       const payoutType = isSelf ? "SELF" : "VENDOR";
 
       let partyCommPctFinal = isSelf ? 0.0 : partyCommPct;
-      // Party commission is ALWAYS calculated on the final net balance received from Bank after GST & TDS:
-      let partyCommDue = isSelf ? 0.0 : Math.round((bankNetReceivable * partyCommPctFinal) / 100);
+      let partyCommDue = isSelf ? 0.0 : Math.round((baseAmount * partyCommPctFinal) / 100);
+
+      // GST and TDS calculated on Actual Amount (after Corporate DSA deduction):
+      const bankGstPct = 18.0;
+      const bankTdsPct = 5.0;
+      const bankTdsAmount = Math.round((actualAmount * bankTdsPct) / 100);
+      const bankGstAmount = Math.round((actualAmount * bankGstPct) / 100);
+
+      // Final Bank Net Receivable: Actual Amount - Bank TDS = X Amount (GST is NOT subtracted from net receivable, kept separate as Y Amount)
+      const bankNetReceivable = Math.max(0, actualAmount - bankTdsAmount);
+      const bankCommDue = bankNetReceivable;
+
       let partyTdsPercent = 0.0;
       let partyTdsAmount = 0.0;
       let partyGstPercent = 0.0;
@@ -245,9 +254,7 @@ const autoSyncDisbursedCases = async (companyId) => {
 
       // In case of Self: only manpower cost is deducted, rest is company margin
       let partyNetPayable = isSelf ? 0.0 : Math.max(0, partyCommDue - partyTdsAmount - partyGstAmount - extraCharges);
-      let netMargin = isSelf
-        ? Math.round(bankNetReceivable - extraCharges)
-        : Math.round(bankNetReceivable - partyNetPayable);
+      let netMargin = Math.round(bankNetReceivable - (isSelf ? 0 : partyNetPayable) - extraCharges);
 
       if (!payout) {
         // Generate Invoice Number
@@ -266,6 +273,9 @@ const autoSyncDisbursedCases = async (companyId) => {
           disbursalDate: primaryApp?.updatedAt || lead.updatedAt || new Date(),
           loanAmount,
           baseAmount,
+          corporateDsaPercent,
+          corporateDsaAmount,
+          actualAmount,
           bankCommissionPercent: bankCommPct,
           bankCommissionDue: bankCommDue,
           bankGstPercent: bankGstPct,
@@ -289,6 +299,9 @@ const autoSyncDisbursedCases = async (companyId) => {
           partyPaidAmount: 0.0,
           partyRemainingDue: partyNetPayable,
           netMargin,
+          gstrStatus: "PENDING",
+          gstrAmount: bankGstAmount,
+          gstrReceivedAmount: 0.0,
           invoiceNumber,
           invoiceDate: new Date(),
           status: "PENDING",
@@ -324,37 +337,42 @@ const autoSyncDisbursedCases = async (companyId) => {
           await payout.update({ lenderId: lender.id, bankName });
         }
 
-        // Ensure bank deductions and net receivable are set, and party commission is based on bank net receivable
-        let curBankNet = parseFloat(payout.bankNetReceivable || 0);
-        let curBankGst = parseFloat(payout.bankGstAmount || 0);
-        let curBankTds = parseFloat(payout.bankTdsAmount || 0);
+        // Ensure bank deductions and net receivable are set based on Corporate DSA deduction rule
         const curBase = parseFloat(payout.baseAmount || 0);
+        const curCorpDsaPct = parseFloat(payout.corporateDsaPercent || 0);
+        const curCorpDsaAmt = payout.corporateDsaAmount !== undefined && payout.corporateDsaAmount !== null ? parseFloat(payout.corporateDsaAmount) : Math.round((curBase * curCorpDsaPct) / 100);
+        const curActualAmt = Math.max(0, curBase - curCorpDsaAmt);
 
-        if ((curBankNet === 0 || (curBankGst === 0 && curBankTds === 0)) && curBase > 0) {
-          curBankGst = Math.round((curBase * (parseFloat(payout.bankGstPercent) || 18.0)) / 100);
-          curBankTds = Math.round((curBase * (parseFloat(payout.bankTdsPercent) || 5.0)) / 100);
-          curBankNet = Math.max(0, curBase - curBankGst - curBankTds);
-        }
+        const curBankGstPct = parseFloat(payout.bankGstPercent) || 18.0;
+        const curBankTdsPct = parseFloat(payout.bankTdsPercent) || 5.0;
+        const curBankGst = Math.round((curActualAmt * curBankGstPct) / 100);
+        const curBankTds = Math.round((curActualAmt * curBankTdsPct) / 100);
+        // Bank Net Receivable: Actual Amount - TDS (GST is separate, not subtracted!)
+        const curBankNet = Math.max(0, curActualAmt - curBankTds);
 
-        const isPayoutSelf = payout.payoutType === "SELF" || (payout.partyName || "").toLowerCase() === "self";
+        const isPayoutSelf = payout.payoutType === "SELF" || (payout.partyName || "").toLowerCase() === "self" || (payout.partyName || "").toLowerCase() === "direct";
         const curPartyPct = isPayoutSelf ? 0 : parseFloat(payout.partyCommissionPercent || 0);
-        const correctPartyCommDue = isPayoutSelf ? 0 : Math.round((curBankNet * curPartyPct) / 100);
+        const correctPartyCommDue = isPayoutSelf ? 0 : Math.round((curBase * curPartyPct) / 100);
+
         const correctPartyTds = Math.round((correctPartyCommDue * (parseFloat(payout.partyTdsPercent) || 0)) / 100);
         const correctPartyGst = Math.round((correctPartyCommDue * (parseFloat(payout.partyGstPercent) || 0)) / 100);
         const correctPartyNet = Math.max(0, correctPartyCommDue - correctPartyTds - correctPartyGst - (parseFloat(payout.extraCharges) || 0));
-        const correctMargin = isPayoutSelf
-          ? Math.round(curBankNet - (parseFloat(payout.extraCharges) || 0))
-          : Math.round(curBankNet - correctPartyNet);
+        const correctMargin = Math.round(curBankNet - (isPayoutSelf ? 0 : correctPartyNet) - (parseFloat(payout.extraCharges) || 0));
 
         const partyPaid = parseFloat(payout.partyPaidAmount || 0);
         const shouldUpdateToNetRule =
           parseFloat(payout.bankNetReceivable || 0) !== curBankNet ||
           parseFloat(payout.bankGstAmount || 0) !== curBankGst ||
           parseFloat(payout.bankTdsAmount || 0) !== curBankTds ||
-          Math.abs(parseFloat(payout.partyCommissionDue || 0) - correctPartyCommDue) > 0.5;
+          parseFloat(payout.actualAmount || 0) !== curActualAmt ||
+          Math.abs(parseFloat(payout.partyCommissionDue || 0) - correctPartyCommDue) > 0.5 ||
+          !payout.gstrStatus;
 
         if (shouldUpdateToNetRule) {
           await payout.update({
+            corporateDsaPercent: curCorpDsaPct,
+            corporateDsaAmount: curCorpDsaAmt,
+            actualAmount: curActualAmt,
             bankGstAmount: curBankGst,
             bankTdsAmount: curBankTds,
             bankNetReceivable: curBankNet,
@@ -366,6 +384,8 @@ const autoSyncDisbursedCases = async (companyId) => {
             partyNetPayable: correctPartyNet,
             partyRemainingDue: Math.max(0, correctPartyNet - partyPaid),
             netMargin: correctMargin,
+            gstrStatus: payout.gstrStatus || "PENDING",
+            gstrAmount: parseFloat(payout.gstrAmount || 0) > 0 ? payout.gstrAmount : curBankGst,
           });
         }
 
@@ -516,6 +536,10 @@ exports.getDisbursedPayouts = async (req, res) => {
     let totalBankCommissionDue = 0;
     let totalBankReceived = 0;
     let totalBankRemainingDue = 0;
+    let totalBankGst = 0;
+    let totalBankTds = 0;
+    let totalGstrAmount = 0;
+    let totalGstrReceived = 0;
     let totalPartyCommissionDue = 0;
     let totalPartyTds = 0;
     let totalPartyGst = 0;
@@ -531,6 +555,10 @@ exports.getDisbursedPayouts = async (req, res) => {
       totalBankCommissionDue += parseFloat(c.bankCommissionDue || c.baseAmount || 0);
       totalBankReceived += parseFloat(c.bankReceivedAmount || 0);
       totalBankRemainingDue += parseFloat(c.bankRemainingDue || 0);
+      totalBankGst += parseFloat(c.bankGstAmount || 0);
+      totalBankTds += parseFloat(c.bankTdsAmount || 0);
+      totalGstrAmount += parseFloat(c.gstrAmount || c.bankGstAmount || 0);
+      totalGstrReceived += parseFloat(c.gstrReceivedAmount || 0);
       totalPartyCommissionDue += parseFloat(c.partyCommissionDue || 0);
       totalPartyTds += parseFloat(c.partyTdsAmount || 0);
       totalPartyGst += parseFloat(c.partyGstAmount || 0);
@@ -549,6 +577,10 @@ exports.getDisbursedPayouts = async (req, res) => {
       totalBankCommissionDue: Math.round(totalBankCommissionDue),
       totalBankReceived: Math.round(totalBankReceived),
       totalBankRemainingDue: Math.round(totalBankRemainingDue),
+      totalBankGst: Math.round(totalBankGst),
+      totalBankTds: Math.round(totalBankTds),
+      totalGstrAmount: Math.round(totalGstrAmount),
+      totalGstrReceived: Math.round(totalGstrReceived),
       totalPartyCommissionDue: Math.round(totalPartyCommissionDue),
       totalPartyTds: Math.round(totalPartyTds),
       totalPartyGst: Math.round(totalPartyGst),
@@ -582,6 +614,9 @@ exports.updateCasePayoutRates = async (req, res) => {
     const {
       loanAmount,
       baseAmount,
+      corporateDsaPercent,
+      corporateDsaAmount,
+      actualAmount: reqActualAmount,
       disbursalDate,
       bankCommissionPercent,
       bankGstPercent,
@@ -592,6 +627,7 @@ exports.updateCasePayoutRates = async (req, res) => {
       partyName,
       partyCode,
       partyCommissionPercent,
+      partyCommissionDue: reqPartyCommissionDue,
       partyTdsPercent,
       partyTdsAmount,
       partyGstPercent,
@@ -624,20 +660,34 @@ exports.updateCasePayoutRates = async (req, res) => {
       newBase = Math.round((newLoan * newBankPct) / 100);
     }
 
-    // 2. Bank Deductions (GST & TDS deducted from Bank Gross Commission)
-    const newBankGstPct = bankGstPercent !== undefined && bankGstPercent !== "" ? parseFloat(bankGstPercent) : parseFloat(casePayout.bankGstPercent || 0);
-    let newBankGstAmt = bankGstAmount !== undefined && bankGstAmount !== "" ? parseFloat(bankGstAmount) : Math.round((newBase * newBankGstPct) / 100);
+    // 2. Corporate DSA Charge (%) and Amount (₹) deducted from Gross Bank Commission Base
+    const newCorpDsaPct =
+      corporateDsaPercent !== undefined && corporateDsaPercent !== ""
+        ? parseFloat(corporateDsaPercent)
+        : parseFloat(casePayout.corporateDsaPercent || 0);
 
+    let newCorpDsaAmt =
+      corporateDsaAmount !== undefined && corporateDsaAmount !== ""
+        ? parseFloat(corporateDsaAmount)
+        : Math.round((newBase * newCorpDsaPct) / 100);
+
+    // 3. Actual Amount after Corporate DSA deduction
+    const actualAmount = Math.max(0, newBase - newCorpDsaAmt);
+
+    // 4. On this Actual Amount, calculate Bank TDS and GST:
     const newBankTdsPct = bankTdsPercent !== undefined && bankTdsPercent !== "" ? parseFloat(bankTdsPercent) : parseFloat(casePayout.bankTdsPercent || 0);
-    let newBankTdsAmt = bankTdsAmount !== undefined && bankTdsAmount !== "" ? parseFloat(bankTdsAmount) : Math.round((newBase * newBankTdsPct) / 100);
+    let newBankTdsAmt = bankTdsAmount !== undefined && bankTdsAmount !== "" ? parseFloat(bankTdsAmount) : Math.round((actualAmount * newBankTdsPct) / 100);
 
-    // Bank Net Payable / Receivable: Bank Commission Due is after subtracting GST & TDS
-    const bankNetReceivable = Math.max(0, newBase - newBankGstAmt - newBankTdsAmt);
+    const newBankGstPct = bankGstPercent !== undefined && bankGstPercent !== "" ? parseFloat(bankGstPercent) : parseFloat(casePayout.bankGstPercent || 0);
+    let newBankGstAmt = bankGstAmount !== undefined && bankGstAmount !== "" ? parseFloat(bankGstAmount) : Math.round((actualAmount * newBankGstPct) / 100);
+
+    // 5. Final Net Receivable: Actual Amount - Bank TDS = X Amount (GST is NOT subtracted from net receivable, kept separate as Y Amount)
+    const bankNetReceivable = Math.max(0, actualAmount - newBankTdsAmt);
     const bankCommissionDue = bankNetReceivable;
     const bankReceived = parseFloat(casePayout.bankReceivedAmount || 0);
     const bankRemainingDue = Math.max(0, bankCommissionDue - bankReceived);
 
-    // 3. Payout Type (SELF vs VENDOR)
+    // 6. Payout Type (SELF vs VENDOR) & Party/Vendor Commission
     const effectivePayoutType =
       payoutType !== undefined
         ? payoutType
@@ -646,8 +696,6 @@ exports.updateCasePayoutRates = async (req, res) => {
         : "VENDOR";
 
     const isSelf = effectivePayoutType === "SELF";
-
-    // 4. Manpower / Staff incentive cost
     const newExtraCharges = extraCharges !== undefined && extraCharges !== "" ? parseFloat(extraCharges) : parseFloat(casePayout.extraCharges || 0);
 
     let newPartyPct = 0.0;
@@ -658,24 +706,16 @@ exports.updateCasePayoutRates = async (req, res) => {
     let newPartyGstAmt = 0.0;
     let partyNetPayable = 0.0;
     let partyRemainingDue = 0.0;
-    let netMargin = 0.0;
     const partyPaid = parseFloat(casePayout.partyPaidAmount || 0);
 
     if (isSelf) {
-      // In case of Self: NO vendor payout, only manpower cost is deducted, rest is 100% company margin
       newPartyPct = 0.0;
       partyCommissionDue = 0.0;
-      newPartyTdsPct = 0.0;
-      newPartyTdsAmt = 0.0;
-      newPartyGstPct = 0.0;
-      newPartyGstAmt = 0.0;
       partyNetPayable = 0.0;
       partyRemainingDue = 0.0;
-      netMargin = Math.round(bankNetReceivable - newExtraCharges);
     } else {
-      // VENDOR Payout: Gross Vendor Comm (calculated on Bank Net Receivable after Bank GST & TDS) minus Vendor TDS, GST, and Manpower cost
       newPartyPct = partyCommissionPercent !== undefined && partyCommissionPercent !== "" ? parseFloat(partyCommissionPercent) : parseFloat(casePayout.partyCommissionPercent || 0);
-      partyCommissionDue = Math.round((bankNetReceivable * newPartyPct) / 100);
+      partyCommissionDue = reqPartyCommissionDue !== undefined && reqPartyCommissionDue !== "" ? parseFloat(reqPartyCommissionDue) : Math.round((newBase * newPartyPct) / 100);
 
       newPartyTdsPct = partyTdsPercent !== undefined && partyTdsPercent !== "" ? parseFloat(partyTdsPercent) : parseFloat(casePayout.partyTdsPercent || 0);
       newPartyTdsAmt = partyTdsAmount !== undefined && partyTdsAmount !== "" ? parseFloat(partyTdsAmount) : Math.round((partyCommissionDue * newPartyTdsPct) / 100);
@@ -685,7 +725,18 @@ exports.updateCasePayoutRates = async (req, res) => {
 
       partyNetPayable = Math.max(0, partyCommissionDue - newPartyTdsAmt - newPartyGstAmt - newExtraCharges);
       partyRemainingDue = Math.max(0, partyNetPayable - partyPaid);
-      netMargin = Math.round(bankNetReceivable - partyNetPayable);
+    }
+
+    const netMargin = Math.round(bankNetReceivable - (isSelf ? 0 : partyNetPayable) - newExtraCharges);
+
+    // 7. GST reflection status & amount
+    const newGstrStatus = req.body.gstrStatus || casePayout.gstrStatus || "PENDING";
+    const newGstrAmount = req.body.gstrAmount !== undefined && req.body.gstrAmount !== "" ? parseFloat(req.body.gstrAmount) : newBankGstAmt;
+    let newGstrReceived = req.body.gstrReceivedAmount !== undefined && req.body.gstrReceivedAmount !== "" ? parseFloat(req.body.gstrReceivedAmount) : parseFloat(casePayout.gstrReceivedAmount || 0);
+    if (newGstrStatus === "COMPLETE" && (newGstrReceived <= 0 || req.body.gstrStatus === "COMPLETE")) {
+      newGstrReceived = newGstrAmount;
+    } else if (newGstrStatus === "PENDING" && req.body.gstrStatus === "PENDING") {
+      newGstrReceived = 0;
     }
 
     let status = "PENDING";
@@ -699,6 +750,9 @@ exports.updateCasePayoutRates = async (req, res) => {
       {
         loanAmount: newLoan,
         baseAmount: newBase,
+        corporateDsaPercent: newCorpDsaPct,
+        corporateDsaAmount: newCorpDsaAmt,
+        actualAmount,
         disbursalDate: disbursalDate || casePayout.disbursalDate,
         bankCommissionPercent: newBankPct,
         bankCommissionDue,
@@ -721,6 +775,9 @@ exports.updateCasePayoutRates = async (req, res) => {
         partyNetPayable,
         partyRemainingDue,
         netMargin,
+        gstrStatus: newGstrStatus,
+        gstrAmount: newGstrAmount,
+        gstrReceivedAmount: newGstrReceived,
         invoiceNumber: invoiceNumber !== undefined ? invoiceNumber : casePayout.invoiceNumber,
         invoiceDate: invoiceDate !== undefined ? invoiceDate : casePayout.invoiceDate,
         invoiceStatus: invoiceStatus || casePayout.invoiceStatus,
@@ -794,6 +851,24 @@ exports.recordBankReceipt = async (req, res) => {
     const tds = parseFloat(tdsAmount || 0);
     const net = gross + gst - tds;
 
+    // Check & Validate: amount cannot exceed (Bank Commission - Corporate DSA Commission - TDS)
+    const baseComm = parseFloat(casePayout.baseAmount || 0);
+    const corpDsaComm = parseFloat(casePayout.partyCommissionDue || 0);
+    const tdsDeducted = parseFloat(casePayout.bankTdsAmount || 0);
+    const maxNetReceivable = Math.max(0, baseComm - corpDsaComm - tdsDeducted);
+    const alreadyReceived = parseFloat(casePayout.bankReceivedAmount || 0);
+    const maxRemainingReceivable = Math.max(0, maxNetReceivable - alreadyReceived);
+
+    if (gross > maxRemainingReceivable + 0.01) {
+      await t.rollback();
+      return res.status(400).json({
+        message: `Receipt amount (₹${gross}) exceeds maximum eligible receivable of ₹${Math.round(maxRemainingReceivable)} (Eligible Net: ₹${Math.round(maxNetReceivable)} [Bank Comm ₹${baseComm} − Corp DSA Comm ₹${corpDsaComm} − TDS ₹${tdsDeducted}] − Already Received ₹${Math.round(alreadyReceived)}).`,
+        maxEligible: Math.round(maxNetReceivable),
+        alreadyReceived: Math.round(alreadyReceived),
+        maxRemainingReceivable: Math.round(maxRemainingReceivable),
+      });
+    }
+
     const receipt = await BankReceipt.create(
       {
         companyId,
@@ -814,8 +889,8 @@ exports.recordBankReceipt = async (req, res) => {
     );
 
     // Update CasePayout
-    const newBankReceived = parseFloat(casePayout.bankReceivedAmount || 0) + gross;
-    const newBankRemaining = Math.max(0, parseFloat(casePayout.bankCommissionDue || 0) - newBankReceived);
+    const newBankReceived = alreadyReceived + gross;
+    const newBankRemaining = Math.max(0, maxNetReceivable - newBankReceived);
 
     const partyRemaining = parseFloat(casePayout.partyRemainingDue || 0);
     let status = "PENDING";
@@ -1145,6 +1220,16 @@ exports.getInvoiceData = async (req, res) => {
     const extraCharges = parseFloat(casePayout.extraCharges || 0);
     const netPayableToParty = parseFloat(casePayout.partyNetPayable || (partyCommDue - partyTdsAmount - partyGstAmount - extraCharges));
 
+    // Dynamic Company GST, PAN, Address, and Remittance details
+    const fullCompanyAddress = [
+      company?.address,
+      company?.city,
+      company?.state ? `${company.state}${company?.pincode ? ` - ${company.pincode}` : ""}` : (company?.pincode ? `PIN: ${company.pincode}` : "")
+    ].filter(Boolean).join(", ") || company?.address || "Address Not Configured (Update in Settings)";
+
+    const companyGstin = company?.gstNumber || "GSTIN Not Specified";
+    const companyPan = company?.panNumber || (company?.gstNumber && company.gstNumber.length >= 12 ? company.gstNumber.substring(2, 12) : "—");
+
     return res.status(200).json({
       invoice: {
         invoiceNumber: casePayout.invoiceNumber || `INV-${new Date().getFullYear()}-${casePayout.id}`,
@@ -1152,15 +1237,15 @@ exports.getInvoiceData = async (req, res) => {
         invoiceStatus: casePayout.invoiceStatus || "ISSUED",
         company: {
           name: company?.name || "CapitalCare Financial Solutions",
-          address: "120, Financial District, MG Road, Jaipur, Rajasthan - 302001",
-          gstin: "08AABCT1234F1Z5",
-          pan: "AABCT1234F",
-          email: company?.email || "billing@capitalcare.in",
-          phone: company?.phone || "+91 98765 43210",
-          bankName: "HDFC Bank",
-          accountNumber: "50200012345678",
-          ifsc: "HDFC0001234",
-          branch: "Ashok Nagar, Jaipur",
+          address: fullCompanyAddress,
+          gstin: companyGstin,
+          pan: companyPan,
+          email: company?.email || "",
+          phone: company?.phone || "",
+          bankName: company?.bankName || "—",
+          accountNumber: company?.accountNumber || "—",
+          ifsc: company?.ifscCode || "—",
+          branch: company?.bankBranch || "—",
         },
         billTo: {
           bankName: casePayout.bankName || "Lender / Bank Partner",
@@ -1229,6 +1314,9 @@ exports.createCasePayout = async (req, res) => {
       loanAmount,
       bankCommissionPercent = 2.0,
       baseAmount,
+      corporateDsaPercent = 0.0,
+      corporateDsaAmount,
+      actualAmount: reqActualAmount,
       bankGstPercent = 18.0,
       bankTdsPercent = 5.0,
       disbursalDate,
@@ -1317,12 +1405,20 @@ exports.createCasePayout = async (req, res) => {
         ? parseFloat(baseAmount)
         : Math.round((newLoan * newBankPct) / 100);
 
-    const newBankGstPct = parseFloat(bankGstPercent ?? 18.0);
-    const newBankGstAmt = Math.round((newBase * newBankGstPct) / 100);
-    const newBankTdsPct = parseFloat(bankTdsPercent ?? 5.0);
-    const newBankTdsAmt = Math.round((newBase * newBankTdsPct) / 100);
+    const newCorpDsaPct = parseFloat(corporateDsaPercent || 0);
+    const newCorpDsaAmt =
+      corporateDsaAmount !== undefined && corporateDsaAmount !== ""
+        ? parseFloat(corporateDsaAmount)
+        : Math.round((newBase * newCorpDsaPct) / 100);
+    const actualAmount = Math.max(0, newBase - newCorpDsaAmt);
 
-    const bankNetReceivable = Math.max(0, newBase - newBankGstAmt - newBankTdsAmt);
+    const newBankTdsPct = parseFloat(bankTdsPercent ?? 5.0);
+    const newBankTdsAmt = Math.round((actualAmount * newBankTdsPct) / 100);
+    const newBankGstPct = parseFloat(bankGstPercent ?? 18.0);
+    const newBankGstAmt = Math.round((actualAmount * newBankGstPct) / 100);
+
+    // Final Net Receivable: Actual Amount - Bank TDS = X Amount (GST is separate, NOT subtracted!)
+    const bankNetReceivable = Math.max(0, actualAmount - newBankTdsAmt);
     const bankCommissionDue = bankNetReceivable;
 
     const effectivePartyName = partyName || targetLead.leadSource || "Self";
@@ -1331,12 +1427,10 @@ exports.createCasePayout = async (req, res) => {
     const payoutType = isSelf ? "SELF" : "VENDOR";
 
     let partyCommPct = isSelf ? 0.0 : parseFloat(partyCommissionPercent ?? 50.0);
-    let partyCommDue = isSelf ? 0.0 : Math.round((bankNetReceivable * partyCommPct) / 100);
+    let partyCommDue = isSelf ? 0.0 : Math.round((newBase * partyCommPct) / 100);
     let newExtra = parseFloat(extraCharges || 0);
     let partyNetPayable = isSelf ? 0.0 : Math.max(0, partyCommDue - newExtra);
-    let netMargin = isSelf
-      ? Math.round(bankNetReceivable - newExtra)
-      : Math.round(bankNetReceivable - partyNetPayable);
+    let netMargin = Math.round(bankNetReceivable - (isSelf ? 0 : partyNetPayable) - newExtra);
 
     const disbDateVal = disbursalDate ? disbursalDate : new Date().toISOString().slice(0, 10);
     const custName = customerName ? customerName.trim() : targetCustomer?.name || "Customer";
@@ -1355,6 +1449,9 @@ exports.createCasePayout = async (req, res) => {
           disbursalDate: disbDateVal,
           loanAmount: newLoan,
           baseAmount: newBase,
+          corporateDsaPercent: newCorpDsaPct,
+          corporateDsaAmount: newCorpDsaAmt,
+          actualAmount,
           bankCommissionPercent: newBankPct,
           bankCommissionDue,
           bankGstPercent: newBankGstPct,
@@ -1372,6 +1469,7 @@ exports.createCasePayout = async (req, res) => {
           partyNetPayable,
           partyRemainingDue: Math.max(0, partyNetPayable - parseFloat(payout.partyPaidAmount || 0)),
           netMargin,
+          gstrAmount: parseFloat(payout.gstrAmount || 0) > 0 ? payout.gstrAmount : newBankGstAmt,
           notes: notes || payout.notes,
         },
         { transaction: t }
@@ -1392,6 +1490,9 @@ exports.createCasePayout = async (req, res) => {
           disbursalDate: disbDateVal,
           loanAmount: newLoan,
           baseAmount: newBase,
+          corporateDsaPercent: newCorpDsaPct,
+          corporateDsaAmount: newCorpDsaAmt,
+          actualAmount,
           bankCommissionPercent: newBankPct,
           bankCommissionDue,
           bankGstPercent: newBankGstPct,
@@ -1415,6 +1516,9 @@ exports.createCasePayout = async (req, res) => {
           partyPaidAmount: 0.0,
           partyRemainingDue: partyNetPayable,
           netMargin,
+          gstrStatus: "PENDING",
+          gstrAmount: newBankGstAmt,
+          gstrReceivedAmount: 0.0,
           invoiceNumber,
           invoiceDate: new Date(),
           status: "PENDING",
@@ -1458,6 +1562,217 @@ exports.createCasePayout = async (req, res) => {
     await t.rollback();
     console.error("[casePayoutController] createCasePayout error:", error);
     return res.status(500).json({ message: "Failed to record case payout", error: error.message });
+  }
+};
+
+/**
+ * PUT /api/payouts/cases/:id/gstr-status
+ * Updates GSTR reflection status (PENDING / COMPLETE / PARTIALLY_COMPLETE) and received amount
+ */
+exports.updateGstrStatus = async (req, res) => {
+  const t = await sequelize.transaction();
+  try {
+    const companyId = resolveCompanyId(req);
+    const { id } = req.params;
+    const { gstrStatus, gstrReceivedAmount, notes } = req.body;
+
+    const casePayout = await CasePayout.findOne({
+      where: { id, companyId },
+      transaction: t,
+    });
+
+    if (!casePayout) {
+      await t.rollback();
+      return res.status(404).json({ message: "Case payout record not found" });
+    }
+
+    const previousValue = casePayout.toJSON();
+    const validStatuses = ["PENDING", "COMPLETE", "PARTIALLY_COMPLETE"];
+    const statusVal = validStatuses.includes(gstrStatus) ? gstrStatus : "PENDING";
+    const totalGstAmount = parseFloat(casePayout.gstrAmount || casePayout.bankGstAmount || 0);
+
+    let receivedAmt = 0;
+    if (statusVal === "COMPLETE") {
+      receivedAmt = gstrReceivedAmount !== undefined && gstrReceivedAmount !== "" ? parseFloat(gstrReceivedAmount) : totalGstAmount;
+    } else if (statusVal === "PARTIALLY_COMPLETE") {
+      receivedAmt = parseFloat(gstrReceivedAmount || 0);
+      if (receivedAmt > totalGstAmount && totalGstAmount > 0) {
+        receivedAmt = totalGstAmount;
+      }
+    } else {
+      receivedAmt = 0;
+    }
+
+    await casePayout.update(
+      {
+        gstrStatus: statusVal,
+        gstrAmount: totalGstAmount,
+        gstrReceivedAmount: receivedAmt,
+        notes: notes !== undefined ? notes : casePayout.notes,
+      },
+      { transaction: t }
+    );
+
+    await logActivity(
+      req,
+      {
+        recordType: "Lead",
+        recordId: casePayout.leadId,
+        action: "UPDATED",
+        previousValue,
+        newValue: casePayout.toJSON(),
+        remarks: `Updated GSTR status to ${statusVal} (Received ₹${receivedAmt} of ₹${totalGstAmount}) for Lead #${casePayout.leadId}`,
+      },
+      t
+    );
+
+    await t.commit();
+    return res.status(200).json({
+      message: `GSTR status updated to ${statusVal} successfully`,
+      casePayout,
+    });
+  } catch (error) {
+    await t.rollback();
+    console.error("[casePayoutController] updateGstrStatus error:", error);
+    return res.status(500).json({ message: "Failed to update GSTR status", error: error.message });
+  }
+};
+
+/**
+ * GET /api/payouts/cases/:id/payment-history
+ * Returns comprehensive payment history and transaction timeline for a lead / case payout
+ */
+exports.getCasePaymentHistory = async (req, res) => {
+  try {
+    const companyId = resolveCompanyId(req);
+    const { id } = req.params;
+
+    const casePayout = await CasePayout.findOne({
+      where: { id, companyId },
+      include: [
+        {
+          model: Lead,
+          as: "lead",
+          include: [
+            { model: Customer, as: "customer" },
+            { model: Application, as: "applications", include: [{ model: Lender, as: "lender" }] },
+          ],
+        },
+        { model: Lender, as: "lender" },
+      ],
+    });
+
+    if (!casePayout) {
+      return res.status(404).json({ message: "Case payout record not found" });
+    }
+
+    // 1. Fetch all Bank Receipts for this case
+    const bankReceipts = await BankReceipt.findAll({
+      where: { companyId, casePayoutId: casePayout.id },
+      include: [{ model: User, as: "recordedBy", attributes: ["id", "name"] }],
+      order: [["receiptDate", "DESC"], ["createdAt", "DESC"]],
+    });
+
+    // 2. Fetch all Party Payments linked to this lead
+    const partyPayments = await PartyPayment.findAll({
+      where: { companyId, leadId: casePayout.leadId },
+      include: [{ model: User, as: "recordedBy", attributes: ["id", "name"] }],
+      order: [["paymentDate", "DESC"], ["createdAt", "DESC"]],
+    });
+
+    // 3. Compile merged timeline
+    const timeline = [];
+
+    bankReceipts.forEach((br) => {
+      timeline.push({
+        id: `br-${br.id}`,
+        rawId: br.id,
+        category: "BANK_RECEIPT",
+        title: "Bank Commission Received",
+        partyOrBank: br.bankName || casePayout.bankName || "Bank",
+        date: br.receiptDate,
+        amount: parseFloat(br.grossAmount || 0),
+        gstAmount: parseFloat(br.gstAmount || 0),
+        tdsAmount: parseFloat(br.tdsAmount || 0),
+        netAmount: parseFloat(br.netAmount || br.grossAmount || 0),
+        paymentMode: br.paymentMode,
+        referenceNumber: br.referenceNumber || "—",
+        notes: br.notes || "—",
+        recordedBy: br.recordedBy?.name || "System",
+        createdAt: br.createdAt,
+      });
+    });
+
+    partyPayments.forEach((pp) => {
+      timeline.push({
+        id: `pp-${pp.id}`,
+        rawId: pp.id,
+        category: "PARTY_PAYOUT",
+        title: `Payout to ${pp.partyName || "Party"}`,
+        partyOrBank: pp.partyName || casePayout.partyName || "Connector",
+        date: pp.paymentDate,
+        amount: parseFloat(pp.amount || 0),
+        gstAmount: 0,
+        tdsAmount: 0,
+        netAmount: parseFloat(pp.amount || 0),
+        paymentMode: pp.paymentMode,
+        referenceNumber: pp.referenceNumber || "—",
+        notes: pp.notes || "—",
+        recordedBy: pp.recordedBy?.name || "System",
+        createdAt: pp.createdAt,
+      });
+    });
+
+    // Sort combined timeline descending by date
+    timeline.sort((a, b) => new Date(b.date || b.createdAt) - new Date(a.date || a.createdAt));
+
+    // Calculate core figures according to requirement:
+    // Gross Bank Comm Base -> minus Corporate DSA Charge -> Actual Amount -> minus Bank TDS = Bank Net Receivable (X Amount).
+    // Bank GST (Y Amount) is separate, NOT subtracted!
+    const loanAmount = parseFloat(casePayout.loanAmount || 0);
+    const bankCommission = parseFloat(casePayout.baseAmount || 0);
+    const corporateDsaPercent = parseFloat(casePayout.corporateDsaPercent || 0);
+    const corporateDsaAmount = parseFloat(casePayout.corporateDsaAmount || 0);
+    const actualAmount = parseFloat(casePayout.actualAmount || Math.max(0, bankCommission - corporateDsaAmount));
+    const tdsAmount = parseFloat(casePayout.bankTdsAmount || 0);
+    const netReceivable = parseFloat(casePayout.bankNetReceivable || Math.max(0, actualAmount - tdsAmount)); // X Amount
+    const gstAmount = parseFloat(casePayout.bankGstAmount || 0); // Y Amount
+    const bankReceivedAmount = parseFloat(casePayout.bankReceivedAmount || 0);
+    const bankRemainingDue = Math.max(0, netReceivable - bankReceivedAmount);
+
+    return res.status(200).json({
+      casePayout,
+      calculations: {
+        loanAmount,
+        bankCommission,
+        bankCommissionPercent: parseFloat(casePayout.bankCommissionPercent || 0),
+        corporateDsaPercent,
+        corporateDsaAmount,
+        corporateDsaCommission: corporateDsaAmount,
+        actualAmount,
+        remainingAfterDsa: actualAmount,
+        partyCommissionPercent: parseFloat(casePayout.partyCommissionPercent || 0),
+        tdsPercent: parseFloat(casePayout.bankTdsPercent || 0),
+        tdsAmount,
+        netReceivable, // X Amount: actualAmount - tdsAmount
+        gstPercent: parseFloat(casePayout.bankGstPercent || 0),
+        gstAmount, // Y Amount: separate, NOT subtracted!
+        bankReceivedAmount,
+        bankRemainingDue,
+        partyNetPayable: parseFloat(casePayout.partyNetPayable || 0),
+        partyPaidAmount: parseFloat(casePayout.partyPaidAmount || 0),
+        partyRemainingDue: parseFloat(casePayout.partyRemainingDue || 0),
+        gstrStatus: casePayout.gstrStatus || "PENDING",
+        gstrAmount: parseFloat(casePayout.gstrAmount || gstAmount || 0),
+        gstrReceivedAmount: parseFloat(casePayout.gstrReceivedAmount || 0),
+      },
+      transactions: timeline,
+      bankReceipts,
+      partyPayments,
+    });
+  } catch (error) {
+    console.error("[casePayoutController] getCasePaymentHistory error:", error);
+    return res.status(500).json({ message: "Failed to fetch payment history", error: error.message });
   }
 };
 
