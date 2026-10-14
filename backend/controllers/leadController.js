@@ -1594,25 +1594,63 @@ exports.importLeadsFromExcel = async (req, res) => {
 
     for (const [index, row] of sheetRows.entries()) {
       const rowNumber = index + 2; // sheet row, counting the header
-      const name = row.name || row.Name;
-      const number = row.number || row.Number || row.mobile || row.Mobile;
+      const rawName =
+        row.name ||
+        row.Name ||
+        row["Customer Name"] ||
+        row["customer_name"] ||
+        row["Name *"] ||
+        row["Lead Name"] ||
+        row["Client Name"] ||
+        row["Borrower Name"];
+      const name = rawName !== undefined && rawName !== null ? String(rawName).trim() : "";
 
-      if (!name || !number) {
+      const rawNumber =
+        row.number ||
+        row.Number ||
+        row.mobile ||
+        row.Mobile ||
+        row["Mobile *"] ||
+        row["Mobile Number"] ||
+        row["Contact"] ||
+        row["Contact Number"] ||
+        row["Phone"] ||
+        row["Phone Number"];
+      const digitsOnly = rawNumber !== undefined && rawNumber !== null ? String(rawNumber).replace(/\D/g, "") : "";
+      const number = digitsOnly.length >= 10 ? digitsOnly.slice(-10) : digitsOnly;
+
+      if (!name || !number || number.length < 10) {
         skipped += 1;
-        errors.push({ row: rowNumber, reason: "Missing name or number" });
+        errors.push({
+          row: rowNumber,
+          reason: !name
+            ? "Missing customer name"
+            : !number
+            ? "Missing mobile number"
+            : "Invalid mobile number (must be at least 10 digits)",
+        });
         continue;
       }
 
       const transaction = await sequelize.transaction();
       try {
+        const rawEmail = row.email || row.Email || row["Email ID"] || row["Email Address"] || null;
+        const rawCity = row.city || row.City || row.location || row.Location || null;
+        const rawEmp =
+          row.employment_type ||
+          row.employmentType ||
+          row["Employment Type"] ||
+          row["Occupation"] ||
+          null;
+
         const { customer } = await findOrCreateCustomer(
           companyId,
           {
             name,
             mobile: number,
-            email: row.email || null,
-            city: row.city || null,
-            employmentType: row.employment_type || null,
+            email: rawEmail ? String(rawEmail).trim() : null,
+            city: rawCity ? String(rawCity).trim() : null,
+            employmentType: rawEmp ? String(rawEmp).trim() : null,
           },
           transaction
         );
@@ -1655,6 +1693,28 @@ exports.importLeadsFromExcel = async (req, res) => {
             : null;
         const rowCommission = parsedCommission !== null && !isNaN(parsedCommission) ? parsedCommission : null;
 
+        const rawLoanType =
+          row.loan_type ||
+          row.loanType ||
+          row["Loan Type"] ||
+          row["Product"] ||
+          row["Loan Product"] ||
+          null;
+        const rawBudget =
+          row.est_budget ||
+          row.required_amount ||
+          row.requiredAmount ||
+          row["Required Amount"] ||
+          row["Loan Amount"] ||
+          row["Amount"] ||
+          row["Budget"] ||
+          null;
+        const parsedBudget = rawBudget ? parseFloat(String(rawBudget).replace(/,/g, "").trim()) : null;
+        const rowBudget = parsedBudget !== null && !isNaN(parsedBudget) ? parsedBudget : null;
+
+        const rawPriority = String(row.priority || row.Priority || "MEDIUM").trim().toUpperCase();
+        const rowPriority = ["HIGH", "MEDIUM", "LOW"].includes(rawPriority) ? rawPriority : "MEDIUM";
+
         const defaultAssigneeId = ![ROLES.SUPERADMIN, ROLES.COMPANY_ADMIN].includes(req.user.role)
           ? req.user.id
           : null;
@@ -1665,9 +1725,9 @@ exports.importLeadsFromExcel = async (req, res) => {
             customerId: customer.id,
             leadSource: rowLeadSource,
             commissionPercent: rowCommission,
-            loanType: row.loan_type || null,
-            requiredAmount: row.est_budget || null,
-            priority: String(row.priority || "MEDIUM").toUpperCase(),
+            loanType: rawLoanType ? String(rawLoanType).trim() : null,
+            requiredAmount: rowBudget,
+            priority: rowPriority,
             status: fresh?.value || "NEW",
             assignedEmployeeId: defaultAssigneeId,
             assignedManagerId: defaultAssigneeId ? (req.user.managerId || null) : null,
@@ -1691,8 +1751,26 @@ exports.importLeadsFromExcel = async (req, res) => {
           }).catch(() => {});
         }
 
-        const remark = remarkOf(row);
-        if (remark) rowRemarks.push(`row ${rowNumber}: ${remark}`);
+        const rawRemark =
+          row.remark ||
+          row.Remark ||
+          row.remarks ||
+          row.Remarks ||
+          row.note ||
+          row.notes ||
+          row.Notes ||
+          remarkOf(row);
+
+        if (rawRemark && String(rawRemark).trim()) {
+          const cleanRemark = String(rawRemark).trim();
+          rowRemarks.push(`row ${rowNumber}: ${cleanRemark}`);
+          Note.create({
+            companyId,
+            leadId: importedLead.id,
+            userId: req.user.id,
+            content: cleanRemark,
+          }).catch(() => {});
+        }
       } catch (rowError) {
         await transaction.rollback();
         skipped += 1;
@@ -1846,6 +1924,93 @@ exports.addLeadRemark = async (req, res) => {
     });
   } catch (error) {
     console.error("[leads] addLeadRemark error:", error);
+    return res.status(500).json({ message: "Internal Server Error", error: error.message });
+  }
+};
+
+/**
+ * GET /api/leads/sample-excel
+ * Downloads a ready-to-use sample Excel sheet with pre-populated demo records
+ * and format instructions.
+ */
+exports.downloadSampleExcel = async (req, res) => {
+  try {
+    const sampleRows = [
+      {
+        "Name": "Rahul Sharma",
+        "Mobile": "9876543210",
+        "Source / Party": "Self",
+        "Commission %": 1.5,
+        "Remarks": "Interested in loan, callback requested after 4 PM",
+      },
+      {
+        "Name": "Priya Patel",
+        "Mobile": "9812345678",
+        "Source / Party": "DSA Partner",
+        "Commission %": 1.0,
+        "Remarks": "Looking for lowest interest rate",
+      },
+      {
+        "Name": "Vikram Singh",
+        "Mobile": "9765432109",
+        "Source / Party": "Direct",
+        "Commission %": 0.0,
+        "Remarks": "Urgent requirement",
+      },
+    ];
+
+    const guidelines = [
+      {
+        "Column Name": "Name",
+        "Required": "YES (Mandatory)",
+        "Description": "Full name of customer / borrower",
+        "Example": "Rahul Sharma",
+      },
+      {
+        "Column Name": "Mobile",
+        "Required": "YES (Mandatory)",
+        "Description": "10-digit mobile phone number",
+        "Example": "9876543210",
+      },
+      {
+        "Column Name": "Source / Party",
+        "Required": "Optional",
+        "Description": "Lead source or DSA channel (defaults to Self)",
+        "Example": "Self, Direct, DSA Partner",
+      },
+      {
+        "Column Name": "Commission %",
+        "Required": "Optional",
+        "Description": "Commission percentage (numeric)",
+        "Example": "1.5",
+      },
+      {
+        "Column Name": "Remarks",
+        "Required": "Optional",
+        "Description": "Initial discussion notes or callback time",
+        "Example": "Customer requested callback after 4 PM",
+      },
+    ];
+
+    const wb = XLSX.utils.book_new();
+
+    const wsSample = XLSX.utils.json_to_sheet(sampleRows);
+    wsSample["!cols"] = [
+      { wch: 22 }, { wch: 16 }, { wch: 20 }, { wch: 16 }, { wch: 45 }
+    ];
+    XLSX.utils.book_append_sheet(wb, wsSample, "Sample Leads");
+
+    const wsGuide = XLSX.utils.json_to_sheet(guidelines);
+    wsGuide["!cols"] = [{ wch: 18 }, { wch: 16 }, { wch: 44 }, { wch: 30 }];
+    XLSX.utils.book_append_sheet(wb, wsGuide, "Format Guide & Rules");
+
+    const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", 'attachment; filename="Sample_Leads_Template.xlsx"');
+    return res.status(200).send(buffer);
+  } catch (error) {
+    console.error("[leads] downloadSampleExcel error:", error);
     return res.status(500).json({ message: "Internal Server Error", error: error.message });
   }
 };

@@ -51,6 +51,11 @@ const AddLead = ({ handleCloseaddcallformModal, onCreated }) => {
     }
   };
 
+  const handleDownloadSample = () => {
+    const token = localStorage.getItem("token");
+    window.open(`${API_URL}/leads/sample-excel?token=${token}`, "_blank");
+  };
+
   const handleExcelUpload = async () => {
     if (!excelFile) {
       alert("Please select an Excel file");
@@ -63,7 +68,7 @@ const AddLead = ({ handleCloseaddcallformModal, onCreated }) => {
     setIsLoading(true);
     try {
       const token = localStorage.getItem("token");
-      const response = await fetch(`${API_URL}/addLeadsFromExcel`, {
+      const response = await fetch(`${API_URL}/leads/import`, {
         method: "POST",
         headers: {
           ...(token && { Authorization: `Bearer ${token}` }),
@@ -71,7 +76,10 @@ const AddLead = ({ handleCloseaddcallformModal, onCreated }) => {
         body: formDataToSend,
       });
 
-      if (!response.ok) throw new Error("Upload failed");
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.message || "Upload failed");
+      }
 
       const result = await response.json();
       alert(result.message || "Leads uploaded successfully");
@@ -147,6 +155,20 @@ const AddLead = ({ handleCloseaddcallformModal, onCreated }) => {
 
         {/* Excel Upload Section */}
         <div className="space-y-3">
+          <div className="p-3 bg-green-50 border border-green-200 rounded-lg flex items-center justify-between text-xs">
+            <div>
+              <p className="font-semibold text-green-800">Sample Excel Template</p>
+              <p className="text-green-600">Download format with demo columns</p>
+            </div>
+            <button
+              type="button"
+              onClick={handleDownloadSample}
+              className="px-2.5 py-1.5 bg-green-700 text-white font-medium rounded hover:bg-green-800 flex items-center gap-1"
+            >
+              📥 Sample Sheet
+            </button>
+          </div>
+
           <input
             type="file"
             accept=".xlsx,.xls"

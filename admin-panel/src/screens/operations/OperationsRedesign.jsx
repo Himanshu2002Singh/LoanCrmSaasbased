@@ -90,6 +90,32 @@ const renderStatusBadge = (status) => {
   );
 };
 
+const WhatsAppIcon = ({ size = 14, style = {} }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="#25D366" style={{ flexShrink: 0, ...style }}>
+    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L0 24l6.335-1.662c1.746.953 3.71 1.456 5.711 1.457h.004c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/>
+  </svg>
+);
+
+const shareOnWhatsApp = ({ mobile, customerName, appNumber, lenderName, stageTitle, remark }) => {
+  if (!mobile || mobile === "—") {
+    toast.error("Customer mobile number not found!");
+    return;
+  }
+  const clean = String(mobile).replace(/\D/g, "");
+  const formatted = clean.length === 10 ? `91${clean}` : clean;
+  
+  let text = `Hello ${customerName || "Customer"},\n\n`;
+  text += `Update regarding your Loan Application #${appNumber || "—"}`;
+  if (lenderName) text += ` with *${lenderName}*`;
+  text += `:\n\n`;
+  if (stageTitle) text += `📌 *Status / Query:* ${stageTitle}\n`;
+  if (remark) text += `📝 *Details / Reason:* ${remark}\n\n`;
+  text += `Please review and update us with the required information/documents.\n\nThank you,\nOperations Team`;
+  
+  const url = `https://wa.me/${formatted}?text=${encodeURIComponent(text)}`;
+  window.open(url, "_blank");
+};
+
 const PIPELINE_STAGES = [
   { key: "DOCS_PENDING", label: "1. Docs Pending", color: "#b45309", bg: "#fef3c7", border: "#fde68a" },
   { key: "READY_TO_SEND", label: "2. Ready to Send", color: "#4f46e5", bg: "#eef2ff", border: "#c7d2fe" },
@@ -101,10 +127,11 @@ const PIPELINE_STAGES = [
   { key: "TECHNICAL", label: "8. Technical", color: "#0891b2", bg: "#ecfeff", border: "#a5f3fc" },
   { key: "SANCTIONED", label: "9. Sanctioned", color: "#15803d", bg: "#f0fdf4", border: "#bbf7d0" },
   { key: "DISBURSEMENT", label: "10. Disbursement", color: "#0d9488", bg: "#f0fdfa", border: "#99f6e4" },
-  { key: "PDD", label: "11. PDD", color: "#d97706", bg: "#fffbeb", border: "#fde68a" },
-  { key: "OTC", label: "12. OTC", color: "#ea580c", bg: "#fff7ed", border: "#ffedd5" },
+  { key: "OTC", label: "11. OTC", color: "#ea580c", bg: "#fff7ed", border: "#ffedd5" },
+  { key: "CANCELLED", label: "12. Cancelled", color: "#475569", bg: "#f1f5f9", border: "#cbd5e1" },
   { key: "DISBURSED", label: "13. Final Disbursed", color: "#047857", bg: "#ecfdf5", border: "#a7f3d0" },
-  { key: "CANCELLED", label: "Cancelled", color: "#475569", bg: "#f1f5f9", border: "#cbd5e1" },
+  { key: "PDD", label: "14. PDD", color: "#d97706", bg: "#fffbeb", border: "#fde68a" },
+  { key: "ALL_PROCESS_COMPLETED", label: "15. All Process Completed", color: "#059669", bg: "#ecfdf5", border: "#6ee7b7" },
   { key: "REJECTED", label: "Rejected", color: "#b91c1c", bg: "#fef2f2", border: "#fecaca" },
 ];
 
@@ -115,6 +142,10 @@ const renderOpsStatusCell = ({
   onClick,
   pendingText = "Pending",
   completedText = "Completed",
+  app,
+  stageTitle = "Status Update",
+  onViewRemark,
+  onWhatsApp,
 }) => {
   const stUpper = String(status || "").toUpperCase();
   const isDone = stUpper === "COMPLETED" || stUpper === "RESOLVED";
@@ -161,8 +192,85 @@ const renderOpsStatusCell = ({
           </div>
         ) : null}
         {remark ? (
-          <div className="cc-status-cell-remark" title={remark}>
-            "{remark.length > 22 ? remark.slice(0, 22) + "…" : remark}"
+          <div
+            className="cc-status-cell-remark-wrap"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+              marginTop: 3,
+              background: "#f8fafc",
+              border: "1px solid #e2e8f0",
+              borderRadius: 6,
+              padding: "2px 5px",
+              maxWidth: "100%",
+              width: "100%",
+              boxSizing: "border-box",
+            }}
+          >
+            <div
+              className="cc-status-cell-remark"
+              onClick={(e) => {
+                if (onViewRemark) {
+                  e.stopPropagation();
+                  onViewRemark({
+                    title: `${stageTitle || label} Remark`,
+                    stage: stageTitle || label,
+                    remark,
+                    updatedAt,
+                    app,
+                  });
+                }
+              }}
+              title="Click to view full remark popup"
+              style={{
+                flex: 1,
+                fontSize: 11,
+                color: "#1e293b",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                fontWeight: 500,
+              }}
+            >
+              "{remark.length > 20 ? remark.slice(0, 20) + "…" : remark}"
+              <span style={{ color: "#2563eb", fontWeight: 700, marginLeft: 4, fontSize: 10 }}>View</span>
+            </div>
+            {app && (app.customer?.mobile || app.customerMobile) && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (onWhatsApp) {
+                    onWhatsApp({
+                      mobile: app.customer?.mobile || app.customerMobile,
+                      customerName: app.customer?.name,
+                      appNumber: app.applicationNumber,
+                      lenderName: app.lender?.name,
+                      stageTitle: stageTitle || label,
+                      remark,
+                    });
+                  }
+                }}
+                title="Direct Share this Remark / Query to Customer on WhatsApp"
+                style={{
+                  background: "#dcfce7",
+                  border: "1px solid #86efac",
+                  borderRadius: "50%",
+                  width: 20,
+                  height: 20,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  padding: 0,
+                  flexShrink: 0,
+                }}
+              >
+                <WhatsAppIcon size={12} />
+              </button>
+            )}
           </div>
         ) : null}
       </div>
@@ -622,6 +730,22 @@ export default function OperationsRedesign() {
     rejectedCount: 0,
     stageCounts: {},
   });
+
+  // Full Remark View Modal State
+  const [remarkViewModal, setRemarkViewModal] = useState(null); // { title, stage, remark, updatedAt, app }
+
+  // All Process Completed Modal State
+  const [allProcessModalApp, setAllProcessModalApp] = useState(null);
+  const [allProcessAmountInput, setAllProcessAmountInput] = useState("");
+  const [allProcessRemarkInput, setAllProcessRemarkInput] = useState("All processes completed successfully");
+  const [allProcessSubmitting, setAllProcessSubmitting] = useState(false);
+
+  const openAllProcessCompletedModal = (app) => {
+    setAllProcessModalApp(app);
+    const defAmt = app.disbursedAmount || app.sanctionedAmount || app.appliedAmount || "";
+    setAllProcessAmountInput(defAmt ? String(defAmt) : "");
+    setAllProcessRemarkInput(app.disbursedRemark || "All processes completed successfully");
+  };
 
   // Disbursal Confirmation Modal State
   const [disburseModalApp, setDisburseModalApp] = useState(null);
@@ -1644,15 +1768,11 @@ export default function OperationsRedesign() {
     }
 
     // Default: COMPLETED / DISBURSED
-    // BUSINESS RULE ENFORCEMENT: Both PDD and OTC must be RESOLVED!
-    const isPddResolved = (disburseModalApp.pddStatus || "").toUpperCase() === "RESOLVED";
+    // BUSINESS RULE: PDD is Post-Disbursement and does NOT block Final Disbursement.
     const isOtcResolved = (disburseModalApp.otcStatus || "").toUpperCase() === "RESOLVED";
-    if (!isPddResolved || !isOtcResolved) {
-      const blockers = [];
-      if (!isPddResolved) blockers.push("PDD is Pending");
-      if (!isOtcResolved) blockers.push("OTC is Pending");
-      toast.error(`Cannot Disburse: Case is Pending for Disbursement (${blockers.join(", ")}). Both PDD and OTC must be Resolved before Final Disbursement.`);
-      return;
+    if (!isOtcResolved) {
+      // Optional notification / non-blocking warning if needed, but allow disburse
+      console.log("Notice: Final disbursement proceeding while OTC is pending clearance.");
     }
 
     const amt = parseFloat(disburseAmountInput);
@@ -1692,6 +1812,67 @@ export default function OperationsRedesign() {
       toast.error(error.response?.data?.message || "Failed to disburse loan application");
     } finally {
       setDisburseSubmitting(false);
+    }
+  };
+
+  // Handler for "All Process Completed"
+  const handleAllProcessCompletedSubmit = async (e) => {
+    if (e) e.preventDefault();
+    if (!allProcessModalApp) return;
+
+    const amt = parseFloat(allProcessAmountInput);
+    if (isNaN(amt) || amt <= 0) {
+      toast.error("Please enter a valid completion / disbursed amount");
+      return;
+    }
+
+    setAllProcessSubmitting(true);
+    try {
+      const res = await axios.put(`${API_URL}/applications/${allProcessModalApp.id}/stage-status`, {
+        stageType: "ALL_PROCESS_COMPLETED",
+        status: "ALL_PROCESS_COMPLETED",
+        disbursedAmount: amt,
+        remark: allProcessRemarkInput.trim() || "All processes completed successfully",
+      });
+
+      toast.success(`Application #${allProcessModalApp.applicationNumber} & Lead marked ALL PROCESS COMPLETED! Payout generated.`);
+      const updated = res.data?.application;
+      if (updated) {
+        setApplications((prev) =>
+          prev.map((a) =>
+            a.id === updated.id
+              ? {
+                  ...a,
+                  ...updated,
+                  status: "DISBURSED",
+                  disbursementStatus: "COMPLETED",
+                  pddStatus: "RESOLVED",
+                  otcStatus: "RESOLVED",
+                  disbursedAmount: amt,
+                  disbursedRemark: allProcessRemarkInput.trim() || "All processes completed successfully",
+                }
+              : a
+          )
+        );
+      }
+      if (verificationApp && verificationApp.id === allProcessModalApp.id) {
+        setVerificationApp((prev) => ({
+          ...prev,
+          status: "DISBURSED",
+          disbursementStatus: "COMPLETED",
+          pddStatus: "RESOLVED",
+          otcStatus: "RESOLVED",
+          disbursedAmount: amt,
+          disbursedRemark: allProcessRemarkInput.trim() || "All processes completed successfully",
+        }));
+      }
+      setAllProcessModalApp(null);
+      fetchApplications(appCurrentPage);
+    } catch (error) {
+      console.error("All Process Completed error:", error);
+      toast.error(error.response?.data?.message || "Failed to mark all process completed");
+    } finally {
+      setAllProcessSubmitting(false);
     }
   };
 
@@ -2234,16 +2415,25 @@ export default function OperationsRedesign() {
       openDisbursementStageModal(app);
       return;
     }
-    if (newStatus === "PDD") {
-      openPddModal(app);
-      return;
-    }
     if (newStatus === "OTC") {
       openOtcModal(app);
       return;
     }
+    if (newStatus === "CANCELLED" || newStatus === "CANCEL") {
+      setDisburseModalApp(app);
+      setDisburseStatusInput("CANCEL");
+      return;
+    }
     if (newStatus === "DISBURSED") {
       initiateDisburseModal(app);
+      return;
+    }
+    if (newStatus === "PDD") {
+      openPddModal(app);
+      return;
+    }
+    if (newStatus === "ALL_PROCESS_COMPLETED" || newStatus === "COMPLETED") {
+      openAllProcessCompletedModal(app);
       return;
     }
 
@@ -2651,16 +2841,43 @@ export default function OperationsRedesign() {
                   <span className="cc-chip-cust">{q.application?.customer?.name || "Customer"}</span>
                 </div>
                 <p className="cc-chip-text">"{q.queryText}"</p>
-                <button
-                  type="button"
-                  className="cc-chip-answer-btn"
-                  onClick={() => {
-                    setReplyTargetQuery(q);
-                    setReplyResponseText("");
-                  }}
-                >
-                  Reply &amp; Resolve
-                </button>
+                <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 4 }}>
+                  <button
+                    type="button"
+                    className="cc-chip-answer-btn"
+                    onClick={() => {
+                      setReplyTargetQuery(q);
+                      setReplyResponseText("");
+                    }}
+                  >
+                    Reply &amp; Resolve
+                  </button>
+                  {q.application?.customer?.mobile && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const msg = `Dear ${q.application?.customer?.name || "Customer"}, regarding your loan application #${q.application?.applicationNumber || q.applicationId}: Clarification required by Banker - "${q.queryText}". Please provide the required information/documents.`;
+                        shareOnWhatsApp(q.application?.customer?.mobile, msg);
+                      }}
+                      style={{
+                        padding: "4px 8px",
+                        borderRadius: 6,
+                        border: "1px solid #86efac",
+                        background: "#f0fdf4",
+                        color: "#166534",
+                        fontSize: 11,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 4,
+                      }}
+                      title="Share query with customer on WhatsApp"
+                    >
+                      <WhatsAppIcon size={12} /> WhatsApp
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -2793,22 +3010,23 @@ export default function OperationsRedesign() {
                       <th>Technical</th>
                       <th>Sanction</th>
                       <th>Disbursement</th>
-                      <th>PDD</th>
                       <th>OTC</th>
+                      <th>Cancel</th>
                       <th>Final Disbursed</th>
+                      <th>PDD</th>
                       <th>Action</th>
                     </tr>
                   </thead>
                   <tbody>
                     {appsLoading ? (
                       <tr>
-                        <td colSpan={14} className="cc-report-empty">
+                        <td colSpan={15} className="cc-report-empty">
                           Loading loan applications...
                         </td>
                       </tr>
                     ) : applications.length === 0 ? (
                       <tr>
-                        <td colSpan={14} className="cc-report-empty">
+                        <td colSpan={15} className="cc-report-empty">
                           No loan applications match the selected filters.
                         </td>
                       </tr>
@@ -2940,6 +3158,10 @@ export default function OperationsRedesign() {
                             onClick: () => openQueryModal(app),
                             pendingText: "Pending",
                             completedText: "Completed",
+                            app,
+                            stageTitle: "Banker Query",
+                            onViewRemark: setRemarkViewModal,
+                            onWhatsApp: shareOnWhatsApp,
                           })}
 
                           {/* 7. Legal */}
@@ -2950,6 +3172,10 @@ export default function OperationsRedesign() {
                             onClick: () => openLegalModal(app),
                             pendingText: "Initiated",
                             completedText: "Resolved",
+                            app,
+                            stageTitle: "Legal Status",
+                            onViewRemark: setRemarkViewModal,
+                            onWhatsApp: shareOnWhatsApp,
                           })}
 
                           {/* 8. Technical */}
@@ -2960,6 +3186,10 @@ export default function OperationsRedesign() {
                             onClick: () => openTechnicalModal(app),
                             pendingText: "Initiated",
                             completedText: "Resolved",
+                            app,
+                            stageTitle: "Technical Status",
+                            onViewRemark: setRemarkViewModal,
+                            onWhatsApp: shareOnWhatsApp,
                           })}
 
                           {/* 9. Sanction */}
@@ -2986,9 +3216,9 @@ export default function OperationsRedesign() {
                                 </span>
                               )}
 
-                              {app.sanctionedAmount ? (
+                              {app.sanctionAmount || app.sanctionedAmount ? (
                                 <div style={{ fontSize: 11, fontWeight: 700, color: "#15803d", marginTop: 3 }}>
-                                  {currencyFormatter.format(app.sanctionedAmount)}
+                                  {currencyFormatter.format(app.sanctionAmount || app.sanctionedAmount)}
                                 </div>
                               ) : null}
 
@@ -3000,8 +3230,76 @@ export default function OperationsRedesign() {
                               )}
 
                               {app.sanctionRemark && (
-                                <div className="cc-status-cell-remark" title={app.sanctionRemark} style={{ marginTop: 2 }}>
-                                  "{app.sanctionRemark}"
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 4,
+                                    marginTop: 3,
+                                    background: "#f8fafc",
+                                    border: "1px solid #e2e8f0",
+                                    borderRadius: 6,
+                                    padding: "2px 5px",
+                                    maxWidth: "100%",
+                                  }}
+                                >
+                                  <div
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setRemarkViewModal({
+                                        title: "Sanction Remark",
+                                        stage: "Sanctioned",
+                                        remark: app.sanctionRemark,
+                                        updatedAt: app.sanctionUpdatedAt,
+                                        app,
+                                      });
+                                    }}
+                                    title="Click to view full remark popup"
+                                    style={{
+                                      flex: 1,
+                                      fontSize: 11,
+                                      color: "#1e293b",
+                                      cursor: "pointer",
+                                      whiteSpace: "nowrap",
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                    }}
+                                  >
+                                    "{app.sanctionRemark.length > 18 ? app.sanctionRemark.slice(0, 18) + "…" : app.sanctionRemark}"
+                                    <span style={{ color: "#2563eb", fontWeight: 700, marginLeft: 4, fontSize: 10 }}>View</span>
+                                  </div>
+                                  {(app.customer?.mobile || app.customerMobile) && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        shareOnWhatsApp({
+                                          mobile: app.customer?.mobile || app.customerMobile,
+                                          customerName: app.customer?.name,
+                                          appNumber: app.applicationNumber,
+                                          lenderName: app.lender?.name,
+                                          stageTitle: "Sanction Approved",
+                                          remark: app.sanctionRemark,
+                                        });
+                                      }}
+                                      title="Share Sanction Update to Customer on WhatsApp"
+                                      style={{
+                                        background: "#dcfce7",
+                                        border: "1px solid #86efac",
+                                        borderRadius: "50%",
+                                        width: 20,
+                                        height: 20,
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        cursor: "pointer",
+                                        padding: 0,
+                                        flexShrink: 0,
+                                      }}
+                                    >
+                                      <WhatsAppIcon size={12} />
+                                    </button>
+                                  )}
                                 </div>
                               )}
                             </div>
@@ -3045,22 +3343,80 @@ export default function OperationsRedesign() {
                               )}
 
                               {app.disbursedRemark && (
-                                <div className="cc-status-cell-remark" title={app.disbursedRemark} style={{ marginTop: 2 }}>
-                                  "{app.disbursedRemark}"
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 4,
+                                    marginTop: 3,
+                                    background: "#f8fafc",
+                                    border: "1px solid #e2e8f0",
+                                    borderRadius: 6,
+                                    padding: "2px 5px",
+                                    maxWidth: "100%",
+                                  }}
+                                >
+                                  <div
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setRemarkViewModal({
+                                        title: "Disbursement Remark",
+                                        stage: "Disbursement",
+                                        remark: app.disbursedRemark,
+                                        updatedAt: app.disbursedAt,
+                                        app,
+                                      });
+                                    }}
+                                    title="Click to view full remark popup"
+                                    style={{
+                                      flex: 1,
+                                      fontSize: 11,
+                                      color: "#1e293b",
+                                      cursor: "pointer",
+                                      whiteSpace: "nowrap",
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                    }}
+                                  >
+                                    "{app.disbursedRemark.length > 18 ? app.disbursedRemark.slice(0, 18) + "…" : app.disbursedRemark}"
+                                    <span style={{ color: "#2563eb", fontWeight: 700, marginLeft: 4, fontSize: 10 }}>View</span>
+                                  </div>
+                                  {(app.customer?.mobile || app.customerMobile) && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        shareOnWhatsApp({
+                                          mobile: app.customer?.mobile || app.customerMobile,
+                                          customerName: app.customer?.name,
+                                          appNumber: app.applicationNumber,
+                                          lenderName: app.lender?.name,
+                                          stageTitle: "Disbursement Update",
+                                          remark: app.disbursedRemark,
+                                        });
+                                      }}
+                                      title="Share Disbursement Update to Customer on WhatsApp"
+                                      style={{
+                                        background: "#dcfce7",
+                                        border: "1px solid #86efac",
+                                        borderRadius: "50%",
+                                        width: 20,
+                                        height: 20,
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        cursor: "pointer",
+                                        padding: 0,
+                                        flexShrink: 0,
+                                      }}
+                                    >
+                                      <WhatsAppIcon size={12} />
+                                    </button>
+                                  )}
                                 </div>
                               )}
                             </div>
                           </td>
-
-                          {/* 11. PDD */}
-                          {renderOpsStatusCell({
-                            status: app.pddStatus || "PENDING",
-                            updatedAt: app.pddUpdatedAt,
-                            remark: app.pddRemark,
-                            onClick: () => openPddModal(app),
-                            pendingText: "Pending",
-                            completedText: "Resolved",
-                          })}
 
                           {/* 11. OTC */}
                           {renderOpsStatusCell({
@@ -3070,9 +3426,13 @@ export default function OperationsRedesign() {
                             onClick: () => openOtcModal(app),
                             pendingText: "Pending",
                             completedText: "Resolved",
+                            app,
+                            stageTitle: "OTC Clearance",
+                            onViewRemark: setRemarkViewModal,
+                            onWhatsApp: shareOnWhatsApp,
                           })}
 
-                          {/* 12. Disbursement */}
+                          {/* 12. Cancel */}
                           <td onClick={(e) => e.stopPropagation()}>
                             {app.status === "CANCELLED" || app.disbursementStatus === "CANCELLED" ? (
                               <div className="cc-ops-status-cell-inner">
@@ -3085,12 +3445,44 @@ export default function OperationsRedesign() {
                                   <XCircle size={11} /> <strong>Cancelled ❌</strong>
                                 </span>
                                 {app.disbursedRemark && (
-                                  <div className="cc-status-cell-remark" title={app.disbursedRemark} style={{ marginTop: 2 }}>
-                                    "{app.disbursedRemark}"
+                                  <div
+                                    className="cc-status-cell-remark"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setRemarkViewModal({
+                                        title: "Cancellation Reason",
+                                        stage: "Cancelled",
+                                        remark: app.disbursedRemark,
+                                        updatedAt: app.updatedAt,
+                                        app,
+                                      });
+                                    }}
+                                    style={{ cursor: "pointer", fontSize: 11, color: "#991b1b", marginTop: 2 }}
+                                    title="Click to view full cancellation remark"
+                                  >
+                                    "{app.disbursedRemark.length > 18 ? app.disbursedRemark.slice(0, 18) + "…" : app.disbursedRemark}" <span style={{ color: "#2563eb", fontWeight: 700 }}>View</span>
                                   </div>
                                 )}
                               </div>
-                            ) : app.status === "DISBURSED" ? (
+                            ) : (
+                              <button
+                                type="button"
+                                className="cc-ops-action-btn"
+                                onClick={() => {
+                                  setDisburseModalApp(app);
+                                  setDisburseStatusInput("CANCEL");
+                                }}
+                                style={{ color: "#ef4444", borderColor: "#fca5a5", background: "#fef2f2", fontSize: 11, padding: "3px 8px" }}
+                                title="Click to cancel loan disbursement"
+                              >
+                                <XCircle size={11} /> Cancel
+                              </button>
+                            )}
+                          </td>
+
+                          {/* 13. Final Disbursed */}
+                          <td onClick={(e) => e.stopPropagation()}>
+                            {app.status === "DISBURSED" ? (
                               <div className="cc-ops-status-cell-inner">
                                 <span className="cc-disbursed-done-tag" title="Loan application is fully Disbursed">
                                   <CheckCircle2 size={12} /> Disbursed
@@ -3115,7 +3507,7 @@ export default function OperationsRedesign() {
                                   </div>
                                 )}
                               </div>
-                            ) : app.isPddResolved && app.isOtcResolved ? (
+                            ) : (
                               <button
                                 type="button"
                                 className="cc-ops-action-btn cc-btn-disburse"
@@ -3124,19 +3516,24 @@ export default function OperationsRedesign() {
                               >
                                 <CheckCircle2 size={12} /> Disburse
                               </button>
-                            ) : (
-                              <button
-                                type="button"
-                                className="cc-ops-action-btn cc-btn-disburse-locked"
-                                title="Disbursement locked until PDD & OTC are both Resolved (Click to review/manage)"
-                                onClick={() => initiateDisburseModal(app)}
-                              >
-                                <Clock size={12} /> Disburse (Locked)
-                              </button>
                             )}
                           </td>
 
-                          {/* 11. Actions */}
+                          {/* 14. PDD */}
+                          {renderOpsStatusCell({
+                            status: app.pddStatus || "PENDING",
+                            updatedAt: app.pddUpdatedAt,
+                            remark: app.pddRemark,
+                            onClick: () => openPddModal(app),
+                            pendingText: "Pending",
+                            completedText: "Resolved",
+                            app,
+                            stageTitle: "PDD (Post-Disbursement Documents)",
+                            onViewRemark: setRemarkViewModal,
+                            onWhatsApp: shareOnWhatsApp,
+                          })}
+
+                          {/* 15. Actions */}
                           <td onClick={(e) => e.stopPropagation()}>
                             <div style={{ display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap" }}>
                               <button
@@ -3155,6 +3552,16 @@ export default function OperationsRedesign() {
                                 onClick={() => openBankMailModal(app)}
                               >
                                 <Mail size={12} /> Email
+                              </button>
+
+                              <button
+                                type="button"
+                                className="cc-ops-action-btn"
+                                style={{ color: "#047857", borderColor: "#a7f3d0", background: "#ecfdf5", fontWeight: 700 }}
+                                title="All Process Completed (Mark Completed, Disburse & Sync Payout)"
+                                onClick={() => openAllProcessCompletedModal(app)}
+                              >
+                                <CheckCircle2 size={12} /> All Done
                               </button>
 
                               <button
@@ -3635,33 +4042,22 @@ export default function OperationsRedesign() {
                           </div>
                         )}
                         {verificationApp.disbursedRemark && (
-                          <div className="cc-status-cell-remark" style={{ marginTop: 2, maxWidth: "100%" }} title={verificationApp.disbursedRemark}>
-                            "{verificationApp.disbursedRemark}"
-                          </div>
-                        )}
-                      </div>
-
-                      {/* 7. PDD Status */}
-                      <div
-                        className="cc-drawer-status-card"
-                        onClick={() => openPddModal(verificationApp)}
-                        title="Click to update PDD Status & Remark"
-                      >
-                        <div className="cc-dsc-head">
-                          <span className="cc-dsc-title">📄 PDD</span>
-                          <span className={`cc-substatus-pill ${(verificationApp.pddStatus || "").toUpperCase() === "RESOLVED" ? "resolved" : "pending"}`}>
-                            <strong>{(verificationApp.pddStatus || "").toUpperCase() === "RESOLVED" ? "Resolved ✓" : "Pending ⏳"}</strong>
-                          </span>
-                        </div>
-                        {verificationApp.pddUpdatedAt && (
-                          <div className="cc-status-cell-time" style={{ marginTop: 2 }}>
-                            <Clock size={10} />
-                            <span>{new Date(verificationApp.pddUpdatedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true })}</span>
-                          </div>
-                        )}
-                        {verificationApp.pddRemark && (
-                          <div className="cc-status-cell-remark" style={{ marginTop: 2, maxWidth: "100%" }} title={verificationApp.pddRemark}>
-                            "{verificationApp.pddRemark}"
+                          <div
+                            className="cc-status-cell-remark"
+                            style={{ marginTop: 2, maxWidth: "100%", cursor: "pointer" }}
+                            title={verificationApp.disbursedRemark}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setRemarkViewModal({
+                                title: "Disbursement Remark",
+                                stage: "Disbursement",
+                                remark: verificationApp.disbursedRemark,
+                                updatedAt: verificationApp.disbursedAt,
+                                app: verificationApp,
+                              });
+                            }}
+                          >
+                            "{verificationApp.disbursedRemark}" <span style={{ color: "#2563eb", fontWeight: 700 }}>View</span>
                           </div>
                         )}
                       </div>
@@ -3685,13 +4081,50 @@ export default function OperationsRedesign() {
                           </div>
                         )}
                         {verificationApp.otcRemark && (
-                          <div className="cc-status-cell-remark" style={{ marginTop: 2, maxWidth: "100%" }} title={verificationApp.otcRemark}>
-                            "{verificationApp.otcRemark}"
+                          <div
+                            className="cc-status-cell-remark"
+                            style={{ marginTop: 2, maxWidth: "100%", cursor: "pointer" }}
+                            title={verificationApp.otcRemark}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setRemarkViewModal({
+                                title: "OTC Requirement Remark",
+                                stage: "OTC",
+                                remark: verificationApp.otcRemark,
+                                updatedAt: verificationApp.otcUpdatedAt,
+                                app: verificationApp,
+                              });
+                            }}
+                          >
+                            "{verificationApp.otcRemark}" <span style={{ color: "#2563eb", fontWeight: 700 }}>View</span>
                           </div>
                         )}
                       </div>
 
-                      {/* 8. Final Disbursement */}
+                      {/* 8. Cancel Status */}
+                      <div
+                        className="cc-drawer-status-card"
+                        onClick={() => {
+                          setDisburseModalApp(verificationApp);
+                          setDisburseStatusInput("CANCEL");
+                        }}
+                        title="Click to view or cancel disbursement"
+                        style={{ borderLeftColor: verificationApp.status === "CANCELLED" || verificationApp.disbursementStatus === "CANCELLED" ? "#ef4444" : "#e2e8f0" }}
+                      >
+                        <div className="cc-dsc-head">
+                          <span className="cc-dsc-title">❌ Cancel State</span>
+                          <span className={`cc-substatus-pill ${verificationApp.status === "CANCELLED" || verificationApp.disbursementStatus === "CANCELLED" ? "rejected" : "not-started"}`}>
+                            <strong>{verificationApp.status === "CANCELLED" || verificationApp.disbursementStatus === "CANCELLED" ? "Cancelled ❌" : "Active Case"}</strong>
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>
+                          {verificationApp.status === "CANCELLED" || verificationApp.disbursementStatus === "CANCELLED"
+                            ? verificationApp.disbursedRemark || "Case Cancelled"
+                            : "Click to Cancel"}
+                        </div>
+                      </div>
+
+                      {/* 9. Final Disbursement */}
                       <div
                         className="cc-drawer-status-card"
                         onClick={() => initiateDisburseModal(verificationApp)}
@@ -3719,6 +4152,63 @@ export default function OperationsRedesign() {
                           {verificationApp.status === "CANCELLED" || verificationApp.disbursementStatus === "CANCELLED"
                             ? verificationApp.disbursedRemark || "Disbursement Cancelled"
                             : verificationApp.disbursedAmount ? `₹${Number(verificationApp.disbursedAmount).toLocaleString("en-IN")}` : "Click to Manage"}
+                        </div>
+                      </div>
+
+                      {/* 10. PDD Status */}
+                      <div
+                        className="cc-drawer-status-card"
+                        onClick={() => openPddModal(verificationApp)}
+                        title="Click to update PDD Status & Remark"
+                      >
+                        <div className="cc-dsc-head">
+                          <span className="cc-dsc-title">📄 PDD</span>
+                          <span className={`cc-substatus-pill ${(verificationApp.pddStatus || "").toUpperCase() === "RESOLVED" ? "resolved" : "pending"}`}>
+                            <strong>{(verificationApp.pddStatus || "").toUpperCase() === "RESOLVED" ? "Resolved ✓" : "Pending ⏳"}</strong>
+                          </span>
+                        </div>
+                        {verificationApp.pddUpdatedAt && (
+                          <div className="cc-status-cell-time" style={{ marginTop: 2 }}>
+                            <Clock size={10} />
+                            <span>{new Date(verificationApp.pddUpdatedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true })}</span>
+                          </div>
+                        )}
+                        {verificationApp.pddRemark && (
+                          <div
+                            className="cc-status-cell-remark"
+                            style={{ marginTop: 2, maxWidth: "100%", cursor: "pointer" }}
+                            title={verificationApp.pddRemark}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setRemarkViewModal({
+                                title: "PDD Requirement Remark",
+                                stage: "PDD",
+                                remark: verificationApp.pddRemark,
+                                updatedAt: verificationApp.pddUpdatedAt,
+                                app: verificationApp,
+                              });
+                            }}
+                          >
+                            "{verificationApp.pddRemark}" <span style={{ color: "#2563eb", fontWeight: 700 }}>View</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 11. All Process Completed Card */}
+                      <div
+                        className="cc-drawer-status-card"
+                        onClick={() => openAllProcessCompletedModal(verificationApp)}
+                        title="Click to mark All Processes Completed and sync Lead & Payout"
+                        style={{ borderLeftColor: "#059669", background: "#f0fdf4" }}
+                      >
+                        <div className="cc-dsc-head">
+                          <span className="cc-dsc-title" style={{ color: "#065f46" }}>✅ All Process Done</span>
+                          <span className="cc-substatus-pill resolved">
+                            <strong>Complete &amp; Payout</strong>
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 11, color: "#047857", marginTop: 2 }}>
+                          Mark Lead Complete + Payout Record
                         </div>
                       </div>
                     </div>
@@ -4046,14 +4536,41 @@ export default function OperationsRedesign() {
                             </p>
 
                             {q.responseText ? (
-                              <div className="cc-qbox-ans">
-                                <strong>Operations Answer:</strong> {q.responseText}
-                                {q.resolvedByOps?.name && (
-                                  <small> — Answered by {q.resolvedByOps.name}</small>
+                              <div className="cc-qbox-ans" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+                                <div>
+                                  <strong>Operations Answer:</strong> {q.responseText}
+                                  {q.resolvedByOps?.name && (
+                                    <small> — Answered by {q.resolvedByOps.name}</small>
+                                  )}
+                                </div>
+                                {verificationApp.customer?.mobile && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const msg = `Dear ${verificationApp.customer?.name || "Customer"}, regarding your loan application #${verificationApp.applicationNumber}: Banker query "${q.queryText}" - Response: "${q.responseText}".`;
+                                      shareOnWhatsApp(verificationApp.customer?.mobile, msg);
+                                    }}
+                                    style={{
+                                      padding: "4px 8px",
+                                      borderRadius: 6,
+                                      border: "1px solid #86efac",
+                                      background: "#f0fdf4",
+                                      color: "#166534",
+                                      fontSize: 11,
+                                      fontWeight: 600,
+                                      cursor: "pointer",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: 4,
+                                    }}
+                                    title="Share resolution on WhatsApp"
+                                  >
+                                    <WhatsAppIcon size={12} /> WhatsApp
+                                  </button>
                                 )}
                               </div>
                             ) : (
-                              <div className="cc-qbox-reply-action">
+                              <div className="cc-qbox-reply-action" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                                 <button
                                   type="button"
                                   className="cc-qbox-answer-btn"
@@ -4064,6 +4581,31 @@ export default function OperationsRedesign() {
                                 >
                                   Answer &amp; Resolve Query
                                 </button>
+                                {verificationApp.customer?.mobile && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const msg = `Dear ${verificationApp.customer?.name || "Customer"}, regarding your loan application #${verificationApp.applicationNumber} with ${verificationApp.lender?.name || "the bank"}: Clarification requested by Banker - "${q.queryText}". Please provide the required information/documents as soon as possible.`;
+                                      shareOnWhatsApp(verificationApp.customer?.mobile, msg);
+                                    }}
+                                    style={{
+                                      padding: "6px 12px",
+                                      borderRadius: 6,
+                                      border: "1px solid #86efac",
+                                      background: "#f0fdf4",
+                                      color: "#166534",
+                                      fontSize: 12,
+                                      fontWeight: 600,
+                                      cursor: "pointer",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: 5,
+                                    }}
+                                    title="Share query with customer on WhatsApp"
+                                  >
+                                    <WhatsAppIcon size={14} /> WhatsApp Customer
+                                  </button>
+                                )}
                               </div>
                             )}
                           </div>
@@ -5078,29 +5620,28 @@ export default function OperationsRedesign() {
                   {(() => {
                     const isPddOk = (disburseModalApp.pddStatus || "").toUpperCase() === "RESOLVED";
                     const isOtcOk = (disburseModalApp.otcStatus || "").toUpperCase() === "RESOLVED";
-                    const canDisburse = isPddOk && isOtcOk;
 
                     return (
                       <div style={{
                         marginBottom: 12,
                         padding: "10px 14px",
                         borderRadius: 10,
-                        background: canDisburse ? "#ecfdf5" : "#fffbeb",
-                        border: canDisburse ? "1px solid #a7f3d0" : "1px solid #fde68a"
+                        background: "#ecfdf5",
+                        border: "1px solid #a7f3d0"
                       }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                          <span style={{ fontSize: 11.5, fontWeight: 700, color: canDisburse ? "#065f46" : "#92400e", textTransform: "uppercase", letterSpacing: 0.5 }}>
-                            Disbursement Gatekeeping Rules
+                          <span style={{ fontSize: 11.5, fontWeight: 700, color: "#065f46", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                            Disbursement Status Check
                           </span>
                           <span style={{
                             fontSize: 10.5,
                             fontWeight: 700,
                             padding: "2px 8px",
                             borderRadius: 12,
-                            background: canDisburse ? "#059669" : "#d97706",
+                            background: "#059669",
                             color: "#fff"
                           }}>
-                            {canDisburse ? "✓ Approved to Disburse" : "⏳ Pending Requirements"}
+                            ✓ Ready for Final Disbursal
                           </span>
                         </div>
 
@@ -5108,34 +5649,32 @@ export default function OperationsRedesign() {
                           <div style={{
                             padding: "6px 9px",
                             borderRadius: 7,
-                            background: isPddOk ? "#d1fae5" : "#fee2e2",
-                            border: isPddOk ? "1px solid #6ee7b7" : "1px solid #fca5a5",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between"
-                          }}>
-                            <span><strong>PDD:</strong> {disburseModalApp.pddStatus || "Pending"}</span>
-                            <span>{isPddOk ? "✓ Resolved" : "❌ Pending"}</span>
-                          </div>
-                          <div style={{
-                            padding: "6px 9px",
-                            borderRadius: 7,
-                            background: isOtcOk ? "#d1fae5" : "#fee2e2",
-                            border: isOtcOk ? "1px solid #6ee7b7" : "1px solid #fca5a5",
+                            background: isOtcOk ? "#d1fae5" : "#fef3c7",
+                            border: isOtcOk ? "1px solid #6ee7b7" : "1px solid #fde68a",
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "space-between"
                           }}>
                             <span><strong>OTC:</strong> {disburseModalApp.otcStatus || "Pending"}</span>
-                            <span>{isOtcOk ? "✓ Resolved" : "❌ Pending"}</span>
+                            <span>{isOtcOk ? "✓ Resolved" : "⏳ Pending"}</span>
+                          </div>
+                          <div style={{
+                            padding: "6px 9px",
+                            borderRadius: 7,
+                            background: isPddOk ? "#d1fae5" : "#eff6ff",
+                            border: isPddOk ? "1px solid #6ee7b7" : "1px solid #bfdbfe",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between"
+                          }}>
+                            <span><strong>PDD (Post-Disb.):</strong> {disburseModalApp.pddStatus || "Pending"}</span>
+                            <span>{isPddOk ? "✓ Collected" : "📄 Post Disb."}</span>
                           </div>
                         </div>
 
-                        {!canDisburse && (
-                          <p style={{ margin: "6px 0 0 0", fontSize: 11, color: "#b45309", lineHeight: 1.35 }}>
-                            🔒 <strong>Case is Pending for Disbursement:</strong> Final disbursement cannot be submitted until both PDD and OTC are marked as <strong>Resolved</strong>. Please resolve both stages before proceeding.
-                          </p>
-                        )}
+                        <p style={{ margin: "6px 0 0 0", fontSize: 11, color: "#047857", lineHeight: 1.35 }}>
+                          ℹ️ <strong>PDD Unblocked:</strong> Post-Disbursement Documents are collected after disbursement. Final disbursement can be executed immediately.
+                        </p>
                       </div>
                     );
                   })()}
@@ -5215,88 +5754,98 @@ export default function OperationsRedesign() {
               )}
 
               {/* Modal Actions */}
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: "auto", borderTop: "1px solid #f1f5f9", paddingTop: 10 }}>
-                <button
-                  type="button"
-                  disabled={disburseSubmitting}
-                  onClick={() => setDisburseModalApp(null)}
-                  style={{
-                    padding: "8px 16px",
-                    borderRadius: 8,
-                    border: "1px solid #cbd5e1",
-                    background: "#f8fafc",
-                    color: "#475569",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={
-                    disburseSubmitting ||
-                    (disburseStatusInput === "COMPLETED" && (
-                      (disburseModalApp.pddStatus || "").toUpperCase() !== "RESOLVED" ||
-                      (disburseModalApp.otcStatus || "").toUpperCase() !== "RESOLVED"
-                    ))
-                  }
-                  style={{
-                    padding: "10px 22px",
-                    borderRadius: 9,
-                    border: "none",
-                    background:
-                      disburseStatusInput === "CANCEL"
-                        ? "#dc2626"
-                        : disburseStatusInput === "PENDING"
-                        ? "#d97706"
-                        : (disburseModalApp.pddStatus || "").toUpperCase() === "RESOLVED" &&
-                          (disburseModalApp.otcStatus || "").toUpperCase() === "RESOLVED"
-                        ? "#047857"
-                        : "#94a3b8",
-                    color: "#fff",
-                    fontSize: 13,
-                    fontWeight: 700,
-                    cursor:
-                      disburseStatusInput === "CANCEL" || disburseStatusInput === "PENDING"
-                        ? "pointer"
-                        : (disburseModalApp.pddStatus || "").toUpperCase() === "RESOLVED" &&
-                          (disburseModalApp.otcStatus || "").toUpperCase() === "RESOLVED"
-                        ? "pointer"
-                        : "not-allowed",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 8,
-                    boxShadow:
-                      disburseStatusInput === "CANCEL"
-                        ? "0 2px 6px rgba(220, 38, 38, 0.35)"
-                        : disburseStatusInput === "PENDING"
-                        ? "0 2px 6px rgba(217, 119, 6, 0.35)"
-                        : (disburseModalApp.pddStatus || "").toUpperCase() === "RESOLVED" &&
-                          (disburseModalApp.otcStatus || "").toUpperCase() === "RESOLVED"
-                        ? "0 2px 6px rgba(4, 120, 87, 0.35)"
-                        : "none",
-                  }}
-                >
-                  {disburseSubmitting ? (
-                    <>
-                      <RefreshCw size={14} className="cc-spin" /> Processing...
-                    </>
-                  ) : disburseStatusInput === "CANCEL" ? (
-                    <>
-                      <XCircle size={16} /> Confirm Cancellation
-                    </>
-                  ) : disburseStatusInput === "PENDING" ? (
-                    <>
-                      <Clock size={16} /> Save Pending Status
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle2 size={16} /> Confirm &amp; Disburse
-                    </>
-                  )}
-                </button>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "auto", borderTop: "1px solid #f1f5f9", paddingTop: 12, gap: 10 }}>
+                {disburseModalApp.customer?.mobile ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const msg = `Dear ${disburseModalApp.customer?.name || "Customer"}, your loan application #${disburseModalApp.applicationNumber} with ${disburseModalApp.lender?.name || "the bank"} is approved for disbursement. Disbursed Amount: ${currencyFormatter.format(parseFloat(disburseAmountInput) || disburseModalApp.sanctionedAmount || disburseModalApp.appliedAmount || 0)}.`;
+                      shareOnWhatsApp(disburseModalApp.customer?.mobile, msg);
+                    }}
+                    style={{
+                      padding: "8px 14px",
+                      borderRadius: 8,
+                      border: "1px solid #86efac",
+                      background: "#f0fdf4",
+                      color: "#166534",
+                      fontSize: 12.5,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                    title="Share disbursement update on WhatsApp"
+                  >
+                    <WhatsAppIcon size={16} /> WhatsApp Update
+                  </button>
+                ) : <div />}
+
+                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  <button
+                    type="button"
+                    disabled={disburseSubmitting}
+                    onClick={() => setDisburseModalApp(null)}
+                    style={{
+                      padding: "8px 16px",
+                      borderRadius: 8,
+                      border: "1px solid #cbd5e1",
+                      background: "#f8fafc",
+                      color: "#475569",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={disburseSubmitting}
+                    style={{
+                      padding: "10px 22px",
+                      borderRadius: 9,
+                      border: "none",
+                      background:
+                        disburseStatusInput === "CANCEL"
+                          ? "#dc2626"
+                          : disburseStatusInput === "PENDING"
+                          ? "#d97706"
+                          : "#047857",
+                      color: "#fff",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                      boxShadow:
+                        disburseStatusInput === "CANCEL"
+                          ? "0 2px 6px rgba(220, 38, 38, 0.35)"
+                          : disburseStatusInput === "PENDING"
+                          ? "0 2px 6px rgba(217, 119, 6, 0.35)"
+                          : "0 2px 6px rgba(4, 120, 87, 0.35)",
+                    }}
+                  >
+                    {disburseSubmitting ? (
+                      <>
+                        <RefreshCw size={14} className="cc-spin" /> Processing...
+                      </>
+                    ) : disburseStatusInput === "CANCEL" ? (
+                      <>
+                        <XCircle size={16} /> Confirm Cancellation
+                      </>
+                    ) : disburseStatusInput === "PENDING" ? (
+                      <>
+                        <Clock size={16} /> Save Pending Status
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 size={16} /> Confirm &amp; Disburse
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             </form>
           </div>
@@ -6114,43 +6663,72 @@ export default function OperationsRedesign() {
               </div>
 
               {/* Actions */}
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-                <button
-                  type="button"
-                  disabled={querySubmitting}
-                  onClick={() => setQueryModalApp(null)}
-                  style={{
-                    padding: "9px 16px",
-                    borderRadius: 8,
-                    border: "1px solid #cbd5e1",
-                    background: "#f8fafc",
-                    color: "#475569",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={querySubmitting}
-                  style={{
-                    padding: "9px 20px",
-                    borderRadius: 8,
-                    border: "none",
-                    background: "#d97706",
-                    color: "#fff",
-                    fontSize: 13,
-                    fontWeight: 700,
-                    cursor: "pointer",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                  }}
-                >
-                  {querySubmitting ? <RefreshCw size={14} className="cc-spin" /> : <CheckCircle2 size={14} />} Save Query Status
-                </button>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                {queryModalApp.customer?.mobile ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const text = queryRemarkInput.trim() || queryModalApp.opsQueryRemark || "Clarification required on your loan application.";
+                      const msg = `Dear ${queryModalApp.customer?.name || "Customer"}, regarding your loan application #${queryModalApp.applicationNumber} with ${queryModalApp.lender?.name || "the bank"}: Banker Query - "${text}". Please provide the necessary details.`;
+                      shareOnWhatsApp(queryModalApp.customer?.mobile, msg);
+                    }}
+                    style={{
+                      padding: "8px 14px",
+                      borderRadius: 8,
+                      border: "1px solid #86efac",
+                      background: "#f0fdf4",
+                      color: "#166534",
+                      fontSize: 12.5,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                    title="Share query with customer on WhatsApp"
+                  >
+                    <WhatsAppIcon size={16} /> WhatsApp Query
+                  </button>
+                ) : <div />}
+
+                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  <button
+                    type="button"
+                    disabled={querySubmitting}
+                    onClick={() => setQueryModalApp(null)}
+                    style={{
+                      padding: "9px 16px",
+                      borderRadius: 8,
+                      border: "1px solid #cbd5e1",
+                      background: "#f8fafc",
+                      color: "#475569",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={querySubmitting}
+                    style={{
+                      padding: "9px 20px",
+                      borderRadius: 8,
+                      border: "none",
+                      background: "#d97706",
+                      color: "#fff",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    {querySubmitting ? <RefreshCw size={14} className="cc-spin" /> : <CheckCircle2 size={14} />} Save Query Status
+                  </button>
+                </div>
               </div>
             </form>
           </div>
@@ -6263,43 +6841,72 @@ export default function OperationsRedesign() {
               </div>
 
               {/* Actions */}
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-                <button
-                  type="button"
-                  disabled={legalSubmitting}
-                  onClick={() => setLegalModalApp(null)}
-                  style={{
-                    padding: "9px 16px",
-                    borderRadius: 8,
-                    border: "1px solid #cbd5e1",
-                    background: "#f8fafc",
-                    color: "#475569",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={legalSubmitting}
-                  style={{
-                    padding: "9px 20px",
-                    borderRadius: 8,
-                    border: "none",
-                    background: "#2563eb",
-                    color: "#fff",
-                    fontSize: 13,
-                    fontWeight: 700,
-                    cursor: "pointer",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                  }}
-                >
-                  {legalSubmitting ? <RefreshCw size={14} className="cc-spin" /> : <CheckCircle2 size={14} />} Save Legal Status
-                </button>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                {legalModalApp.customer?.mobile ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const text = legalRemarkInput.trim() || legalModalApp.legalRemark || legalStatusInput;
+                      const msg = `Dear ${legalModalApp.customer?.name || "Customer"}, regarding your loan application #${legalModalApp.applicationNumber} with ${legalModalApp.lender?.name || "the bank"}: Legal verification update - "${text}".`;
+                      shareOnWhatsApp(legalModalApp.customer?.mobile, msg);
+                    }}
+                    style={{
+                      padding: "8px 14px",
+                      borderRadius: 8,
+                      border: "1px solid #86efac",
+                      background: "#f0fdf4",
+                      color: "#166534",
+                      fontSize: 12.5,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                    title="Share legal update with customer on WhatsApp"
+                  >
+                    <WhatsAppIcon size={16} /> WhatsApp Legal
+                  </button>
+                ) : <div />}
+
+                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  <button
+                    type="button"
+                    disabled={legalSubmitting}
+                    onClick={() => setLegalModalApp(null)}
+                    style={{
+                      padding: "9px 16px",
+                      borderRadius: 8,
+                      border: "1px solid #cbd5e1",
+                      background: "#f8fafc",
+                      color: "#475569",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={legalSubmitting}
+                    style={{
+                      padding: "9px 20px",
+                      borderRadius: 8,
+                      border: "none",
+                      background: "#2563eb",
+                      color: "#fff",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    {legalSubmitting ? <RefreshCw size={14} className="cc-spin" /> : <CheckCircle2 size={14} />} Save Legal Status
+                  </button>
+                </div>
               </div>
             </form>
           </div>
@@ -6412,43 +7019,72 @@ export default function OperationsRedesign() {
               </div>
 
               {/* Actions */}
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-                <button
-                  type="button"
-                  disabled={technicalSubmitting}
-                  onClick={() => setTechnicalModalApp(null)}
-                  style={{
-                    padding: "9px 16px",
-                    borderRadius: 8,
-                    border: "1px solid #cbd5e1",
-                    background: "#f8fafc",
-                    color: "#475569",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={technicalSubmitting}
-                  style={{
-                    padding: "9px 20px",
-                    borderRadius: 8,
-                    border: "none",
-                    background: "#0891b2",
-                    color: "#fff",
-                    fontSize: 13,
-                    fontWeight: 700,
-                    cursor: "pointer",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                  }}
-                >
-                  {technicalSubmitting ? <RefreshCw size={14} className="cc-spin" /> : <CheckCircle2 size={14} />} Save Technical Status
-                </button>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                {technicalModalApp.customer?.mobile ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const text = techRemarkInput.trim() || technicalModalApp.technicalRemark || techStatusInput;
+                      const msg = `Dear ${technicalModalApp.customer?.name || "Customer"}, regarding your loan application #${technicalModalApp.applicationNumber} with ${technicalModalApp.lender?.name || "the bank"}: Technical verification update - "${text}".`;
+                      shareOnWhatsApp(technicalModalApp.customer?.mobile, msg);
+                    }}
+                    style={{
+                      padding: "8px 14px",
+                      borderRadius: 8,
+                      border: "1px solid #86efac",
+                      background: "#f0fdf4",
+                      color: "#166534",
+                      fontSize: 12.5,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                    title="Share technical update with customer on WhatsApp"
+                  >
+                    <WhatsAppIcon size={16} /> WhatsApp Technical
+                  </button>
+                ) : <div />}
+
+                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  <button
+                    type="button"
+                    disabled={technicalSubmitting}
+                    onClick={() => setTechnicalModalApp(null)}
+                    style={{
+                      padding: "9px 16px",
+                      borderRadius: 8,
+                      border: "1px solid #cbd5e1",
+                      background: "#f8fafc",
+                      color: "#475569",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={technicalSubmitting}
+                    style={{
+                      padding: "9px 20px",
+                      borderRadius: 8,
+                      border: "none",
+                      background: "#0891b2",
+                      color: "#fff",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    {technicalSubmitting ? <RefreshCw size={14} className="cc-spin" /> : <CheckCircle2 size={14} />} Save Technical Status
+                  </button>
+                </div>
               </div>
             </form>
           </div>
@@ -6560,43 +7196,72 @@ export default function OperationsRedesign() {
               </div>
 
               {/* Actions */}
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-                <button
-                  type="button"
-                  disabled={pddSubmitting}
-                  onClick={() => setPddModalApp(null)}
-                  style={{
-                    padding: "9px 16px",
-                    borderRadius: 8,
-                    border: "1px solid #cbd5e1",
-                    background: "#f8fafc",
-                    color: "#475569",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={pddSubmitting}
-                  style={{
-                    padding: "9px 20px",
-                    borderRadius: 8,
-                    border: "none",
-                    background: "#7c3aed",
-                    color: "#fff",
-                    fontSize: 13,
-                    fontWeight: 700,
-                    cursor: "pointer",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                  }}
-                >
-                  {pddSubmitting ? <RefreshCw size={14} className="cc-spin" /> : <CheckCircle2 size={14} />} Save PDD Status
-                </button>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                {pddModalApp.customer?.mobile ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const text = pddRemarkInput.trim() || pddModalApp.pddRemark || pddStatusInput;
+                      const msg = `Dear ${pddModalApp.customer?.name || "Customer"}, regarding your loan application #${pddModalApp.applicationNumber} with ${pddModalApp.lender?.name || "the bank"}: Post-Disbursement Document (PDD) update - "${text}".`;
+                      shareOnWhatsApp(pddModalApp.customer?.mobile, msg);
+                    }}
+                    style={{
+                      padding: "8px 14px",
+                      borderRadius: 8,
+                      border: "1px solid #86efac",
+                      background: "#f0fdf4",
+                      color: "#166534",
+                      fontSize: 12.5,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                    title="Share PDD update with customer on WhatsApp"
+                  >
+                    <WhatsAppIcon size={16} /> WhatsApp PDD
+                  </button>
+                ) : <div />}
+
+                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  <button
+                    type="button"
+                    disabled={pddSubmitting}
+                    onClick={() => setPddModalApp(null)}
+                    style={{
+                      padding: "9px 16px",
+                      borderRadius: 8,
+                      border: "1px solid #cbd5e1",
+                      background: "#f8fafc",
+                      color: "#475569",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={pddSubmitting}
+                    style={{
+                      padding: "9px 20px",
+                      borderRadius: 8,
+                      border: "none",
+                      background: "#7c3aed",
+                      color: "#fff",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    {pddSubmitting ? <RefreshCw size={14} className="cc-spin" /> : <CheckCircle2 size={14} />} Save PDD Status
+                  </button>
+                </div>
               </div>
             </form>
           </div>
@@ -6708,43 +7373,72 @@ export default function OperationsRedesign() {
               </div>
 
               {/* Actions */}
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-                <button
-                  type="button"
-                  disabled={otcSubmitting}
-                  onClick={() => setOtcModalApp(null)}
-                  style={{
-                    padding: "9px 16px",
-                    borderRadius: 8,
-                    border: "1px solid #cbd5e1",
-                    background: "#f8fafc",
-                    color: "#475569",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={otcSubmitting}
-                  style={{
-                    padding: "9px 20px",
-                    borderRadius: 8,
-                    border: "none",
-                    background: "#d97706",
-                    color: "#fff",
-                    fontSize: 13,
-                    fontWeight: 700,
-                    cursor: "pointer",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                  }}
-                >
-                  {otcSubmitting ? <RefreshCw size={14} className="cc-spin" /> : <CheckCircle2 size={14} />} Save OTC Status
-                </button>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                {otcModalApp.customer?.mobile ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const text = otcRemarkInput.trim() || otcModalApp.otcRemark || otcStatusInput;
+                      const msg = `Dear ${otcModalApp.customer?.name || "Customer"}, regarding your loan application #${otcModalApp.applicationNumber} with ${otcModalApp.lender?.name || "the bank"}: One-Time Clearance (OTC) update - "${text}".`;
+                      shareOnWhatsApp(otcModalApp.customer?.mobile, msg);
+                    }}
+                    style={{
+                      padding: "8px 14px",
+                      borderRadius: 8,
+                      border: "1px solid #86efac",
+                      background: "#f0fdf4",
+                      color: "#166534",
+                      fontSize: 12.5,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                    title="Share OTC update with customer on WhatsApp"
+                  >
+                    <WhatsAppIcon size={16} /> WhatsApp OTC
+                  </button>
+                ) : <div />}
+
+                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  <button
+                    type="button"
+                    disabled={otcSubmitting}
+                    onClick={() => setOtcModalApp(null)}
+                    style={{
+                      padding: "9px 16px",
+                      borderRadius: 8,
+                      border: "1px solid #cbd5e1",
+                      background: "#f8fafc",
+                      color: "#475569",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={otcSubmitting}
+                    style={{
+                      padding: "9px 20px",
+                      borderRadius: 8,
+                      border: "none",
+                      background: "#d97706",
+                      color: "#fff",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    {otcSubmitting ? <RefreshCw size={14} className="cc-spin" /> : <CheckCircle2 size={14} />} Save OTC Status
+                  </button>
+                </div>
               </div>
             </form>
           </div>
@@ -6818,10 +7512,12 @@ export default function OperationsRedesign() {
                   <option value="LEGAL">7. Legal</option>
                   <option value="TECHNICAL">8. Technical</option>
                   <option value="SANCTIONED">9. Sanctioned</option>
-                  <option value="DISBURSEMENT">10. Disbursement</option>
-                  <option value="PDD">11. PDD (Pending / Resolved)</option>
-                  <option value="OTC">12. OTC (Pending / Resolved)</option>
+                  <option value="DISBURSEMENT">10. Intermediate Disbursement</option>
+                  <option value="OTC">11. OTC (Pending / Resolved)</option>
+                  <option value="CANCELLED">12. Cancel (Cancelled)</option>
                   <option value="DISBURSED">13. Final Disbursed</option>
+                  <option value="PDD">14. PDD (Post-Disb. Documents)</option>
+                  <option value="ALL_PROCESS_COMPLETED">15. All Process Completed</option>
                   <option value="REJECTED">❌ Rejected</option>
                 </select>
               </div>
@@ -6853,16 +7549,12 @@ export default function OperationsRedesign() {
                   marginBottom: 16,
                   padding: "10px 14px",
                   borderRadius: 8,
-                  background: ((stageModalApp.pddStatus || "").toUpperCase() === "RESOLVED" && (stageModalApp.otcStatus || "").toUpperCase() === "RESOLVED") ? "#ecfdf5" : "#fef2f2",
-                  border: ((stageModalApp.pddStatus || "").toUpperCase() === "RESOLVED" && (stageModalApp.otcStatus || "").toUpperCase() === "RESOLVED") ? "1px solid #6ee7b7" : "1px solid #fecaca",
+                  background: "#ecfdf5",
+                  border: "1px solid #6ee7b7",
                   fontSize: 12,
-                  color: ((stageModalApp.pddStatus || "").toUpperCase() === "RESOLVED" && (stageModalApp.otcStatus || "").toUpperCase() === "RESOLVED") ? "#065f46" : "#991b1b",
+                  color: "#065f46",
                 }}>
-                  {((stageModalApp.pddStatus || "").toUpperCase() === "RESOLVED" && (stageModalApp.otcStatus || "").toUpperCase() === "RESOLVED") ? (
-                    <span>✓ Both PDD and OTC are Resolved. You may mark this case as Disbursed.</span>
-                  ) : (
-                    <span>⚠️ <strong>Notice:</strong> Final Disbursed status is blocked because PDD or OTC is still Pending. Please resolve PDD and OTC first!</span>
-                  )}
+                  <span>✓ <strong>Ready for Disbursal:</strong> PDD is collected post-disbursement. You may transition this application to Disbursed.</span>
                 </div>
               )}
 
@@ -6891,43 +7583,72 @@ export default function OperationsRedesign() {
               </div>
 
               {/* Actions */}
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-                <button
-                  type="button"
-                  disabled={stageSubmitting}
-                  onClick={() => setStageModalApp(null)}
-                  style={{
-                    padding: "9px 16px",
-                    borderRadius: 8,
-                    border: "1px solid #cbd5e1",
-                    background: "#f8fafc",
-                    color: "#475569",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={stageSubmitting}
-                  style={{
-                    padding: "9px 20px",
-                    borderRadius: 8,
-                    border: "none",
-                    background: "#4f46e5",
-                    color: "#fff",
-                    fontSize: 13,
-                    fontWeight: 700,
-                    cursor: "pointer",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                  }}
-                >
-                  {stageSubmitting ? <RefreshCw size={14} className="cc-spin" /> : <CheckCircle2 size={14} />} Update Stage
-                </button>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                {stageModalApp.customer?.mobile ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const text = stageRemarkInput.trim() || `Workflow stage updated to ${stageTargetInput.replace(/_/g, " ")}`;
+                      const msg = `Dear ${stageModalApp.customer?.name || "Customer"}, regarding your loan application #${stageModalApp.applicationNumber} with ${stageModalApp.lender?.name || "the bank"}: ${text}.`;
+                      shareOnWhatsApp(stageModalApp.customer?.mobile, msg);
+                    }}
+                    style={{
+                      padding: "8px 14px",
+                      borderRadius: 8,
+                      border: "1px solid #86efac",
+                      background: "#f0fdf4",
+                      color: "#166534",
+                      fontSize: 12.5,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                    title="Share stage update with customer on WhatsApp"
+                  >
+                    <WhatsAppIcon size={16} /> WhatsApp
+                  </button>
+                ) : <div />}
+
+                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  <button
+                    type="button"
+                    disabled={stageSubmitting}
+                    onClick={() => setStageModalApp(null)}
+                    style={{
+                      padding: "9px 16px",
+                      borderRadius: 8,
+                      border: "1px solid #cbd5e1",
+                      background: "#f8fafc",
+                      color: "#475569",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={stageSubmitting}
+                    style={{
+                      padding: "9px 20px",
+                      borderRadius: 8,
+                      border: "none",
+                      background: "#4f46e5",
+                      color: "#fff",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    {stageSubmitting ? <RefreshCw size={14} className="cc-spin" /> : <CheckCircle2 size={14} />} Update Stage
+                  </button>
+                </div>
               </div>
             </form>
           </div>
@@ -7051,6 +7772,390 @@ export default function OperationsRedesign() {
           if (verificationApp?.id) openVerificationDrawer(verificationApp);
         }}
       />
+
+      {/* MODAL: REMARK FULL VIEW POPUP & WHATSAPP SHARE */}
+      {remarkViewModal && (
+        <div className="cc-disburse-backdrop" onClick={() => setRemarkViewModal(null)}>
+          <div className="cc-disburse-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520, borderRadius: 14 }}>
+            <div className="cc-disburse-header" style={{ background: "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)" }}>
+              <div className="cc-disburse-title-wrap">
+                <div className="cc-disburse-icon-badge" style={{ background: "rgba(255, 255, 255, 0.15)" }}>
+                  <FileText size={18} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#fff" }}>
+                    {remarkViewModal.title || "Stage Remark Details"}
+                  </h3>
+                  <small style={{ color: "#94a3b8", fontSize: 12 }}>
+                    Stage: <strong style={{ color: "#38bdf8" }}>{remarkViewModal.stage || "Operations"}</strong>
+                    {remarkViewModal.app?.applicationNumber && ` • App #${remarkViewModal.app.applicationNumber}`}
+                  </small>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="cc-disburse-close-btn"
+                onClick={() => setRemarkViewModal(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ padding: "20px 24px" }}>
+              {/* Application Details Summary */}
+              {remarkViewModal.app && (
+                <div style={{
+                  background: "#f8fafc",
+                  border: "1px solid #e2e8f0",
+                  borderRadius: 10,
+                  padding: "10px 14px",
+                  marginBottom: 16,
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 8,
+                  fontSize: 12
+                }}>
+                  <div>
+                    <span style={{ color: "#64748b" }}>Borrower:</span>{" "}
+                    <strong style={{ color: "#0f172a" }}>{remarkViewModal.app.customer?.name || "Customer"}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: "#64748b" }}>Mobile:</span>{" "}
+                    <strong style={{ color: "#0f172a" }}>{remarkViewModal.app.customer?.mobile || "—"}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: "#64748b" }}>Lender / Bank:</span>{" "}
+                    <strong style={{ color: "#047857" }}>{remarkViewModal.app.lender?.name || "Bank / Lender"}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: "#64748b" }}>Product:</span>{" "}
+                    <strong style={{ color: "#0f172a" }}>{remarkViewModal.app.loanProduct || "Loan"}</strong>
+                  </div>
+                </div>
+              )}
+
+              {/* Full Remark Content */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 6 }}>
+                  Full Remark / Notes / Query Reason
+                </label>
+                <div style={{
+                  background: "#fff",
+                  border: "1.5px solid #cbd5e1",
+                  borderRadius: 10,
+                  padding: "14px 16px",
+                  fontSize: 13.5,
+                  lineHeight: 1.6,
+                  color: "#0f172a",
+                  minHeight: 100,
+                  maxHeight: 280,
+                  overflowY: "auto",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                  fontFamily: "inherit"
+                }}>
+                  {remarkViewModal.remark ? (
+                    remarkViewModal.remark
+                  ) : (
+                    <span style={{ color: "#94a3b8", fontStyle: "italic" }}>No remark provided for this stage.</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Timestamp Info */}
+              {remarkViewModal.updatedAt && (
+                <div style={{ background: "#f1f5f9", borderRadius: 8, padding: "8px 12px", marginBottom: 18, fontSize: 11.5, color: "#64748b", display: "flex", justifyContent: "space-between" }}>
+                  <span><strong>Last Updated:</strong> {new Date(remarkViewModal.updatedAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</span>
+                  {remarkViewModal.app?.lead?.assignedEmployee?.name && (
+                    <span><strong>Staff:</strong> {remarkViewModal.app.lead.assignedEmployee.name}</span>
+                  )}
+                </div>
+              )}
+
+              {/* Actions Footer */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #f1f5f9", paddingTop: 14 }}>
+                {remarkViewModal.app?.customer?.mobile ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const app = remarkViewModal.app;
+                      const msg = `Dear ${app.customer?.name || "Customer"}, regarding your loan application #${app.applicationNumber} with ${app.lender?.name || "the bank"}: ${remarkViewModal.stage ? `[${remarkViewModal.stage}] ` : ""}${remarkViewModal.remark || "Please reach out to our team."}`;
+                      shareOnWhatsApp(app.customer.mobile, msg);
+                    }}
+                    style={{
+                      padding: "9px 16px",
+                      borderRadius: 8,
+                      border: "1px solid #86efac",
+                      background: "#f0fdf4",
+                      color: "#166534",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 7,
+                      boxShadow: "0 1px 3px rgba(22, 101, 52, 0.1)"
+                    }}
+                    title="Share this remark directly on WhatsApp"
+                  >
+                    <WhatsAppIcon size={16} /> Share on WhatsApp
+                  </button>
+                ) : <div />}
+
+                <button
+                  type="button"
+                  onClick={() => setRemarkViewModal(null)}
+                  style={{
+                    padding: "9px 20px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    background: "#0f172a",
+                    color: "#fff",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: ALL PROCESS COMPLETED */}
+      {allProcessModalApp && (
+        <div className="cc-disburse-backdrop" onClick={() => !allProcessSubmitting && setAllProcessModalApp(null)}>
+          <div className="cc-disburse-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 540 }}>
+            <div className="cc-disburse-header" style={{ background: "linear-gradient(135deg, #059669 0%, #047857 100%)" }}>
+              <div className="cc-disburse-title-wrap">
+                <div className="cc-disburse-icon-badge" style={{ background: "rgba(255, 255, 255, 0.2)" }}>
+                  <CheckCircle2 size={20} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#fff" }}>
+                    Complete All Process &amp; Sync Payout
+                  </h3>
+                  <small style={{ color: "#d1fae5", fontSize: 12 }}>
+                    App #{allProcessModalApp.applicationNumber} • {allProcessModalApp.customer?.name}
+                  </small>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="cc-disburse-close-btn"
+                onClick={() => !allProcessSubmitting && setAllProcessModalApp(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleAllProcessCompletedSubmit} style={{ padding: "20px 24px" }}>
+              {/* App Summary */}
+              <div style={{
+                background: "#f0fdf4",
+                border: "1px solid #bbf7d0",
+                borderRadius: 10,
+                padding: "12px 14px",
+                marginBottom: 16,
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 8,
+                fontSize: 12
+              }}>
+                <div>
+                  <span style={{ color: "#166534" }}>Borrower:</span>{" "}
+                  <strong style={{ color: "#0f172a" }}>{allProcessModalApp.customer?.name}</strong>
+                </div>
+                <div>
+                  <span style={{ color: "#166534" }}>Mobile:</span>{" "}
+                  <strong style={{ color: "#0f172a" }}>{allProcessModalApp.customer?.mobile || "—"}</strong>
+                </div>
+                <div>
+                  <span style={{ color: "#166534" }}>Bank / Lender:</span>{" "}
+                  <strong style={{ color: "#047857" }}>{allProcessModalApp.lender?.name || "Direct / Bank"}</strong>
+                </div>
+                <div>
+                  <span style={{ color: "#166534" }}>Product:</span>{" "}
+                  <strong style={{ color: "#0f172a" }}>{allProcessModalApp.loanProduct || "Loan"}</strong>
+                </div>
+                <div>
+                  <span style={{ color: "#166534" }}>Sanctioned:</span>{" "}
+                  <strong style={{ color: "#0f172a" }}>{allProcessModalApp.sanctionedAmount ? currencyFormatter.format(allProcessModalApp.sanctionedAmount) : "—"}</strong>
+                </div>
+                <div>
+                  <span style={{ color: "#166534" }}>Applied:</span>{" "}
+                  <strong style={{ color: "#0f172a" }}>{currencyFormatter.format(allProcessModalApp.appliedAmount || 0)}</strong>
+                </div>
+              </div>
+
+              {/* Completion Disbursed Amount */}
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 5 }}>
+                  Final Disbursed Amount (₹) <span style={{ color: "#ef4444" }}>*</span>
+                </label>
+                <div style={{ position: "relative" }}>
+                  <IndianRupee size={16} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "#64748b" }} />
+                  <input
+                    type="number"
+                    step="1"
+                    min="1"
+                    required
+                    value={allProcessAmountInput}
+                    onChange={(e) => setAllProcessAmountInput(e.target.value)}
+                    placeholder="e.g. 5000000"
+                    style={{
+                      width: "100%",
+                      padding: "9px 12px 9px 36px",
+                      borderRadius: 8,
+                      border: "1.5px solid #cbd5e1",
+                      fontSize: 15,
+                      fontWeight: 700,
+                      color: "#047857",
+                      background: "#fff",
+                      boxSizing: "border-box",
+                      outline: "none",
+                    }}
+                    onFocus={(e) => (e.target.style.borderColor = "#047857")}
+                    onBlur={(e) => (e.target.style.borderColor = "#cbd5e1")}
+                  />
+                </div>
+                {allProcessAmountInput && !isNaN(parseFloat(allProcessAmountInput)) && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, color: "#047857", fontWeight: 700, fontSize: 12, marginTop: 4 }}>
+                    <CheckCircle2 size={12} />
+                    <span>Formatted: {currencyFormatter.format(parseFloat(allProcessAmountInput))}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Remarks */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", fontWeight: 600, fontSize: 12.5, color: "#334155", marginBottom: 5 }}>
+                  Completion Remarks / Notes
+                </label>
+                <textarea
+                  rows={2}
+                  value={allProcessRemarkInput}
+                  onChange={(e) => setAllProcessRemarkInput(e.target.value)}
+                  placeholder="e.g. All operations stages, OTC &amp; PDD completed. Payout calculation synced."
+                  style={{
+                    width: "100%",
+                    padding: "9px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    fontSize: 12.5,
+                    color: "#0f172a",
+                    boxSizing: "border-box",
+                    outline: "none",
+                    resize: "vertical"
+                  }}
+                />
+              </div>
+
+              {/* What will happen note */}
+              <div style={{
+                background: "#ecfdf5",
+                border: "1px solid #a7f3d0",
+                borderRadius: 8,
+                padding: "10px 14px",
+                marginBottom: 16,
+                fontSize: 11.5,
+                color: "#065f46",
+                lineHeight: 1.45
+              }}>
+                <div style={{ fontWeight: 700, marginBottom: 3, display: "flex", alignItems: "center", gap: 6 }}>
+                  <CheckCircle2 size={14} color="#059669" /> Automatic Synchronizations:
+                </div>
+                <ul style={{ margin: 0, paddingLeft: 18 }}>
+                  <li>Application marked as <strong>DISBURSED (COMPLETED)</strong></li>
+                  <li>Linked Lead status updated to <strong>COMPLETED</strong></li>
+                  <li>PDD &amp; OTC marked as <strong>RESOLVED</strong></li>
+                  <li>Payout commission record automatically created / synced in <strong>Case Payouts</strong></li>
+                </ul>
+              </div>
+
+              {/* Actions */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #f1f5f9", paddingTop: 14 }}>
+                {allProcessModalApp.customer?.mobile ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const amt = parseFloat(allProcessAmountInput) || allProcessModalApp.sanctionedAmount || allProcessModalApp.appliedAmount || 0;
+                      const msg = `Dear ${allProcessModalApp.customer?.name || "Customer"}, your loan application #${allProcessModalApp.applicationNumber} with ${allProcessModalApp.lender?.name || "the bank"} has completed all processes successfully. Disbursed Amount: ${currencyFormatter.format(amt)}. Thank you!`;
+                      shareOnWhatsApp(allProcessModalApp.customer?.mobile, msg);
+                    }}
+                    style={{
+                      padding: "8px 14px",
+                      borderRadius: 8,
+                      border: "1px solid #86efac",
+                      background: "#f0fdf4",
+                      color: "#166534",
+                      fontSize: 12.5,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                    title="Share completion update on WhatsApp"
+                  >
+                    <WhatsAppIcon size={16} /> WhatsApp
+                  </button>
+                ) : <div />}
+
+                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  <button
+                    type="button"
+                    disabled={allProcessSubmitting}
+                    onClick={() => setAllProcessModalApp(null)}
+                    style={{
+                      padding: "9px 16px",
+                      borderRadius: 8,
+                      border: "1px solid #cbd5e1",
+                      background: "#f8fafc",
+                      color: "#475569",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={allProcessSubmitting}
+                    style={{
+                      padding: "9px 22px",
+                      borderRadius: 8,
+                      border: "none",
+                      background: "#059669",
+                      color: "#fff",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 7,
+                      boxShadow: "0 2px 6px rgba(5, 150, 105, 0.35)",
+                    }}
+                  >
+                    {allProcessSubmitting ? (
+                      <>
+                        <RefreshCw size={14} className="cc-spin" /> Processing...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 size={16} /> Confirm All Completed
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -79,6 +79,16 @@ const autoSyncDisbursedCases = async (companyId) => {
       ],
     });
 
+    const isDisbursedOrCompleted = (stat) => {
+      const s = (stat || "").toUpperCase();
+      return (
+        s === "DISBURSED" ||
+        s === "COMPLETED" ||
+        s === "CLOSED" ||
+        s === "ALL_PROCESS_COMPLETED"
+      );
+    };
+
     for (const payout of existingPayouts) {
       const lead = payout.lead;
       const app = payout.application || (lead?.applications || [])[0];
@@ -94,11 +104,12 @@ const autoSyncDisbursedCases = async (companyId) => {
         appStatus === "REJECTED" ||
         disbStatus === "CANCELLED";
 
-      // A case has completed Final Disbursement ONLY if app.status === "DISBURSED"
-      // (or lead.status === "DISBURSED" if standalone lead without app)
+      // A case has completed Final Disbursement or All Process Completed if app or lead is DISBURSED or COMPLETED
       const isFinalDisbursed =
         !isCancelledOrRejected &&
-        (app ? appStatus === "DISBURSED" : leadStatus === "DISBURSED");
+        (app
+          ? isDisbursedOrCompleted(appStatus) || isDisbursedOrCompleted(disbStatus)
+          : isDisbursedOrCompleted(leadStatus));
 
       if (isCancelledOrRejected || !isFinalDisbursed) {
         await CasePayout.destroy({ where: { id: payout.id } });
@@ -134,11 +145,12 @@ const autoSyncDisbursedCases = async (companyId) => {
       const leadStatusUpper = (lead.status || "").toUpperCase();
       const apps = lead.applications || [];
 
-      // Find the application that has completed Final Disbursement
+      // Find the application that has completed Final Disbursement or All Process Completed
       const primaryApp =
         apps.find((a) => {
           const aStat = (a.status || "").toUpperCase();
-          return aStat === "DISBURSED";
+          const aDisb = (a.disbursementStatus || "").toUpperCase();
+          return isDisbursedOrCompleted(aStat) || isDisbursedOrCompleted(aDisb);
         }) || apps[0];
 
       const appStatusUpper = (primaryApp?.status || "").toUpperCase();
@@ -156,10 +168,12 @@ const autoSyncDisbursedCases = async (companyId) => {
         continue;
       }
 
-      // Check strictly for final disbursement: app must be DISBURSED
+      // Check for final disbursement / all process completed:
       const isFinalDisbursed =
         !isCancelledOrRejected &&
-        (primaryApp ? appStatusUpper === "DISBURSED" : leadStatusUpper === "DISBURSED");
+        (primaryApp
+          ? isDisbursedOrCompleted(appStatusUpper) || isDisbursedOrCompleted(appDisbStatusUpper)
+          : isDisbursedOrCompleted(leadStatusUpper));
 
       if (!isFinalDisbursed) {
         await CasePayout.destroy({ where: { companyId, leadId: lead.id } });

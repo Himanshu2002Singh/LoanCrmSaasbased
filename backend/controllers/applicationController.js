@@ -911,23 +911,15 @@ const updateStatus = async (req, res, next) => {
       return res.status(403).json({ message: "You are not authorized to update this application" });
     }
 
-    // ENFORCE BUSINESS RULE: PDD & OTC must BOTH be RESOLVED before DISBURSED
-    if (status === "DISBURSED") {
-      const pddResolved = (application.pddStatus || "").toUpperCase() === "RESOLVED";
-      const otcResolved = (application.otcStatus || "").toUpperCase() === "RESOLVED";
-      if (!pddResolved || !otcResolved) {
-        const pendingReasons = [];
-        if (!pddResolved) pendingReasons.push("PDD is Pending");
-        if (!otcResolved) pendingReasons.push("OTC is Pending");
-        return res.status(400).json({
-          message: `Cannot disburse! Case is 'Pending for Disbursement' (${pendingReasons.join(", ")}). Both PDD and OTC must be Resolved before Final Disbursement.`,
-          pendingReasons,
-        });
-      }
+    // BUSINESS RULE: OTC check can be reviewed, but PDD (Post-Disbursement) does NOT block Final Disbursement
+    if (status === "ALL_PROCESS_COMPLETED" || status === "COMPLETED") {
+      application.pddStatus = "RESOLVED";
+      application.otcStatus = "RESOLVED";
+      application.disbursementStatus = "COMPLETED";
     }
 
     const beforeStatus = application.status;
-    application.status = status;
+    application.status = status === "ALL_PROCESS_COMPLETED" ? "DISBURSED" : status;
     if (status === "REJECTED" && rejectionReason) {
       application.rejectionReason = rejectionReason;
     }
@@ -991,6 +983,8 @@ const updateStatus = async (req, res, next) => {
         let targetLeadStatus = null;
         if (status === "DISBURSED") {
           targetLeadStatus = "DISBURSED";
+        } else if (status === "COMPLETED" || status === "ALL_PROCESS_COMPLETED") {
+          targetLeadStatus = "COMPLETED";
         } else if (status === "SANCTIONED") {
           targetLeadStatus = "SANCTIONED";
         } else if (status === "REJECTED") {
@@ -1011,15 +1005,15 @@ const updateStatus = async (req, res, next) => {
             },
           });
 
-          // Ensure master config exists for DISBURSED / SANCTIONED so UI tags look great
-          if (!leadStatusConfig && (targetLeadStatus === "DISBURSED" || targetLeadStatus === "SANCTIONED")) {
+          // Ensure master config exists for DISBURSED / SANCTIONED / COMPLETED so UI tags look great
+          if (!leadStatusConfig && (targetLeadStatus === "DISBURSED" || targetLeadStatus === "SANCTIONED" || targetLeadStatus === "COMPLETED")) {
             await MasterConfig.create({
               companyId: lead.companyId,
               configType: "LEAD_STATUS",
               value: targetLeadStatus,
-              label: targetLeadStatus === "DISBURSED" ? "Disbursed" : "Sanctioned",
-              colorCode: targetLeadStatus === "DISBURSED" ? "#047857" : "#10B981",
-              orderIndex: targetLeadStatus === "DISBURSED" ? 70 : 60,
+              label: targetLeadStatus === "COMPLETED" ? "Completed" : targetLeadStatus === "DISBURSED" ? "Disbursed" : "Sanctioned",
+              colorCode: targetLeadStatus === "COMPLETED" ? "#059669" : targetLeadStatus === "DISBURSED" ? "#047857" : "#10B981",
+              orderIndex: targetLeadStatus === "COMPLETED" ? 80 : targetLeadStatus === "DISBURSED" ? 70 : 60,
               team: "operations",
             }).catch(() => {});
           }
@@ -1233,22 +1227,8 @@ const updateStageStatus = async (req, res, next) => {
         application.disbursementStatus = "PENDING";
         application.disbursedRemark = trimmedRemark;
       } else {
-        // COMPLETED / DISBURSED
-        // CRITICAL BUSINESS RULE: Both PDD and OTC must be RESOLVED!
-        const pddResolved = (application.pddStatus || "").toUpperCase() === "RESOLVED";
-        const otcResolved = (application.otcStatus || "").toUpperCase() === "RESOLVED";
-
-        if (!pddResolved || !otcResolved) {
-          await t.rollback();
-          const blockers = [];
-          if (!pddResolved) blockers.push("PDD is Pending");
-          if (!otcResolved) blockers.push("OTC is Pending");
-          return res.status(400).json({
-            message: `Cannot disburse! Case is 'Pending for Disbursement' (${blockers.join(", ")}). Both PDD and OTC must be Resolved before Final Disbursement.`,
-            blockers,
-          });
-        }
-
+        // COMPLETED / DISBURSED / FINAL DISBURSEMENT
+        // Business Rule: PDD (Post-Disbursement) does NOT block disbursement.
         oldStatus = application.status;
         newStatus = "DISBURSED";
         application.status = "DISBURSED";
@@ -1258,9 +1238,25 @@ const updateStageStatus = async (req, res, next) => {
         application.disbursedRemark = trimmedRemark;
         if (disbursedAmount) {
           application.disbursedAmount = parseFloat(disbursedAmount);
-        } else if (!application.disbursedAmount) {
+        } else if (!application.disbursedAmount || application.disbursedAmount === 0) {
           application.disbursedAmount = application.sanctionedAmount || application.appliedAmount || 0;
         }
+      }
+    } else if (typeUpper === "ALL_PROCESS_COMPLETED" || statusUpper === "ALL_PROCESS_COMPLETED" || (typeUpper === "STAGE" && statusUpper === "COMPLETED")) {
+      // ALL PROCESS COMPLETED: Mark lead complete, application disbursed/complete, resolve OTC & PDD, and sync payout
+      oldStatus = application.status;
+      newStatus = "COMPLETED";
+      application.status = "DISBURSED";
+      application.disbursementStatus = "COMPLETED";
+      application.pddStatus = "RESOLVED";
+      application.otcStatus = "RESOLVED";
+      application.disbursedAt = disbursementDate ? new Date(disbursementDate) : now;
+      application.disbursedBy = userId;
+      application.disbursedRemark = trimmedRemark || "All process completed successfully";
+      if (disbursedAmount) {
+        application.disbursedAmount = parseFloat(disbursedAmount);
+      } else if (!application.disbursedAmount || application.disbursedAmount === 0) {
+        application.disbursedAmount = application.sanctionedAmount || application.appliedAmount || 0;
       }
     } else {
       // General workflow stage change (DOCS_PENDING, READY_TO_SEND, SUBMITTED_TO_BANK, SANCTIONED, REJECTED)
@@ -1302,8 +1298,12 @@ const updateStageStatus = async (req, res, next) => {
     if (application.leadId) {
       const lead = await Lead.findByPk(application.leadId, { transaction: t });
       if (lead) {
-        if (newStatus === "DISBURSED") await lead.update({ status: "DISBURSED" }, { transaction: t });
-        else if (newStatus === "SANCTIONED") await lead.update({ status: "SANCTIONED" }, { transaction: t });
+        if (newStatus === "DISBURSED" || newStatus === "COMPLETED") {
+          await lead.update({
+            status: newStatus === "COMPLETED" ? "COMPLETED" : "DISBURSED",
+            ...(application.disbursedAmount ? { requiredAmount: application.disbursedAmount } : {}),
+          }, { transaction: t });
+        } else if (newStatus === "SANCTIONED") await lead.update({ status: "SANCTIONED" }, { transaction: t });
         else if (newStatus === "REJECTED" || newStatus === "CANCELLED") await lead.update({ status: newStatus }, { transaction: t });
       }
     }

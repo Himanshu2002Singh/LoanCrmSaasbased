@@ -1,7 +1,21 @@
 import React, { useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { toast } from "react-toastify";
-import { FileSpreadsheet, Percent, Phone, Share2, Upload, User, X } from "lucide-react";
+import {
+  FileSpreadsheet,
+  Percent,
+  Phone,
+  Share2,
+  Upload,
+  User,
+  X,
+  Download,
+  Info,
+  ChevronDown,
+  ChevronUp,
+  CheckCircle2,
+} from "lucide-react";
+import * as XLSX from "xlsx";
 import API_URL from "../../config";
 
 const MODES = [
@@ -21,6 +35,7 @@ export default function AddLeadModal({ open, onClose, onCreated }) {
   const [sourcesList, setSourcesList] = useState([]);
   const [file, setFile] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [showFormatGuide, setShowFormatGuide] = useState(false);
   const fileInputRef = useRef(null);
 
   const userRole = localStorage.getItem("userRole") || "";
@@ -176,6 +191,88 @@ export default function AddLeadModal({ open, onClose, onCreated }) {
     }
   };
 
+  const downloadSampleExcel = () => {
+    try {
+      const sampleData = [
+        {
+          "Name": "Rahul Sharma",
+          "Mobile": "9876543210",
+          "Source / Party": "Self",
+          "Commission %": 1.5,
+          "Remarks": "Interested in loan, callback requested after 4 PM",
+        },
+        {
+          "Name": "Priya Patel",
+          "Mobile": "9812345678",
+          "Source / Party": "DSA Partner",
+          "Commission %": 1.0,
+          "Remarks": "Looking for lowest interest rate",
+        },
+        {
+          "Name": "Vikram Singh",
+          "Mobile": "9765432109",
+          "Source / Party": "Direct",
+          "Commission %": 0.0,
+          "Remarks": "Urgent requirement",
+        },
+      ];
+
+      const instructionsData = [
+        {
+          "Column Name": "Name",
+          "Required": "YES (Mandatory)",
+          "Description": "Full name of the customer or lead",
+          "Accepted Formats / Example": "Rahul Sharma, Priya Patel",
+        },
+        {
+          "Column Name": "Mobile",
+          "Required": "YES (Mandatory)",
+          "Description": "10-digit mobile phone number",
+          "Accepted Formats / Example": "9876543210 (digits only or with +91)",
+        },
+        {
+          "Column Name": "Source / Party",
+          "Required": "Optional",
+          "Description": "Channel or DSA/Party name. If blank, uses modal default setting.",
+          "Accepted Formats / Example": "Self, Direct, DSA Partner, ABC Agency",
+        },
+        {
+          "Column Name": "Commission %",
+          "Required": "Optional",
+          "Description": "Payout commission rate for party. If blank, uses modal default setting.",
+          "Accepted Formats / Example": "1.5, 2.0 (numbers only)",
+        },
+        {
+          "Column Name": "Remarks",
+          "Required": "Optional",
+          "Description": "Initial discussion notes or callback time",
+          "Accepted Formats / Example": "Customer requested callback after 4 PM",
+        },
+      ];
+
+      const workbook = XLSX.utils.book_new();
+
+      const wsSample = XLSX.utils.json_to_sheet(sampleData);
+      wsSample["!cols"] = [
+        { wch: 22 }, { wch: 16 }, { wch: 20 }, { wch: 16 }, { wch: 45 }
+      ];
+      XLSX.utils.book_append_sheet(workbook, wsSample, "Sample Leads");
+
+      const wsGuide = XLSX.utils.json_to_sheet(instructionsData);
+      wsGuide["!cols"] = [
+        { wch: 18 }, { wch: 16 }, { wch: 44 }, { wch: 32 }
+      ];
+      XLSX.utils.book_append_sheet(workbook, wsGuide, "Format Guide & Rules");
+
+      XLSX.writeFile(workbook, "Sample_Leads_Template.xlsx");
+      toast.success("Sample Excel template downloaded successfully!");
+    } catch (err) {
+      console.error("Failed to generate sample excel:", err);
+      const token = localStorage.getItem("token");
+      window.open(`${API_URL}/leads/sample-excel?token=${token}`, "_blank");
+    }
+  };
+
   return (
     <div className="cc-modal-overlay" onClick={closeAll}>
       <style>{styles}</style>
@@ -297,15 +394,157 @@ export default function AddLeadModal({ open, onClose, onCreated }) {
           </form>
         ) : (
           <div className="cc-modal-form">
+            {/* Sample Excel Template Download & Format Guide Banner */}
+            <div
+              style={{
+                background: "#f0fdf4",
+                border: "1.5px solid #86efac",
+                borderRadius: "12px",
+                padding: "12px 14px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <div style={{
+                    width: "32px",
+                    height: "32px",
+                    borderRadius: "8px",
+                    background: "#059669",
+                    color: "#fff",
+                    display: "grid",
+                    placeItems: "center",
+                    flexShrink: 0
+                  }}>
+                    <FileSpreadsheet size={18} />
+                  </div>
+                  <div>
+                    <strong style={{ fontSize: "13px", color: "#065f46", display: "block" }}>
+                      Sample Excel Template
+                    </strong>
+                    <span style={{ fontSize: "11px", color: "#166534" }}>
+                      Download ready-to-use template with sample leads &amp; rules
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={downloadSampleExcel}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    padding: "7px 12px",
+                    background: "#047857",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: "8px",
+                    fontSize: "12px",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    boxShadow: "0 2px 4px rgba(4, 120, 87, 0.25)"
+                  }}
+                  title="Download Sample Excel Template"
+                >
+                  <Download size={14} /> Download Sample
+                </button>
+              </div>
+
+              {/* Collapsible Format Guide */}
+              <div style={{ borderTop: "1px dashed #a7f3d0", paddingTop: "8px", marginTop: "2px" }}>
+                <button
+                  type="button"
+                  onClick={() => setShowFormatGuide(!showFormatGuide)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#047857",
+                    fontSize: "11.5px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    padding: 0,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "4px"
+                  }}
+                >
+                  <Info size={13} />
+                  {showFormatGuide ? "Hide Column Guidelines" : "View Column Guidelines & Required Format"}
+                  {showFormatGuide ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                </button>
+
+                {showFormatGuide && (
+                  <div style={{
+                    marginTop: "8px",
+                    background: "#fff",
+                    border: "1px solid #bbf7d0",
+                    borderRadius: "8px",
+                    padding: "8px 10px",
+                    fontSize: "11px",
+                    color: "#334155",
+                    maxHeight: "170px",
+                    overflowY: "auto"
+                  }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
+                      <thead>
+                        <tr style={{ borderBottom: "1px solid #e2e8f0", color: "#065f46" }}>
+                          <th style={{ padding: "4px 6px" }}>Column</th>
+                          <th style={{ padding: "4px 6px" }}>Status</th>
+                          <th style={{ padding: "4px 6px" }}>Sample Value</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr style={{ borderBottom: "1px solid #f1f5f9" }}>
+                          <td style={{ padding: "4px 6px", fontWeight: 700 }}>Name</td>
+                          <td style={{ padding: "4px 6px", color: "#dc2626", fontWeight: 700 }}>Required</td>
+                          <td style={{ padding: "4px 6px" }}>Rahul Sharma</td>
+                        </tr>
+                        <tr style={{ borderBottom: "1px solid #f1f5f9" }}>
+                          <td style={{ padding: "4px 6px", fontWeight: 700 }}>Mobile</td>
+                          <td style={{ padding: "4px 6px", color: "#dc2626", fontWeight: 700 }}>Required (10 digits)</td>
+                          <td style={{ padding: "4px 6px" }}>9876543210</td>
+                        </tr>
+                        <tr style={{ borderBottom: "1px solid #f1f5f9" }}>
+                          <td style={{ padding: "4px 6px", fontWeight: 600 }}>Source / Party</td>
+                          <td style={{ padding: "4px 6px", color: "#64748b" }}>Optional (default: Self)</td>
+                          <td style={{ padding: "4px 6px" }}>Direct / DSA Partner</td>
+                        </tr>
+                        <tr style={{ borderBottom: "1px solid #f1f5f9" }}>
+                          <td style={{ padding: "4px 6px", fontWeight: 600 }}>Commission %</td>
+                          <td style={{ padding: "4px 6px", color: "#64748b" }}>Optional</td>
+                          <td style={{ padding: "4px 6px" }}>1.5</td>
+                        </tr>
+                        <tr>
+                          <td style={{ padding: "4px 6px", fontWeight: 600 }}>Remarks</td>
+                          <td style={{ padding: "4px 6px", color: "#64748b" }}>Optional</td>
+                          <td style={{ padding: "4px 6px" }}>Interested in loan, callback after 4 PM</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* File Drop Area */}
             <div
               className={`cc-modal-drop ${file ? "has-file" : ""}`}
               onClick={() => fileInputRef.current?.click()}
             >
-              <Upload size={20} />
+              {file ? (
+                <CheckCircle2 size={24} style={{ color: "#047857" }} />
+              ) : (
+                <Upload size={22} />
+              )}
               <p>
-                <strong>{file ? file.name : "Click to select an Excel file"}</strong>
+                <strong>{file ? file.name : "Click to select your filled Excel file"}</strong>
               </p>
-              <small>.xlsx or .xls</small>
+              <small>
+                {file ? `${(file.size / 1024).toFixed(1)} KB • Click to change file` : "Supports .xlsx and .xls formats"}
+              </small>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -380,7 +619,7 @@ export default function AddLeadModal({ open, onClose, onCreated }) {
 
 const styles = `
   .cc-modal-overlay { position:fixed; inset:0; background:rgba(15,23,42,0.6); z-index:120; display:grid; place-items:center; padding:16px; }
-  .cc-modal-card { width:100%; max-width:460px; background:#fff; border-radius:18px; padding:22px 22px 20px; display:flex; flex-direction:column; gap:14px; box-shadow:0 20px 60px rgba(15,23,42,0.28); }
+  .cc-modal-card { width:100%; max-width:520px; background:#fff; border-radius:18px; padding:22px 22px 20px; display:flex; flex-direction:column; gap:14px; box-shadow:0 20px 60px rgba(15,23,42,0.28); }
   .cc-modal-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
   .cc-modal-head p { margin:0; font-size:11px; letter-spacing:0.08em; text-transform:uppercase; color:#047857; font-weight:700; }
   .cc-modal-head h3 { margin:2px 0 0; font-size:19px; color:#0f172a; font-weight:700; }

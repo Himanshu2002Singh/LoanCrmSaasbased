@@ -35,6 +35,7 @@ const canAssign = (req, res, next) => {
 router.use(isAuthenticated);
 
 // Fixed segments first, so they are not swallowed by /:id.
+router.get("/sample-excel", leadController.downloadSampleExcel);
 router.get("/unassigned", leadController.getUnassignedLeads);
 router.get("/followups", leadController.getFollowups);
 router.get("/counts", leadController.getLeadCounts);
