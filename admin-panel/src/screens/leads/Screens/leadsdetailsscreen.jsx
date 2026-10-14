@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { ToastContainer, toast } from "react-toastify";
@@ -10,6 +10,7 @@ import {
   Building2,
   Calendar,
   CheckCircle2,
+  ChevronDown,
   Clock,
   Coins,
   Download,
@@ -164,6 +165,47 @@ export default function LeadDetailScreen() {
   const [newRemarkText, setNewRemarkText] = useState("");
   const [newFollowupDate, setNewFollowupDate] = useState("");
   const [submittingRemark, setSubmittingRemark] = useState(false);
+  const [statusesList, setStatusesList] = useState([]);
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+  const [statusDropdownOpen, setStatusDropdownOpen] = useState(false);
+  const statusDropdownRef = useRef(null);
+
+  useEffect(() => {
+    axios
+      .get(`${API_URL}/master-configs/LEAD_STATUS`, { params: { includeInactive: false } })
+      .then((res) => setStatusesList(res.data?.data || []))
+      .catch(() => setStatusesList([]));
+  }, []);
+
+  useEffect(() => {
+    if (!statusDropdownOpen) return;
+    const onDoc = (event) => {
+      if (statusDropdownRef.current && !statusDropdownRef.current.contains(event.target)) {
+        setStatusDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [statusDropdownOpen]);
+
+  const handleDetailStatusChange = async (st) => {
+    const statusVal = typeof st === "string" ? st : (st.value || st.label);
+    setIsUpdatingStatus(true);
+    try {
+      await axios.patch(`${API_URL}/leads/${id}/status`, {
+        status: statusVal,
+      });
+      setLead((prev) => ({ ...prev, status: statusVal, status_value: statusVal }));
+      toast.success(`Lead status updated to "${st.label || statusVal}"`);
+      setStatusDropdownOpen(false);
+      fetchLeadDetails();
+    } catch (err) {
+      console.error("Status update error:", err);
+      toast.error(err.response?.data?.message || "Failed to update status");
+    } finally {
+      setIsUpdatingStatus(false);
+    }
+  };
 
   const formatDateTime = (isoStr) => {
     if (!isoStr) return "--";
@@ -643,16 +685,98 @@ export default function LeadDetailScreen() {
             <div className="cc-lead-title-row">
               <h2>{lead.name}</h2>
               <span className="cc-lead-id-tag">#LEAD-{lead.lead_id || lead.id}</span>
-              <span
-                className="cc-lead-status-pill"
-                style={{
-                  backgroundColor: statusStyle.bg,
-                  color: statusStyle.text,
-                  borderColor: statusStyle.border,
-                }}
-              >
-                {lead.status}
-              </span>
+              <div ref={statusDropdownRef} style={{ position: "relative", display: "inline-block" }}>
+                {isReadOnly || !canEditLead ? (
+                  <span
+                    className="cc-lead-status-pill"
+                    style={{
+                      backgroundColor: statusStyle.bg,
+                      color: statusStyle.text,
+                      borderColor: statusStyle.border,
+                    }}
+                  >
+                    {lead.status}
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    className="cc-lead-status-pill"
+                    onClick={() => setStatusDropdownOpen((prev) => !prev)}
+                    disabled={isUpdatingStatus}
+                    style={{
+                      backgroundColor: statusStyle.bg,
+                      color: statusStyle.text,
+                      borderColor: statusStyle.border,
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                    title="Click to change lead status"
+                  >
+                    <span>{isUpdatingStatus ? "Updating..." : lead.status}</span>
+                    <ChevronDown size={12} style={{ opacity: 0.7 }} />
+                  </button>
+                )}
+
+                {statusDropdownOpen && statusesList.length > 0 && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "calc(100% + 6px)",
+                      left: 0,
+                      zIndex: 50,
+                      minWidth: 200,
+                      background: "#ffffff",
+                      borderRadius: 12,
+                      border: "1px solid #d5ded7",
+                      boxShadow: "0 12px 30px rgba(15,23,42,0.18)",
+                      padding: 6,
+                      maxHeight: 240,
+                      overflowY: "auto",
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", padding: "4px 8px 6px", borderBottom: "1px solid #f1f5f9" }}>
+                      Select Status
+                    </div>
+                    <ul style={{ listStyle: "none", margin: "4px 0 0", padding: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+                      {statusesList.map((st) => {
+                        const isCurrent = (lead.status || "").toUpperCase() === (st.value || "").toUpperCase();
+                        const sStyle = statusColorMap[st.value] || { bg: "#f1f5f9", text: "#475569" };
+                        return (
+                          <li key={st.id || st.value}>
+                            <button
+                              type="button"
+                              onClick={() => handleDetailStatusChange(st)}
+                              style={{
+                                width: "100%",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 8,
+                                padding: "6px 10px",
+                                borderRadius: 6,
+                                border: "none",
+                                background: isCurrent ? "#f0fdf4" : "transparent",
+                                color: isCurrent ? "#166534" : "#1e293b",
+                                fontSize: "12.5px",
+                                fontWeight: isCurrent ? 700 : 500,
+                                cursor: "pointer",
+                                textAlign: "left",
+                              }}
+                              onMouseEnter={(e) => { if (!isCurrent) e.currentTarget.style.background = "#f8fafc"; }}
+                              onMouseLeave={(e) => { if (!isCurrent) e.currentTarget.style.background = "transparent"; }}
+                            >
+                              <span style={{ width: 8, height: 8, borderRadius: "50%", background: sStyle.text || "#059669" }} />
+                              <span>{st.label || st.value}</span>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                )}
+              </div>
               <span
                 className="cc-lead-source-pill"
                 style={{

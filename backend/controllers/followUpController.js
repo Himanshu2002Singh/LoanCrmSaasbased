@@ -54,14 +54,12 @@ const followUpScope = async (req) => {
   if (
     req.user.role === ROLES.SUPERADMIN ||
     req.user.role === ROLES.COMPANY_ADMIN ||
-    req.user.role === ROLES.OPS ||
     req.permissions?.viewAllLeads === true
   ) {
     return {};
   }
 
   let leadCondition = {};
-  let teamIds = [req.user.id];
 
   if (req.user.role === ROLES.MANAGER) {
     const subordinates = await User.findAll({
@@ -69,7 +67,7 @@ const followUpScope = async (req) => {
       attributes: ["id"],
       raw: true,
     });
-    teamIds = [req.user.id, ...subordinates.map((u) => u.id)];
+    const teamIds = [req.user.id, ...subordinates.map((u) => u.id)];
     leadCondition = {
       companyId: req.user.companyId,
       [Op.or]: [
@@ -77,7 +75,8 @@ const followUpScope = async (req) => {
         { assignedEmployeeId: { [Op.in]: teamIds } },
       ],
     };
-  } else if (req.user.role === ROLES.EMPLOYEE) {
+  } else {
+    // Both EMPLOYEE and OPS (and any non-admin staff)
     leadCondition = {
       companyId: req.user.companyId,
       [Op.or]: [
@@ -95,11 +94,12 @@ const followUpScope = async (req) => {
 
   const visibleLeadIds = visibleLeads.map((l) => l.id);
 
+  if (!visibleLeadIds.length) {
+    return { id: -1 };
+  }
+
   return {
-    [Op.or]: [
-      { userId: { [Op.in]: teamIds } },
-      ...(visibleLeadIds.length > 0 ? [{ leadId: { [Op.in]: visibleLeadIds } }] : []),
-    ],
+    leadId: { [Op.in]: visibleLeadIds },
   };
 };
 
@@ -363,8 +363,15 @@ exports.updateFollowUp = async (req, res) => {
     if (!followUp || !belongsToScope(req, followUp)) {
       return res.status(404).json({ message: "Follow-up not found" });
     }
-    if (req.user.role === ROLES.EMPLOYEE && followUp.userId !== req.user.id) {
-      return res.status(403).json({ message: "You can only edit your own follow-ups" });
+    const lead = await Lead.findByPk(followUp.leadId);
+    if (
+      [ROLES.EMPLOYEE, ROLES.OPS].includes(req.user.role) &&
+      !req.permissions?.viewAllLeads &&
+      followUp.userId !== req.user.id &&
+      lead?.assignedEmployeeId !== req.user.id &&
+      lead?.assignedManagerId !== req.user.id
+    ) {
+      return res.status(403).json({ message: "You can only edit follow-ups for your assigned leads" });
     }
 
     const data = {};
@@ -415,8 +422,15 @@ exports.deleteFollowUp = async (req, res) => {
     if (!followUp || !belongsToScope(req, followUp)) {
       return res.status(404).json({ message: "Follow-up not found" });
     }
-    if (req.user.role === ROLES.EMPLOYEE && followUp.userId !== req.user.id) {
-      return res.status(403).json({ message: "You can only delete your own follow-ups" });
+    const lead = await Lead.findByPk(followUp.leadId);
+    if (
+      [ROLES.EMPLOYEE, ROLES.OPS].includes(req.user.role) &&
+      !req.permissions?.viewAllLeads &&
+      followUp.userId !== req.user.id &&
+      lead?.assignedEmployeeId !== req.user.id &&
+      lead?.assignedManagerId !== req.user.id
+    ) {
+      return res.status(403).json({ message: "You can only delete follow-ups for your assigned leads" });
     }
 
     await followUp.destroy();

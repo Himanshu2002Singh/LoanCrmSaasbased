@@ -327,7 +327,7 @@ const resolveStatus = (statuses, input) => {
 const canSetStatus = (user, status, permissions = {}) => {
   const role = typeof user === "string" ? user : user?.role;
   if ([ROLES.SUPERADMIN, ROLES.COMPANY_ADMIN, ROLES.OPS].includes(role)) return true;
-  if (permissions?.manageOperations || permissions?.viewAllLeads) return true;
+  if (permissions?.manageOperations || permissions?.viewAllLeads || permissions?.editLead || permissions?.manageLeads) return true;
   const team = status?.team || teamForStatus(status?.value, status?.team);
   if (role === ROLES.EMPLOYEE || role === ROLES.MANAGER) return team === "calling" || team === "both";
   return false;
@@ -338,10 +338,15 @@ const canSetStatus = (user, status, permissions = {}) => {
  * a manager sees their team's, admins see the whole company.
  */
 const visibilityScope = async (req) => {
-  if (req.user.role === ROLES.EMPLOYEE) {
-    if (req.permissions?.viewAllLeads || (req.query.team === "operations" && req.permissions?.manageOperations)) {
-      return {};
-    }
+  if (
+    req.user.role === ROLES.SUPERADMIN ||
+    req.user.role === ROLES.COMPANY_ADMIN ||
+    req.permissions?.viewAllLeads === true
+  ) {
+    return {};
+  }
+
+  if (req.user.role === ROLES.EMPLOYEE || req.user.role === ROLES.OPS) {
     return {
       [Op.or]: [
         { assignedEmployeeId: req.user.id },
@@ -349,32 +354,8 @@ const visibilityScope = async (req) => {
       ],
     };
   }
-  if (req.user.role === ROLES.OPS) {
-    if (req.query.team === "operations") {
-      if (req.query.assignedOnly === "true") {
-        return {
-          [Op.or]: [
-            { assignedEmployeeId: req.user.id },
-            { assignedManagerId: req.user.id },
-          ],
-        };
-      }
-      return {};
-    }
-    if (req.permissions?.viewAllLeads) {
-      return {};
-    }
-    return {
-      [Op.or]: [
-        { assignedEmployeeId: req.user.id },
-        { assignedManagerId: req.user.id },
-      ],
-    };
-  }
+
   if (req.user.role === ROLES.MANAGER) {
-    if (req.permissions?.viewAllLeads) {
-      return {};
-    }
     const subordinates = await User.findAll({
       where: { companyId: req.user.companyId, managerId: req.user.id },
       attributes: ["id"],
@@ -799,9 +780,13 @@ exports.createLead = async (req, res) => {
 
     const remark = remarkOf(body);
 
-    // An employee creating a lead owns it; their manager inherits oversight.
+    // Whenever an employee/staff member creates a lead, default assignment to the creator unless explicitly provided
+    const defaultAssigneeId = ![ROLES.SUPERADMIN, ROLES.COMPANY_ADMIN].includes(req.user.role)
+      ? req.user.id
+      : null;
+
     const assignedEmployeeId =
-      body.assignedEmployeeId ?? body.person_id ?? (req.user.role === ROLES.EMPLOYEE ? req.user.id : null);
+      body.assignedEmployeeId ?? body.person_id ?? defaultAssigneeId;
     const owner = assignedEmployeeId ? await User.findByPk(assignedEmployeeId, { transaction }) : null;
     if (assignedEmployeeId && (!owner || owner.companyId !== companyId)) {
       await transaction.rollback();
@@ -815,7 +800,7 @@ exports.createLead = async (req, res) => {
         customerId: customer.id,
         status: status?.value || "NEW",
         assignedEmployeeId: assignedEmployeeId || null,
-        assignedManagerId: body.assignedManagerId ?? owner?.managerId ?? null,
+        assignedManagerId: body.assignedManagerId ?? owner?.managerId ?? (assignedEmployeeId === req.user.id ? req.user.managerId : null),
       },
       { transaction }
     );
@@ -1032,6 +1017,13 @@ exports.updateLead = async (req, res) => {
         reason: req.body.assignment_reason || req.body.reason || remark || null,
         req,
       });
+
+      if (data.assignedEmployeeId) {
+        await FollowUp.update(
+          { userId: data.assignedEmployeeId },
+          { where: { leadId: lead.id, companyId: lead.companyId, status: "PENDING" } }
+        ).catch((err) => console.error("[updateLead] FollowUp transfer error:", err));
+      }
     }
 
     if (statusChange) {
@@ -1151,16 +1143,19 @@ exports.updateLeadStatus = async (req, res) => {
       return res.status(404).json({ message: "Lead not found" });
     }
 
-    if (req.user.role === ROLES.EMPLOYEE) {
+    if ([ROLES.EMPLOYEE, ROLES.OPS].includes(req.user.role)) {
       if (
+        !req.permissions?.viewAllLeads &&
         !req.permissions?.editAllLeads &&
-        !req.permissions?.editLeads &&
+        !req.permissions?.editLead &&
+        !req.permissions?.manageLeads &&
+        lead.assignedEmployeeId &&
         lead.assignedEmployeeId !== req.user.id &&
         lead.assignedManagerId !== req.user.id
       ) {
         return res.status(403).json({
           code: "WORKED_LEAD_READ_ONLY",
-          message: "This lead is currently assigned to another employee. You have read-only access to this worked lead.",
+          message: "This lead is currently assigned to another staff member. You have read-only access to this lead.",
         });
       }
     }
@@ -1381,6 +1376,10 @@ exports.reassignLeadsBulk = async (req, res) => {
           reason: req.body.reason || `Bulk reassigned to ${owner.name}`,
           req,
         });
+        await FollowUp.update(
+          { userId: owner.id },
+          { where: { leadId: lead.id, companyId: lead.companyId, status: "PENDING" } }
+        ).catch((err) => console.error("[reassignLeadsBulk] FollowUp transfer error:", err));
       })
     );
 
@@ -1656,7 +1655,11 @@ exports.importLeadsFromExcel = async (req, res) => {
             : null;
         const rowCommission = parsedCommission !== null && !isNaN(parsedCommission) ? parsedCommission : null;
 
-        await Lead.create(
+        const defaultAssigneeId = ![ROLES.SUPERADMIN, ROLES.COMPANY_ADMIN].includes(req.user.role)
+          ? req.user.id
+          : null;
+
+        const importedLead = await Lead.create(
           {
             companyId,
             customerId: customer.id,
@@ -1666,6 +1669,8 @@ exports.importLeadsFromExcel = async (req, res) => {
             requiredAmount: row.est_budget || null,
             priority: String(row.priority || "MEDIUM").toUpperCase(),
             status: fresh?.value || "NEW",
+            assignedEmployeeId: defaultAssigneeId,
+            assignedManagerId: defaultAssigneeId ? (req.user.managerId || null) : null,
             nextFollowupDate,
           },
           { transaction }
@@ -1673,6 +1678,18 @@ exports.importLeadsFromExcel = async (req, res) => {
 
         await transaction.commit();
         imported += 1;
+
+        if (defaultAssigneeId) {
+          trackLeadAssignment({
+            companyId,
+            leadId: importedLead.id,
+            fromUserId: null,
+            toUserId: defaultAssigneeId,
+            assignedById: req.user.id,
+            reason: "Initial import assignment",
+            req: null,
+          }).catch(() => {});
+        }
 
         const remark = remarkOf(row);
         if (remark) rowRemarks.push(`row ${rowNumber}: ${remark}`);
@@ -1727,10 +1744,26 @@ exports.assignLeadSingle = async (req, res) => {
         return res.status(400).json({ message: "Target user not found in this company" });
       }
     }
+    const prevAssignee = lead.assignedEmployeeId;
     await lead.update({
       assignedEmployeeId: owner ? owner.id : null,
       assignedManagerId: owner ? (owner.managerId ?? null) : null,
     });
+    if (owner && prevAssignee !== owner.id) {
+      await trackLeadAssignment({
+        companyId: lead.companyId,
+        leadId: lead.id,
+        fromUserId: prevAssignee,
+        toUserId: owner.id,
+        assignedById: req.user.id,
+        reason: req.body.reason || "Lead assigned",
+        req,
+      });
+      await FollowUp.update(
+        { userId: owner.id },
+        { where: { leadId: lead.id, companyId: lead.companyId, status: "PENDING" } }
+      ).catch((err) => console.error("[assignLeadSingle] FollowUp transfer error:", err));
+    }
     await logActivity(req, {
       recordType: "Lead",
       recordId: lead.id,

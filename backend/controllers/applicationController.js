@@ -332,7 +332,32 @@ const listApplications = async (req, res, next) => {
       leadRequired = true;
     }
 
-    if (req.query.assignedOnly === "true") {
+    const isUnrestrictedAdmin =
+      req.user.role === ROLES.SUPERADMIN ||
+      req.user.role === ROLES.COMPANY_ADMIN ||
+      req.permissions?.viewAllLeads === true;
+
+    if (!isUnrestrictedAdmin) {
+      if (req.user.role === ROLES.MANAGER) {
+        const subordinates = await User.findAll({
+          where: { companyId: req.user.companyId, managerId: req.user.id },
+          attributes: ["id"],
+          raw: true,
+        });
+        const teamIds = [req.user.id, ...subordinates.map((u) => u.id)];
+        leadWhere[Op.or] = [
+          { assignedManagerId: req.user.id },
+          { assignedEmployeeId: { [Op.in]: teamIds } },
+        ];
+        leadRequired = true;
+      } else if (req.user.role === ROLES.OPS || req.user.role === ROLES.EMPLOYEE) {
+        leadWhere[Op.or] = [
+          { assignedEmployeeId: req.user.id },
+          { assignedManagerId: req.user.id },
+        ];
+        leadRequired = true;
+      }
+    } else if (req.query.assignedOnly === "true") {
       leadWhere[Op.or] = [
         { assignedEmployeeId: req.user.id },
         { assignedManagerId: req.user.id },
@@ -495,6 +520,7 @@ const listApplications = async (req, res, next) => {
     const allApps = await Application.findAll({
       where: summaryWhere,
       attributes: ["id", "status", "appliedAmount", "sanctionedAmount", "disbursedAmount"],
+      include: leadRequired ? [leadInclude] : [],
     });
 
     const summary = {
@@ -574,9 +600,39 @@ const getBankerStats = async (req, res, next) => {
       where.assignedBankerId = req.user.id;
     }
 
+    const leadWhere = {};
+    let leadRequired = false;
+    const isUnrestrictedAdmin =
+      req.user.role === ROLES.SUPERADMIN ||
+      req.user.role === ROLES.COMPANY_ADMIN ||
+      req.permissions?.viewAllLeads === true;
+
+    if (!isUnrestrictedAdmin) {
+      if (req.user.role === ROLES.MANAGER) {
+        const subordinates = await User.findAll({
+          where: { companyId: req.user.companyId, managerId: req.user.id },
+          attributes: ["id"],
+          raw: true,
+        });
+        const teamIds = [req.user.id, ...subordinates.map((u) => u.id)];
+        leadWhere[Op.or] = [
+          { assignedManagerId: req.user.id },
+          { assignedEmployeeId: { [Op.in]: teamIds } },
+        ];
+        leadRequired = true;
+      } else if (req.user.role === ROLES.OPS || req.user.role === ROLES.EMPLOYEE) {
+        leadWhere[Op.or] = [
+          { assignedEmployeeId: req.user.id },
+          { assignedManagerId: req.user.id },
+        ];
+        leadRequired = true;
+      }
+    }
+
     const applications = await Application.findAll({
       where,
       attributes: ["id", "status", "appliedAmount", "sanctionedAmount", "disbursedAmount"],
+      include: leadRequired ? [{ model: Lead, as: "lead", where: leadWhere, required: true }] : [],
     });
 
     const stats = {
@@ -666,6 +722,35 @@ const listAllQueries = async (req, res, next) => {
       where.queryText = { [Op.like]: `%${search.trim()}%` };
     }
 
+    const leadWhere = {};
+    let leadRequired = false;
+    const isUnrestrictedAdmin =
+      req.user.role === ROLES.SUPERADMIN ||
+      req.user.role === ROLES.COMPANY_ADMIN ||
+      req.permissions?.viewAllLeads === true;
+
+    if (!isUnrestrictedAdmin) {
+      if (req.user.role === ROLES.MANAGER) {
+        const subordinates = await User.findAll({
+          where: { companyId: req.user.companyId, managerId: req.user.id },
+          attributes: ["id"],
+          raw: true,
+        });
+        const teamIds = [req.user.id, ...subordinates.map((u) => u.id)];
+        leadWhere[Op.or] = [
+          { assignedManagerId: req.user.id },
+          { assignedEmployeeId: { [Op.in]: teamIds } },
+        ];
+        leadRequired = true;
+      } else if (req.user.role === ROLES.OPS || req.user.role === ROLES.EMPLOYEE) {
+        leadWhere[Op.or] = [
+          { assignedEmployeeId: req.user.id },
+          { assignedManagerId: req.user.id },
+        ];
+        leadRequired = true;
+      }
+    }
+
     const { count, rows } = await BankerQuery.findAndCountAll({
       where,
       limit,
@@ -676,7 +761,11 @@ const listAllQueries = async (req, res, next) => {
           model: Application,
           as: "application",
           attributes: ["id", "applicationNumber", "loanProduct", "status", "appliedAmount", "sanctionedAmount"],
-          include: [{ model: Customer, as: "customer", attributes: ["id", "name", "mobile", "city"] }],
+          required: leadRequired,
+          include: [
+            { model: Customer, as: "customer", attributes: ["id", "name", "mobile", "city"] },
+            ...(leadRequired ? [{ model: Lead, as: "lead", where: leadWhere, required: true }] : []),
+          ],
         },
         { model: User, as: "banker", attributes: ["id", "name", "email", "phone"] },
         { model: User, as: "resolvedByOps", attributes: ["id", "name", "email", "phone"] },

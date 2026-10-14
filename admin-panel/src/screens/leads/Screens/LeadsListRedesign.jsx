@@ -21,6 +21,7 @@ import {
   MessageSquare,
   Filter,
   CheckCircle2,
+  ChevronDown,
   X,
 } from "lucide-react";
 import API_URL from "../../../config";
@@ -69,6 +70,9 @@ export default function LeadsListRedesign() {
   const [assignQuery, setAssignQuery] = useState("");
   const [debouncedAssignQuery, setDebouncedAssignQuery] = useState("");
   const menuRef = useRef(null);
+  const [statusMenuFor, setStatusMenuFor] = useState(null); // { leadId, currentStatus, anchor }
+  const [updatingStatusLeadId, setUpdatingStatusLeadId] = useState(null);
+  const statusMenuRef = useRef(null);
 
   const userRole = localStorage.getItem("userRole") || "";
   const employeeRole = localStorage.getItem("employeeRole") || "";
@@ -341,6 +345,42 @@ export default function LeadsListRedesign() {
     return () => document.removeEventListener("mousedown", onDoc);
   }, [assignFor]);
 
+  useEffect(() => {
+    if (!statusMenuFor) return;
+    const onDoc = (event) => {
+      if (statusMenuRef.current && !statusMenuRef.current.contains(event.target)) {
+        setStatusMenuFor(null);
+      }
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [statusMenuFor]);
+
+  const handleStatusChange = async (leadId, newStatusObj) => {
+    const statusVal = typeof newStatusObj === "string" ? newStatusObj : (newStatusObj.value || newStatusObj.label);
+    setUpdatingStatusLeadId(leadId);
+    try {
+      await axios.patch(`${API_URL}/leads/${leadId}/status`, {
+        status: statusVal,
+      });
+      setRows((prev) =>
+        prev.map((row) =>
+          row.lead_id === leadId
+            ? { ...row, status: statusVal, status_value: statusVal }
+            : row
+        )
+      );
+      toast.success(`Status updated to "${newStatusObj.label || statusVal}"`);
+      setStatusMenuFor(null);
+      fetchCounts();
+    } catch (error) {
+      console.error("Failed to update status:", error);
+      toast.error(error.response?.data?.message || "Failed to update status");
+    } finally {
+      setUpdatingStatusLeadId(null);
+    }
+  };
+
   const handleAssign = async (leadId, emp) => {
     try {
       await axios.put(`${API_URL}/leads/${leadId}`, {
@@ -356,7 +396,7 @@ export default function LeadsListRedesign() {
       setAssignQuery("");
       setDebouncedAssignQuery("");
       fetchCounts();
-      if (statusCategory === "WORKED") {
+      if (statusCategory === "WORKED" || (!isCompanyAdmin && !userPermissions.viewAllLeads)) {
         fetchLeads(currentPage, debouncedSearchTerm);
       }
     } catch (error) {
@@ -860,26 +900,60 @@ export default function LeadsListRedesign() {
                     <td>
                       {(() => {
                         const stageInfo = getStatusStageInfo(row.status || row.status_value);
+                        const isReadonly = Boolean(row.is_read_only) || !canEditLead;
                         return (
                           <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                            <span
-                              style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: 5,
-                                padding: "3px 9px",
-                                borderRadius: "12px",
-                                fontSize: "12px",
-                                fontWeight: 700,
-                                background: stageInfo.bg,
-                                color: stageInfo.color,
-                                border: `1px solid ${stageInfo.border}`,
-                                width: "fit-content",
-                              }}
-                            >
-                              <span>{stageInfo.icon}</span>
-                              <span>{row.status || "Unassigned"}</span>
-                            </span>
+                            {isReadonly ? (
+                              <span
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: 5,
+                                  padding: "3px 9px",
+                                  borderRadius: "12px",
+                                  fontSize: "12px",
+                                  fontWeight: 700,
+                                  background: stageInfo.bg,
+                                  color: stageInfo.color,
+                                  border: `1px solid ${stageInfo.border}`,
+                                  width: "fit-content",
+                                }}
+                              >
+                                <span>{stageInfo.icon}</span>
+                                <span>{row.status || "Unassigned"}</span>
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  const rect = event.currentTarget.getBoundingClientRect();
+                                  setStatusMenuFor({ leadId: row.lead_id, currentStatus: row.status, anchor: rect });
+                                }}
+                                disabled={updatingStatusLeadId === row.lead_id}
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: 6,
+                                  padding: "4px 10px",
+                                  borderRadius: "12px",
+                                  fontSize: "12px",
+                                  fontWeight: 700,
+                                  background: stageInfo.bg,
+                                  color: stageInfo.color,
+                                  border: `1px solid ${stageInfo.border}`,
+                                  width: "fit-content",
+                                  cursor: "pointer",
+                                  boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                                  transition: "all 0.15s ease",
+                                }}
+                                title="Click to update lead status"
+                              >
+                                <span>{stageInfo.icon}</span>
+                                <span>{updatingStatusLeadId === row.lead_id ? "Updating..." : (row.status || "Select Status")}</span>
+                                <ChevronDown size={12} style={{ opacity: 0.7 }} />
+                              </button>
+                            )}
                             <span
                               style={{
                                 fontSize: "10.5px",
@@ -1161,6 +1235,75 @@ export default function LeadsListRedesign() {
                 </li>
               ))
             )}
+          </ul>
+        </div>
+      ) : null}
+
+      {statusMenuFor ? (
+        <div
+          ref={statusMenuRef}
+          className="cc-leads-assign-menu"
+          style={{
+            position: "fixed",
+            zIndex: 65,
+            top: Math.min(statusMenuFor.anchor.bottom + 6, window.innerHeight - 280),
+            left: Math.min(statusMenuFor.anchor.left, window.innerWidth - 260),
+            minWidth: 220,
+            background: "#ffffff",
+            borderRadius: "12px",
+            border: "1px solid #d5ded7",
+            boxShadow: "0 14px 35px rgba(15,23,42,0.18)",
+            padding: "8px",
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", padding: "4px 8px 6px", borderBottom: "1px solid #f1f5f9" }}>
+            Change Lead Status
+          </div>
+          <ul style={{ maxHeight: 240, overflowY: "auto", margin: "4px 0 0", padding: 0, listStyle: "none" }}>
+            {statusesList.map((st) => {
+              const info = getStatusStageInfo(st.value || st.label);
+              const isCurrent = (statusMenuFor.currentStatus || "").toUpperCase() === (st.value || "").toUpperCase();
+              return (
+                <li key={st.id || st.value}>
+                  <button
+                    type="button"
+                    onClick={() => handleStatusChange(statusMenuFor.leadId, st)}
+                    style={{
+                      width: "100%",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "7px 10px",
+                      borderRadius: "8px",
+                      border: "none",
+                      background: isCurrent ? "#f0fdf4" : "transparent",
+                      color: isCurrent ? "#166534" : "#1e293b",
+                      fontSize: "12.5px",
+                      fontWeight: isCurrent ? 700 : 500,
+                      cursor: "pointer",
+                    }}
+                    onMouseEnter={(e) => { if (!isCurrent) e.currentTarget.style.background = "#f8fafc"; }}
+                    onMouseLeave={(e) => { if (!isCurrent) e.currentTarget.style.background = "transparent"; }}
+                  >
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                      <span
+                        style={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: "50%",
+                          background: info.color || "#059669",
+                        }}
+                      />
+                      {st.label || st.value}
+                    </span>
+                    <span style={{ fontSize: "10px", color: "#94a3b8", fontWeight: 600 }}>
+                      {info.stage}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </div>
       ) : null}
