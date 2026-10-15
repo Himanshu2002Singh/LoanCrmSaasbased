@@ -40,7 +40,11 @@ function ProtectedRoute({ children, allowedRoles = ["manager", "operations"], re
   }
 
   // Permission Check for Company users (Company Admin has all permissions)
-  if (requiredPermission && userRole !== "COMPANY_ADMIN" && userRole !== "SUPERADMIN") {
+  const isCompanyAdmin =
+    ["COMPANY_ADMIN", "SUPERADMIN"].includes(userRole?.toUpperCase()) ||
+    ["admin", "superadmin"].includes(employeeRole?.toLowerCase());
+
+  if (requiredPermission && !isCompanyAdmin) {
     let permissions = {};
     try {
       permissions = JSON.parse(localStorage.getItem("userPermissions") || "{}");
@@ -48,8 +52,31 @@ function ProtectedRoute({ children, allowedRoles = ["manager", "operations"], re
       permissions = {};
     }
 
-    const hasPermission = Boolean(permissions[requiredPermission] || permissions.manageSettings);
-    if (!hasPermission || (permissions[requiredPermission] === false && !permissions.manageSettings)) {
+    const isConfidential = [
+      "viewPayouts",
+      "managePayouts",
+      "viewConnectors",
+      "manageConnectors",
+    ].includes(requiredPermission);
+
+    let hasPermission = false;
+    if (requiredPermission === "viewExpenses") {
+      // Expense by Employees is universal for all staff roles
+      hasPermission = true;
+    } else if (permissions[requiredPermission] === true) {
+      hasPermission = true;
+    } else if (permissions[requiredPermission] === false) {
+      hasPermission = false;
+    } else if (isConfidential) {
+      hasPermission = employeeRole === "finance" || userRole === "FINANCE";
+    } else {
+      hasPermission = Boolean(permissions.manageSettings);
+    }
+
+    if (!hasPermission) {
+      if (requiredPermission === "manageSettings") {
+        return <Navigate to="/profile" replace />;
+      }
       const fallbackHome =
         employeeRole === "finance" || userRole === "FINANCE"
           ? "/case-payouts"

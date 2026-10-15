@@ -493,7 +493,7 @@ export default function RolePermissionsRedesign() {
         managePayouts: false,
         viewConnectors: false,
         manageConnectors: false,
-        viewExpenses: false,
+        viewExpenses: true, // Employee expenses universal
         manageExpenses: false,
         viewAllLeads: false,
         createLead: selectedRole === "MANAGER" || selectedRole === "EMPLOYEE",
@@ -672,7 +672,7 @@ export default function RolePermissionsRedesign() {
         viewFollowupWork: true,
         viewOperations: true,
         viewPayouts: false,
-        viewExpenses: false,
+        viewExpenses: true,
         viewConnectors: false,
       });
       setEmployeeHasChanges(true);
@@ -686,7 +686,7 @@ export default function RolePermissionsRedesign() {
         managePayouts: false,
         viewConnectors: false,
         manageConnectors: false,
-        viewExpenses: false,
+        viewExpenses: true,
         manageExpenses: false,
         exportData: false,
       });

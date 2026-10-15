@@ -74,6 +74,10 @@ export default function ProfileScreen() {
 
         if (u.name) localStorage.setItem("name", u.name);
         if (u.email) localStorage.setItem("email", u.email);
+        if (u.resolvedPermissions) {
+          localStorage.setItem("userPermissions", JSON.stringify(u.resolvedPermissions));
+          window.dispatchEvent(new CustomEvent("permissions_updated"));
+        }
       }
     } catch (err) {
       console.error("Failed to fetch user profile:", err);

@@ -49,22 +49,23 @@ exports.getExpenses = async (req, res) => {
       limit = 50,
     } = req.query;
 
-    const isAdminOrHasPerm =
+    const canViewAllExpenses =
       req.user.role === "SUPERADMIN" ||
       req.user.role === "COMPANY_ADMIN" ||
-      Boolean(req.permissions?.viewExpenses);
+      req.user.role === "FINANCE" ||
+      Boolean(req.permissions?.manageExpenses);
 
     const where = { ...scope };
 
     // Role-based visibility
-    if (!isAdminOrHasPerm) {
-      // Employees, Operations, Sales Managers without full viewExpenses see only their own expenses
+    if (!canViewAllExpenses) {
+      // Employees, Operations, Sales Managers without full manageExpenses see only their own expenses
       where[Op.or] = [
         { createdById: req.user.id },
         { employeeId: req.user.id },
       ];
     } else {
-      // Admin / Manager with viewExpenses
+      // Admin / Finance / Staff with manageExpenses
       if (expenseType && expenseType !== "ALL") {
         where.expenseType = expenseType.toUpperCase();
       }

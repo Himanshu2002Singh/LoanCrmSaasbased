@@ -386,7 +386,7 @@ const listApplications = async (req, res, next) => {
         },
       ],
       required: leadRequired,
-      where: Object.keys(leadWhere).length > 0 ? leadWhere : undefined,
+      where: leadRequired || Reflect.ownKeys(leadWhere).length > 0 ? leadWhere : undefined,
     };
 
     const { count, rows } = await Application.findAndCountAll({
@@ -814,9 +814,26 @@ const getApplicationById = async (req, res, next) => {
       return res.status(404).json({ message: "Application not found" });
     }
 
+    const isUnrestrictedAdmin =
+      req.user.role === ROLES.SUPERADMIN ||
+      req.user.role === ROLES.COMPANY_ADMIN ||
+      req.permissions?.viewAllLeads === true;
+
     // Role check for Banker: only assigned applications allowed
     if (req.user.role === ROLES.BANKER && application.assignedBankerId !== req.user.id) {
       return res.status(403).json({ message: "You are not authorized to view this application" });
+    }
+
+    // Role check for Employee / Ops: only assigned applications allowed unless unrestricted admin
+    if (!isUnrestrictedAdmin && [ROLES.OPS, ROLES.EMPLOYEE].includes(req.user.role)) {
+      if (
+        application.lead &&
+        application.lead.assignedEmployeeId &&
+        application.lead.assignedEmployeeId !== req.user.id &&
+        application.lead.assignedManagerId !== req.user.id
+      ) {
+        return res.status(403).json({ message: "You are not authorized to view this application" });
+      }
     }
 
     // Collect all documents linked to Customer, Lead, or Application

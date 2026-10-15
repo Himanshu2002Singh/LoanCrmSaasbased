@@ -103,7 +103,8 @@ export default function ExpenseTrackerScreen() {
     }
   }, []);
 
-  const canViewOfficeExpenses = isCompanyAdmin || Boolean(userPermissions.viewExpenses || userPermissions.manageExpenses);
+  const isFinance = userRole.toUpperCase() === "FINANCE" || employeeRole.toLowerCase() === "finance";
+  const canViewOfficeExpenses = isCompanyAdmin || isFinance || Boolean(userPermissions.manageExpenses);
   const canViewFullExpenses = canViewOfficeExpenses;
 
   const [selectedMonth, setSelectedMonth] = useState(getTodayMonthStr);

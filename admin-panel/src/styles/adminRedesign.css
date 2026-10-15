@@ -265,6 +265,144 @@
   display: none;
 }
 
+/* Sidebar Dropdown Groups & Sub-items */
+.cc-nav-group {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.cc-nav-group-header {
+  width: 100%;
+  justify-content: space-between;
+  border: 0;
+  cursor: pointer;
+  background: transparent;
+  text-align: left;
+  font-family: inherit;
+}
+
+.cc-nav-header-left {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+
+.cc-nav-chevron {
+  color: #64748b;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.cc-nav-group-header:hover .cc-nav-chevron {
+  color: #cbd5e1;
+}
+
+.cc-nav-chevron-rotated {
+  transform: rotate(180deg);
+  color: #34d399;
+}
+
+.cc-nav-group-header-active {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.cc-nav-group-header-active .cc-nav-icon {
+  color: #34d399;
+}
+
+.cc-nav-group-children {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 3px;
+  margin-bottom: 6px;
+  margin-left: 20px;
+  padding-left: 12px;
+  border-left: 1.5px solid rgba(255, 255, 255, 0.12);
+  animation: ccNavSlideDown 0.18s ease-out;
+}
+
+@keyframes ccNavSlideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.cc-nav-sub-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: #94a3b8;
+  text-decoration: none;
+  transition: background 140ms ease, color 140ms ease, transform 140ms ease;
+  white-space: nowrap;
+}
+
+.cc-nav-sub-item:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: #f8fafc;
+  transform: translateX(2px);
+}
+
+.cc-nav-sub-item-active {
+  background: rgba(4, 120, 87, 0.22);
+  color: #34d399;
+  font-weight: 650;
+  box-shadow: inset 2.5px 0 0 #10b981;
+}
+
+.cc-nav-sub-item .cc-sub-icon {
+  flex-shrink: 0;
+  opacity: 0.75;
+}
+
+.cc-nav-sub-item-active .cc-sub-icon {
+  opacity: 1;
+  color: #34d399;
+}
+
+/* Fast action items: + Add Lead, + Add Loan Product, + Add Lead Status */
+.cc-nav-action-item {
+  color: #10b981;
+  font-weight: 600;
+}
+
+.cc-nav-action-item .cc-sub-icon {
+  color: #10b981;
+  opacity: 1;
+}
+
+.cc-nav-action-item:hover {
+  background: rgba(16, 185, 129, 0.12);
+  color: #34d399;
+}
+
+.cc-admin-collapsed .cc-nav-group-children {
+  display: none !important;
+}
+
+.cc-admin-collapsed .cc-nav-chevron {
+  display: none !important;
+}
+
+.cc-admin-collapsed .cc-nav-header-left {
+  justify-content: center;
+  width: 100%;
+}
+
 .cc-logout {
   margin: 0;
   border: 0;

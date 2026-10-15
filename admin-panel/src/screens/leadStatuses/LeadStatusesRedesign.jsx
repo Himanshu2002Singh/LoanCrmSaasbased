@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
@@ -81,6 +82,17 @@ export default function LeadStatusesRedesign() {
     return () => clearTimeout(debounce);
   }, [searchTerm]);
 
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const closeModal = () => {
+    setModalOpen(false);
+    setEditing(null);
+    if (location.search.includes("action=add")) {
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  };
+
   const openCreate = () => {
     if (!canManage) {
       toast.error("You do not have permission to add lead statuses");
@@ -90,6 +102,18 @@ export default function LeadStatusesRedesign() {
     setForm(emptyForm());
     setModalOpen(true);
   };
+
+  useEffect(() => {
+    if ((location.search.includes("action=add") || location.state?.openCreate) && !loading) {
+      openCreate();
+    }
+  }, [location.search, location.state, loading]);
+
+  useEffect(() => {
+    const handleOpenModal = () => openCreate();
+    window.addEventListener("crm_open_add_lead_status", handleOpenModal);
+    return () => window.removeEventListener("crm_open_add_lead_status", handleOpenModal);
+  }, [canManage]);
 
   const openEdit = (status) => {
     if (!canManage) {
@@ -121,7 +145,7 @@ export default function LeadStatusesRedesign() {
         await axios.post(`${API_URL}/lead-statuses`, form);
         toast.success("Status created");
       }
-      setModalOpen(false);
+      closeModal();
       setForm(emptyForm());
       setEditing(null);
       fetchStatuses();
@@ -301,11 +325,11 @@ export default function LeadStatusesRedesign() {
       </section>
 
       {modalOpen ? (
-        <div className="cc-ls-overlay" onClick={() => setModalOpen(false)}>
+        <div className="cc-ls-overlay" onClick={closeModal}>
           <div className="cc-ls-modal" onClick={(event) => event.stopPropagation()}>
             <div className="cc-ls-modal-head">
               <h3>{editing ? "Edit status" : "New status"}</h3>
-              <button type="button" onClick={() => setModalOpen(false)}><X size={16} /></button>
+              <button type="button" onClick={closeModal}><X size={16} /></button>
             </div>
             <form
               className="cc-ls-form"
@@ -369,7 +393,7 @@ export default function LeadStatusesRedesign() {
                 </label>
               </div>
               <div className="cc-ls-modal-actions">
-                <button type="button" className="cc-ls-btn ghost" onClick={() => setModalOpen(false)}>
+                <button type="button" className="cc-ls-btn ghost" onClick={closeModal}>
                   Cancel
                 </button>
                 <button type="submit" className="cc-ls-btn primary" disabled={submitting}>

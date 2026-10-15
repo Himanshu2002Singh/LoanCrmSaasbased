@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import moment from "moment";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import * as XLSX from "xlsx";
@@ -45,6 +45,7 @@ const getDefaultRange = () => {
 
 export default function LeadsListRedesign() {
   const navigate = useNavigate();
+  const location = useLocation();
   const defaults = useMemo(getDefaultRange, []);
   const [rows, setRows] = useState([]);
   const [employees, setEmployees] = useState([]);
@@ -108,6 +109,29 @@ export default function LeadsListRedesign() {
       (["MANAGER", "OPS", "EMPLOYEE"].includes(userRole.toUpperCase()) ||
         ["manager", "operations", "calling", "employee", "sales"].includes(employeeRole?.toLowerCase()) ||
         Boolean(userPermissions.reassignLeads || userPermissions.assignLead || userPermissions.manageLeads)));
+
+  useEffect(() => {
+    if (location.search.includes("action=add") || location.state?.openAddLead) {
+      if (canAddLead) {
+        setShowAddModal(true);
+      }
+    }
+  }, [location.search, location.state, canAddLead]);
+
+  useEffect(() => {
+    const handleOpenModal = () => {
+      if (canAddLead) setShowAddModal(true);
+    };
+    window.addEventListener("crm_open_add_lead", handleOpenModal);
+    return () => window.removeEventListener("crm_open_add_lead", handleOpenModal);
+  }, [canAddLead]);
+
+  const handleCloseAddModal = () => {
+    setShowAddModal(false);
+    if (location.search.includes("action=add")) {
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  };
 
   const formatDateTime = (isoStr) => {
     if (!isoStr) return "--";
@@ -1423,7 +1447,7 @@ export default function LeadsListRedesign() {
 
       <AddLeadModal
         open={showAddModal}
-        onClose={() => setShowAddModal(false)}
+        onClose={handleCloseAddModal}
         onCreated={() => fetchLeads(currentPage)}
       />
 

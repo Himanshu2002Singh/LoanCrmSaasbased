@@ -3,6 +3,119 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import CrmLogo from "./CrmLogo";
 import { resolveLogoUrl } from "../utils/logo";
 
+const ROLE_DEFAULTS = {
+  COMPANY_ADMIN: {
+    viewDashboard: true,
+    viewLeads: true,
+    createLead: true,
+    manageLeads: true,
+    viewFollowupWork: true,
+    viewTasks: true,
+    viewNotes: true,
+    viewOperations: true,
+    viewConnectors: true,
+    viewPayouts: true,
+    viewExpenses: true,
+    viewReports: true,
+    manageUsers: true,
+    manageSettings: true,
+    manageLeadStatuses: true,
+    manageLoanProducts: true,
+    manageLeadSources: true,
+    manageBranches: true,
+    viewAttendance: true,
+    viewLenders: true,
+  },
+  MANAGER: {
+    viewDashboard: true,
+    viewLeads: true,
+    createLead: true,
+    manageLeads: true,
+    viewFollowupWork: true,
+    viewTasks: true,
+    viewNotes: true,
+    viewReports: true,
+    viewAttendance: true,
+    viewOperations: false,
+    manageLoanProducts: false,
+    manageLeadStatuses: false,
+    manageLeadSources: false,
+    manageUsers: false,
+    manageBranches: false,
+    viewConnectors: false,
+    viewPayouts: false,
+    viewExpenses: true,
+    manageSettings: false,
+    viewLenders: false,
+  },
+  OPS: {
+    viewDashboard: true,
+    viewLeads: true,
+    createLead: false,
+    manageLeads: true,
+    viewFollowupWork: true,
+    viewTasks: true,
+    viewNotes: true,
+    viewOperations: true,
+    manageOperations: true,
+    viewPayouts: true,
+    viewReports: false,
+    viewConnectors: false,
+    viewExpenses: true,
+    manageUsers: false,
+    manageBranches: false,
+    manageSettings: false,
+    manageLeadStatuses: false,
+    manageLoanProducts: false,
+    manageLeadSources: false,
+    viewAttendance: false,
+    viewLenders: true,
+  },
+  EMPLOYEE: {
+    viewDashboard: false,
+    viewLeads: true,
+    createLead: true,
+    manageLeads: true,
+    viewFollowupWork: true,
+    viewTasks: false,
+    viewNotes: true,
+    viewOperations: false,
+    viewConnectors: false,
+    viewPayouts: false,
+    viewExpenses: true,
+    viewReports: false,
+    manageUsers: false,
+    manageBranches: false,
+    manageSettings: false,
+    manageLeadStatuses: false,
+    manageLoanProducts: false,
+    manageLeadSources: false,
+    viewAttendance: false,
+    viewLenders: false,
+  },
+  FINANCE: {
+    viewDashboard: false,
+    viewLeads: false,
+    createLead: false,
+    viewFollowupWork: false,
+    viewTasks: false,
+    viewNotes: false,
+    viewOperations: false,
+    viewConnectors: true,
+    viewPayouts: true,
+    viewExpenses: true,
+    viewReports: true,
+    manageUsers: false,
+    manageBranches: false,
+    manageSettings: false,
+    manageLeadStatuses: false,
+    manageLoanProducts: false,
+    manageLeadSources: false,
+    viewAttendance: false,
+    viewLenders: false,
+  },
+};
+
 const Sidebar = ({ isOpen, setIsOpen }) => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -13,50 +126,117 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
   const isActive = (path) => location.pathname === path;
   const employeeRole = localStorage.getItem("employeeRole");
 
+  const userRole = localStorage.getItem("userRole") || "";
+  const isCompanyAdmin =
+    ["COMPANY_ADMIN", "SUPERADMIN"].includes(userRole.toUpperCase()) ||
+    ["admin", "superadmin"].includes(employeeRole?.toLowerCase());
+
+  let userPermissions = {};
+  try {
+    userPermissions = JSON.parse(localStorage.getItem("userPermissions") || "{}");
+  } catch {
+    userPermissions = {};
+  }
+
+  const canManageSettings = isCompanyAdmin || Boolean(userPermissions.manageSettings);
+
+  const checkPermission = (permKey) => {
+    if (isCompanyAdmin) return true;
+    if (!permKey) return true;
+    if (permKey === "viewExpenses") return true;
+    if (userPermissions[permKey] === true) return true;
+    if (userPermissions[permKey] === false) return false;
+
+    const normalizedRole =
+      employeeRole === "operations" || userRole.toUpperCase() === "OPERATIONS" || userRole.toUpperCase() === "OPS"
+        ? "OPS"
+        : employeeRole === "finance" || userRole.toUpperCase() === "FINANCE"
+        ? "FINANCE"
+        : employeeRole === "calling" || employeeRole === "employee" || userRole.toUpperCase() === "EMPLOYEE"
+        ? "EMPLOYEE"
+        : "MANAGER";
+
+    const roleDefault = ROLE_DEFAULTS[normalizedRole]?.[permKey];
+    if (roleDefault !== undefined) {
+      return Boolean(roleDefault);
+    }
+
+    return false;
+  };
+
   const managerNavItems = [
     { path: "/", label: "Dashboard", icon: "home" },
-    { path: "/leads", label: "Leads", icon: "document" },
-    { path: "/followup-work", label: "Today Followup / Work", icon: "calendar" },
-    { path: "/notes", label: "Quick Notes", icon: "document" },
-    { path: "/add-users", label: "Add Employees", icon: "user-add" },
-    { path: "/attendance", label: "Attendance", icon: "calendar" },
-    { path: "/tasks", label: "Tasks", icon: "task" },
-    { path: "/template", label: "Template", icon: "template" },
-    { path: "/email-templates", label: "Email Templates", icon: "document" },
-    { path: "/lead-statuses", label: "Lead Statuses", icon: "lead_report" },
-    { path: "/loan-products", label: "Loan Types", icon: "template" },
-    { path: "/lead-sources", label: "Lead Sources", icon: "template" },
-    { path: "/document-types", label: "Document Types", icon: "document" },
-    { path: "/operations", label: "Operations", icon: "operations" },
-    { path: "/party-payouts", label: "Party / Connector Details", icon: "template" },
-    { path: "/case-payouts", label: "Disbursement & Payouts", icon: "performance" },
-    { path: "/expenses", label: "Expense Tracker", icon: "expense" },
-    { path: "/performance", label: "Performance Report", icon: "performance" },
-    { path: "/lead_report", label: "Lead Report", icon: "lead_report" },
-    { path: "/settings", label: "Settings", icon: "settings" },
-    { path: "/logout", label: "Logout", icon: "logout" },
-  ];
-  const operationsNavItems = [
-    { path: "/leads", label: "Leads", icon: "document" },
-    { path: "/followup-work", label: "Today Followup / Work", icon: "calendar" },
-    { path: "/notes", label: "Quick Notes", icon: "document" },
-    { path: "/operations", label: "Operations", icon: "operations" },
-    { path: "/email-templates", label: "Email Templates", icon: "document" },
-    { path: "/party-payouts", label: "Party / Connector Details", icon: "template" },
-    { path: "/case-payouts", label: "Disbursement & Payouts", icon: "performance" },
-    { path: "/expenses", label: "Expense Tracker", icon: "expense" },
-    { path: "/logout", label: "Logout", icon: "logout" },
-  ];
-  const defaultNavItems = [
+    { path: "/leads", label: "Leads", icon: "document", permission: "viewLeads" },
+    { path: "/followup-work", label: "Today Followup / Work", icon: "calendar", permission: "viewFollowupWork" },
+    { path: "/tasks", label: "Tasks", icon: "task", permission: "viewTasks" },
+    { path: "/notes", label: "Quick Notes", icon: "document", permission: "viewNotes" },
+    { path: "/operations", label: "Operations", icon: "operations", permission: "viewOperations" },
+    { path: "/loan-products", label: "Loan Types", icon: "template", permission: "manageLoanProducts" },
+    { path: "/lead-statuses", label: "Lead Statuses", icon: "lead_report", permission: "manageLeadStatuses" },
+    { path: "/lead-sources", label: "Lead Sources", icon: "template", permission: "manageLeadSources" },
+    { path: "/document-types", label: "Document Types", icon: "document", permission: "manageLoanProducts" },
+    { path: "/add-users", label: "Add Employees", icon: "user-add", permission: "manageUsers" },
+    { path: "/attendance", label: "Attendance", icon: "calendar", permission: "viewAttendance" },
+    { path: "/party-payouts", label: "Party / Connector Details", icon: "template", permission: "viewConnectors" },
+    { path: "/case-payouts", label: "Disbursement & Payouts", icon: "performance", permission: "viewPayouts" },
+    { path: "/expenses", label: isCompanyAdmin ? "Expense Tracker" : "Expense by Employees", icon: "expense", permission: "viewExpenses" },
+    { path: "/performance", label: "Performance Report", icon: "performance", permission: "viewReports" },
+    { path: "/lead_report", label: "Lead Report", icon: "lead_report", permission: "viewReports" },
+    { path: "/email-templates", label: "Email Templates", icon: "document", permission: "manageSettings" },
+    { path: "/template", label: "Template", icon: "template", permission: "manageSettings" },
+    canManageSettings
+      ? { path: "/settings", label: "Settings", icon: "settings", permission: "manageSettings" }
+      : { path: "/profile", label: "My Profile", icon: "profile" },
     { path: "/logout", label: "Logout", icon: "logout" },
   ];
 
-  const navItems =
+  const operationsNavItems = [
+    { path: "/leads", label: "Leads", icon: "document", permission: "viewLeads" },
+    { path: "/followup-work", label: "Today Followup / Work", icon: "calendar", permission: "viewFollowupWork" },
+    { path: "/notes", label: "Quick Notes", icon: "document", permission: "viewNotes" },
+    { path: "/operations", label: "Operations", icon: "operations", permission: "viewOperations" },
+    { path: "/email-templates", label: "Email Templates", icon: "document", permission: "manageSettings" },
+    { path: "/party-payouts", label: "Party / Connector Details", icon: "template", permission: "viewConnectors" },
+    { path: "/case-payouts", label: "Disbursement & Payouts", icon: "performance", permission: "viewPayouts" },
+    { path: "/expenses", label: isCompanyAdmin ? "Expense Tracker" : "Expense by Employees", icon: "expense", permission: "viewExpenses" },
+    canManageSettings
+      ? { path: "/settings", label: "Settings", icon: "settings", permission: "manageSettings" }
+      : { path: "/profile", label: "My Profile", icon: "profile" },
+    { path: "/logout", label: "Logout", icon: "logout" },
+  ];
+
+  const employeeNavItems = [
+    { path: "/leads", label: "Leads", icon: "document", permission: "viewLeads" },
+    { path: "/followup-work", label: "Today Followup / Work", icon: "calendar", permission: "viewFollowupWork" },
+    { path: "/notes", label: "Quick Notes", icon: "document", permission: "viewNotes" },
+    { path: "/expenses", label: "Expense by Employees", icon: "expense", permission: "viewExpenses" },
+    canManageSettings
+      ? { path: "/settings", label: "Settings", icon: "settings", permission: "manageSettings" }
+      : { path: "/profile", label: "My Profile", icon: "profile" },
+    { path: "/logout", label: "Logout", icon: "logout" },
+  ];
+
+  const defaultNavItems = [
+    { path: "/expenses", label: "Expense by Employees", icon: "expense", permission: "viewExpenses" },
+    { path: "/profile", label: "My Profile", icon: "profile" },
+    { path: "/logout", label: "Logout", icon: "logout" },
+  ];
+
+  const rawNavItems =
     employeeRole === "operations"
       ? operationsNavItems
       : employeeRole === "manager"
-        ? managerNavItems
-        : defaultNavItems;
+      ? managerNavItems
+      : employeeRole === "calling" || employeeRole === "employee"
+      ? employeeNavItems
+      : defaultNavItems;
+
+  const navItems = rawNavItems.filter((item) => {
+    if (item.permission && !checkPermission(item.permission)) {
+      return false;
+    }
+    return true;
+  });
 
   const getIcon = (icon) => {
     switch (icon) {
@@ -105,6 +285,13 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
           <svg className="w-5 h-5 mr-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+        );
+      case "profile":
+      case "user":
+        return (
+          <svg className="w-5 h-5 mr-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
           </svg>
         );
       case "logout":

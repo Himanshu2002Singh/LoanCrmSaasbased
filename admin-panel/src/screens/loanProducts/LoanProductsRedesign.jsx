@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
@@ -86,6 +87,17 @@ export default function LoanProductsRedesign() {
     return () => clearTimeout(debounce);
   }, [searchTerm]);
 
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const closeModal = () => {
+    setModalOpen(false);
+    setEditing(null);
+    if (location.search.includes("action=add")) {
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  };
+
   const openCreate = () => {
     if (!canManage) {
       toast.error("You do not have permission to add loan products");
@@ -101,6 +113,18 @@ export default function LoanProductsRedesign() {
     });
     setModalOpen(true);
   };
+
+  useEffect(() => {
+    if ((location.search.includes("action=add") || location.state?.openCreate) && !loading) {
+      openCreate();
+    }
+  }, [location.search, location.state, loading]);
+
+  useEffect(() => {
+    const handleOpenModal = () => openCreate();
+    window.addEventListener("crm_open_add_loan_product", handleOpenModal);
+    return () => window.removeEventListener("crm_open_add_loan_product", handleOpenModal);
+  }, [products, canManage]);
 
   const openEdit = (product) => {
     if (!canManage) {
@@ -145,7 +169,7 @@ export default function LoanProductsRedesign() {
         });
         toast.success("Loan product created successfully");
       }
-      setModalOpen(false);
+      closeModal();
       setForm(emptyForm());
       setEditing(null);
       fetchProducts();
@@ -430,7 +454,7 @@ export default function LoanProductsRedesign() {
 
       {/* Create / Edit Modal */}
       {modalOpen ? (
-        <div className="cc-lp-overlay" onClick={() => setModalOpen(false)}>
+        <div className="cc-lp-overlay" onClick={closeModal}>
           <div
             className="cc-lp-modal"
             onClick={(event) => event.stopPropagation()}
@@ -452,7 +476,7 @@ export default function LoanProductsRedesign() {
               <button
                 type="button"
                 className="cc-lp-modal-close"
-                onClick={() => setModalOpen(false)}
+                onClick={closeModal}
               >
                 <X size={16} />
               </button>
@@ -575,7 +599,7 @@ export default function LoanProductsRedesign() {
                 <button
                   type="button"
                   className="cc-lp-btn ghost"
-                  onClick={() => setModalOpen(false)}
+                  onClick={closeModal}
                 >
                   Cancel
                 </button>

@@ -60,6 +60,32 @@ const PlatformShell = ({ children }) => (
   <ProtectedRoute allowedRoles={["superadmin"]}>{children}</ProtectedRoute>
 );
 
+const SettingsRouteWrapper = () => {
+  const userRole = localStorage.getItem("userRole") || "";
+  const employeeRole = localStorage.getItem("employeeRole") || "";
+  const isCompanyAdmin =
+    ["COMPANY_ADMIN", "SUPERADMIN"].includes(userRole.toUpperCase()) ||
+    ["admin", "superadmin"].includes(employeeRole.toLowerCase());
+
+  let permissions = {};
+  try {
+    permissions = JSON.parse(localStorage.getItem("userPermissions") || "{}");
+  } catch (e) {
+    permissions = {};
+  }
+
+  const canManageSettings = isCompanyAdmin || Boolean(permissions.manageSettings);
+  if (!canManageSettings) {
+    return <Navigate to="/profile" replace />;
+  }
+
+  return (
+    <RedesignPageFrame pageKey="settings">
+      <SettingsScreen />
+    </RedesignPageFrame>
+  );
+};
+
 function App() {
   return (
     <Router>
@@ -204,7 +230,7 @@ function App() {
         <Route
           path="/template"
           element={
-            <PageShell>
+            <PageShell requiredPermission="manageSettings">
               <TemplateScreen />
             </PageShell>
           }
@@ -212,7 +238,7 @@ function App() {
         <Route
           path="/email-templates"
           element={
-            <PageShell allowedRoles={["manager", "operations"]}>
+            <PageShell allowedRoles={["manager", "operations"]} requiredPermission="manageSettings">
               <EmailTemplatesScreen />
             </PageShell>
           }
@@ -260,7 +286,7 @@ function App() {
         <Route
           path="/case-payouts"
           element={
-            <PageShell allowedRoles={["manager", "operations", "finance"]}>
+            <PageShell allowedRoles={["manager", "operations", "finance"]} requiredPermission="viewPayouts">
               <CasePayoutsScreen />
             </PageShell>
           }
@@ -268,7 +294,7 @@ function App() {
         <Route
           path="/payouts"
           element={
-            <PageShell allowedRoles={["manager", "operations", "finance"]}>
+            <PageShell allowedRoles={["manager", "operations", "finance"]} requiredPermission="viewPayouts">
               <CasePayoutsScreen />
             </PageShell>
           }
@@ -276,7 +302,7 @@ function App() {
         <Route
           path="/expenses"
           element={
-            <PageShell allowedRoles={["manager", "operations", "calling", "employee", "finance"]}>
+            <PageShell allowedRoles={["manager", "operations", "calling", "employee", "finance", "sales", "ops"]} requiredPermission="viewExpenses">
               <ExpenseTrackerScreen />
             </PageShell>
           }
@@ -284,7 +310,7 @@ function App() {
         <Route
           path="/expense-tracker"
           element={
-            <PageShell allowedRoles={["manager", "operations", "calling", "employee", "finance"]}>
+            <PageShell allowedRoles={["manager", "operations", "calling", "employee", "finance", "sales", "ops"]} requiredPermission="viewExpenses">
               <ExpenseTrackerScreen />
             </PageShell>
           }
@@ -292,7 +318,7 @@ function App() {
         <Route
           path="/document-types"
           element={
-            <PageShell requiredPermission="manageSettings">
+            <PageShell requiredPermission="manageLoanProducts">
               <DocumentTypesScreen />
             </PageShell>
           }
@@ -324,10 +350,8 @@ function App() {
         <Route
           path="/settings"
           element={
-            <PageShell requiredPermission="manageSettings">
-              <RedesignPageFrame pageKey="settings">
-                <SettingsScreen />
-              </RedesignPageFrame>
+            <PageShell allowedRoles={["admin", "manager", "operations", "calling", "employee", "finance", "banker"]}>
+              <SettingsRouteWrapper />
             </PageShell>
           }
         />
@@ -358,7 +382,7 @@ function App() {
         <Route
           path="/company"
           element={
-            <PageShell allowedRoles={["admin", "manager"]}>
+            <PageShell allowedRoles={["admin", "manager"]} requiredPermission="manageSettings">
               <CompanyProfileScreen />
             </PageShell>
           }

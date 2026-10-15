@@ -808,6 +808,12 @@ export default function OperationsRedesign() {
   });
   const [editBankSubmitting, setEditBankSubmitting] = useState(false);
 
+  // Reassign Lead / Case Ownership Modal State
+  const [reassignModalData, setReassignModalData] = useState(null);
+  const [reassignTargetUserId, setReassignTargetUserId] = useState("");
+  const [reassignReason, setReassignReason] = useState("");
+  const [reassignSubmitting, setReassignSubmitting] = useState(false);
+
   // Bank Email Dispatch Modal State
   const [bankMailModalApp, setBankMailModalApp] = useState(null);
   const [emailTemplates, setEmailTemplates] = useState([]);
@@ -2801,34 +2807,120 @@ export default function OperationsRedesign() {
       };
 
       setApplications((prev) =>
-        prev.map((a) => (a.id === editBankModalApp.id ? patchApp(a) : a))
-      );
-      setFilteredApplications((prev) =>
-        prev.map((a) => (a.id === editBankModalApp.id ? patchApp(a) : a))
+        Array.isArray(prev) ? prev.map((a) => (a.id === editBankModalApp.id ? patchApp(a) : a)) : []
       );
       if (verificationApp && verificationApp.id === editBankModalApp.id) {
         setVerificationApp((prev) => patchApp(prev));
       }
 
       setLeads((prev) =>
-        prev.map((ld) => {
-          if (ld.application_id === editBankModalApp.id || ld.lead_id === editBankModalApp.leadId) {
-            return {
-              ...ld,
-              bank_name: selectedLender?.name || ld.bank_name,
-            };
-          }
-          return ld;
-        })
+        Array.isArray(prev)
+          ? prev.map((ld) => {
+              if (ld.application_id === editBankModalApp.id || ld.lead_id === editBankModalApp.leadId) {
+                return {
+                  ...ld,
+                  bank_name: selectedLender?.name || ld.bank_name,
+                };
+              }
+              return ld;
+            })
+          : []
       );
 
       toast.success(`Bank successfully updated to ${selectedLender?.name || "selected Bank"}!`);
       setEditBankModalApp(null);
+      fetchApplications(appCurrentPage);
+      fetchLeads(leadCurrentPage);
     } catch (error) {
       console.error("Error updating bank:", error);
       toast.error(error.response?.data?.message || "Failed to update Bank");
     } finally {
       setEditBankSubmitting(false);
+    }
+  };
+
+  // Reassign Lead Ownership
+  const openReassignModal = (item) => {
+    if (!item) return;
+    const leadId = item.lead_id || item.leadId || (item.lead ? item.lead.id : item.id);
+    const currentOwnerId =
+      item.person_id ||
+      item.assignedEmployeeId ||
+      item.lead?.assignedEmployeeId ||
+      item.current_owner_id ||
+      "";
+    const currentOwnerName =
+      item.owner ||
+      item.current_owner ||
+      item.lead?.assignedEmployee?.name ||
+      "Unassigned";
+    const appNum = item.applicationNumber || item.application_number || "";
+    const custName =
+      item.name ||
+      item.customer?.name ||
+      item.customerName ||
+      "Customer";
+
+    setReassignModalData({
+      lead_id: leadId,
+      name: custName,
+      owner: currentOwnerName,
+      person_id: currentOwnerId,
+      applicationNumber: appNum,
+      applicationId: item.applicationId || (item.lead_id ? item.application_id : item.id),
+    });
+    setReassignTargetUserId(currentOwnerId ? String(currentOwnerId) : "");
+    setReassignReason("");
+  };
+
+  const handleReassignSubmit = async (e) => {
+    e.preventDefault();
+    if (!reassignTargetUserId) {
+      toast.warning("Please select a staff member to reassign to");
+      return;
+    }
+    const leadId = reassignModalData?.lead_id;
+    if (!leadId) {
+      toast.error("Lead reference is missing for this record");
+      return;
+    }
+    setReassignSubmitting(true);
+    try {
+      const targetEmp = employees.find((u) => String(u.id) === String(reassignTargetUserId));
+      await axios.patch(`${API_URL}/leads/${leadId}/assign`, {
+        assignedEmployeeId: parseInt(reassignTargetUserId, 10),
+        reason:
+          reassignReason ||
+          (targetEmp ? `Reassigned to ${targetEmp.name} from Operations` : "Reassigned from Operations"),
+      });
+
+      toast.success(targetEmp ? `Lead reassigned to ${targetEmp.name}!` : "Lead reassigned successfully!");
+      setReassignModalData(null);
+      setReassignReason("");
+
+      // Refresh applications and leads queue
+      fetchApplications(appCurrentPage);
+      fetchLeads(leadCurrentPage);
+
+      if (verificationApp && (verificationApp.leadId === leadId || verificationApp.lead?.id === leadId)) {
+        setVerificationApp((prev) =>
+          prev
+            ? {
+                ...prev,
+                lead: {
+                  ...(prev.lead || {}),
+                  assignedEmployeeId: parseInt(reassignTargetUserId, 10),
+                  assignedEmployee: targetEmp || prev.lead?.assignedEmployee,
+                },
+              }
+            : prev
+        );
+      }
+    } catch (err) {
+      console.error("Error reassigning lead:", err);
+      toast.error(err.response?.data?.message || "Failed to reassign lead");
+    } finally {
+      setReassignSubmitting(false);
     }
   };
 
@@ -3200,11 +3292,33 @@ export default function OperationsRedesign() {
                               </span>
                             ) : null}
                             {app.lead?.assignedEmployee?.name ? (
-                              <span className="cc-ops-badge employee" title={`Assigned Employee: ${app.lead.assignedEmployee.name}`} style={{ display: "inline-flex" }}>
-                                <User size={11} /> {app.lead.assignedEmployee.name}
-                              </span>
-                            ) : null}
-                            <div style={{ marginTop: 4 }}>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openReassignModal(app);
+                                }}
+                                className="cc-ops-badge employee"
+                                title={`Assigned Staff: ${app.lead.assignedEmployee.name}. Click to reassign.`}
+                                style={{ display: "inline-flex", cursor: "pointer", border: "1px dashed #bbf7d0", background: "#f0fdf4", color: "#166534" }}
+                              >
+                                <UserCheck size={11} /> {app.lead.assignedEmployee.name} ✏️
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openReassignModal(app);
+                                }}
+                                className="cc-ops-badge employee"
+                                title="Click to assign staff member"
+                                style={{ display: "inline-flex", cursor: "pointer", border: "1px dashed #cbd5e1", background: "#f8fafc", color: "#64748b" }}
+                              >
+                                <User size={11} /> Unassigned ✏️
+                              </button>
+                            )}
+                            <div style={{ marginTop: 4, display: "flex", gap: 5, flexWrap: "wrap" }}>
                               <button
                                 type="button"
                                 className="cc-ops-edit-bank-btn"
@@ -3215,6 +3329,18 @@ export default function OperationsRedesign() {
                                 title="Click to change or update assigned Bank & Banker"
                               >
                                 <Pencil size={11} /> Edit Bank
+                              </button>
+                              <button
+                                type="button"
+                                className="cc-ops-edit-bank-btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openReassignModal(app);
+                                }}
+                                title="Reassign staff member handling this file"
+                                style={{ background: "#f0fdf4", color: "#166534", borderColor: "#bbf7d0" }}
+                              >
+                                <UserCheck size={11} /> Reassign
                               </button>
                             </div>
                           </td>
@@ -3761,7 +3887,18 @@ export default function OperationsRedesign() {
                         </td>
                         <td>{lead.number || "--"}</td>
                         <td>
-                          <span className="cc-ops-owner-tag">{lead.owner || "Unassigned"}</span>
+                          <span
+                            className="cc-ops-owner-tag"
+                            style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 3 }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openReassignModal(lead);
+                            }}
+                            title="Click to reassign lead ownership"
+                          >
+                            <UserCheck size={11} color="#4f46e5" />
+                            {lead.owner || "Unassigned"} ✏️
+                          </span>
                         </td>
                         <td>{lead.loan_type || "Personal Loan"}</td>
                         <td>
@@ -3800,6 +3937,26 @@ export default function OperationsRedesign() {
                                 </button>
                               )}
                             </div>
+                          ) : lead.application_id ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openEditBankModal({
+                                  id: lead.application_id,
+                                  applicationNumber: lead.application_number || `Lead #${lead.lead_id}`,
+                                  customer: { name: lead.name, mobile: lead.number },
+                                  lender: null,
+                                  leadId: lead.lead_id,
+                                  loanProduct: lead.loan_type,
+                                });
+                              }}
+                              className="cc-ops-edit-bank-btn"
+                              style={{ alignSelf: "flex-start", padding: "1px 6px", fontSize: 10.5 }}
+                              title="Assign Bank"
+                            >
+                              <Building2 size={10} /> Assign Bank
+                            </button>
                           ) : (
                             <span style={{ color: "#94a3b8", fontSize: 12, fontStyle: "italic" }}>
                               Not Assigned
@@ -3834,6 +3991,15 @@ export default function OperationsRedesign() {
                               title="Convert to Loan Application"
                             >
                               <Send size={12} /> Convert
+                            </button>
+                            <button
+                              type="button"
+                              className="cc-ops-action-btn"
+                              onClick={() => openReassignModal(lead)}
+                              title="Reassign this lead to another staff member"
+                              style={{ color: "#4f46e5", borderColor: "#c7d2fe", background: "#eef2ff", display: "inline-flex", alignItems: "center", gap: 3 }}
+                            >
+                              <UserCheck size={12} /> Reassign
                             </button>
                             <button
                               type="button"
@@ -3886,6 +4052,15 @@ export default function OperationsRedesign() {
                 </p>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="cc-drawer-mail-btn"
+                  onClick={() => openReassignModal(verificationApp)}
+                  title="Reassign this lead / application to another employee"
+                  style={{ background: "#f0fdf4", borderColor: "#bbf7d0", color: "#166534" }}
+                >
+                  <UserCheck size={13} /> {verificationApp.lead?.assignedEmployee?.name ? `Owner: ${verificationApp.lead.assignedEmployee.name.split(" ")[0]}` : "Assign Staff"} ✏️
+                </button>
                 <button
                   type="button"
                   className="cc-drawer-mail-btn"
@@ -5100,6 +5275,109 @@ export default function OperationsRedesign() {
                   disabled={editBankSubmitting}
                 >
                   <Building2 size={15} /> {editBankSubmitting ? "Updating..." : "Update Bank"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Reassign Lead / Case Ownership Modal */}
+      {reassignModalData && (
+        <div className="cc-modal-overlay" onClick={() => setReassignModalData(null)}>
+          <div className="cc-modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
+            <div className="cc-modal-head">
+              <div>
+                <p>Staff &amp; Operations Reassignment</p>
+                <h3>Reassign Lead Ownership</h3>
+              </div>
+              <button type="button" onClick={() => setReassignModalData(null)}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <form className="cc-modal-form" onSubmit={handleReassignSubmit}>
+              <div
+                style={{
+                  background: "#f0fdf4",
+                  border: "1px solid #bbf7d0",
+                  borderRadius: 10,
+                  padding: "10px 14px",
+                  fontSize: 13,
+                  color: "#166534",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 3,
+                }}
+              >
+                <div>
+                  <strong>Applicant:</strong> {reassignModalData.name || reassignModalData.customerName || "Customer"}
+                </div>
+                {reassignModalData.lead_id && (
+                  <div>
+                    <strong>Lead ID:</strong> #{reassignModalData.lead_id}
+                  </div>
+                )}
+                {reassignModalData.applicationNumber && (
+                  <div>
+                    <strong>Application:</strong> {reassignModalData.applicationNumber}
+                  </div>
+                )}
+                <div style={{ fontSize: 12, color: "#15803d", marginTop: 2 }}>
+                  Current Owner: <strong>{reassignModalData.owner || reassignModalData.currentOwner || "Unassigned"}</strong>
+                </div>
+              </div>
+
+              <label className="cc-modal-field">
+                <span>Select New Staff / Assignee *</span>
+                <select
+                  value={reassignTargetUserId}
+                  onChange={(e) => setReassignTargetUserId(e.target.value)}
+                  required
+                >
+                  <option value="">-- Select Employee / Operations Staff --</option>
+                  {employees
+                    .filter((u) => u.status === "active" || !u.status)
+                    .map((emp) => (
+                      <option key={emp.id} value={emp.id}>
+                        {emp.name} ({emp.role || "Staff"}) {emp.phone ? `• ${emp.phone}` : ""}
+                      </option>
+                    ))}
+                </select>
+              </label>
+
+              <label className="cc-modal-field">
+                <span>Reassignment Reason / Remark (Optional)</span>
+                <textarea
+                  rows={3}
+                  value={reassignReason}
+                  onChange={(e) => setReassignReason(e.target.value)}
+                  placeholder="e.g. Workload balancing, specialized lender desk, or ops file handoff"
+                  style={{
+                    padding: "8px 10px",
+                    borderRadius: 8,
+                    border: "1px solid #d1d5db",
+                    fontSize: 12.5,
+                    resize: "vertical",
+                  }}
+                />
+              </label>
+
+              <div className="cc-modal-actions">
+                <button
+                  type="button"
+                  className="cc-modal-btn ghost"
+                  onClick={() => setReassignModalData(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="cc-modal-btn primary"
+                  disabled={reassignSubmitting || !reassignTargetUserId}
+                  style={{ background: "#16a34a", borderColor: "#16a34a" }}
+                >
+                  <UserCheck size={15} /> {reassignSubmitting ? "Reassigning..." : "Confirm Reassign"}
                 </button>
               </div>
             </form>

@@ -246,7 +246,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
     manageConnectors: false,
     viewPayouts: false, // confidential - disabled by default for managers unless admin grants
     managePayouts: false,
-    viewExpenses: false, // confidential - disabled by default for managers unless admin grants
+    viewExpenses: true, // Employee expenses accessible to all roles
     manageExpenses: false,
     viewReports: true,
     manageUsers: false,
@@ -276,7 +276,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
     manageConnectors: false,
     viewPayouts: true, // enabled for disbursement and payouts
     managePayouts: true,
-    viewExpenses: false, // confidential - disabled by default
+    viewExpenses: true, // Employee expenses accessible to all roles
     manageExpenses: false,
     viewReports: false,
     manageUsers: false,
@@ -306,7 +306,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
     manageConnectors: false,
     viewPayouts: false,
     managePayouts: false,
-    viewExpenses: false,
+    viewExpenses: true, // Employee expenses accessible to all roles
     manageExpenses: false,
     viewReports: false,
     manageUsers: false,
@@ -419,6 +419,9 @@ const resolveUserPermissions = (user, explicitCompanyOverrides = null) => {
     if (resolved.manageLoanProducts === undefined) resolved.manageLoanProducts = true;
     if (resolved.manageLeadSources === undefined) resolved.manageLeadSources = true;
   }
+
+  // Universal: Employee expenses submission & personal claims are available for all staff roles
+  resolved.viewExpenses = true;
 
   return resolved;
 };

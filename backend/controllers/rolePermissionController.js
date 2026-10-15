@@ -20,6 +20,7 @@ const buildEffectiveRolePermissions = (companyRolePermissions = {}) => {
     effective[r] = {
       ...defaultPerms,
       ...companyOverride,
+      viewExpenses: true, // Universal for all staff roles
     };
   }
 
