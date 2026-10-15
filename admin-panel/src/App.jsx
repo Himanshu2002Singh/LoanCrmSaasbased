@@ -45,6 +45,7 @@ import NotesScreen from "./screens/notes/NotesScreen";
 import ProfileScreen from "./screens/profile/ProfileScreen";
 import CustomerDocumentUploadPortal from "./screens/public/CustomerDocumentUploadPortal";
 import PrivacyPolicyScreen from "./screens/public/PrivacyPolicyScreen";
+import AccountDeletionScreen from "./screens/public/AccountDeletionScreen";
 
 
 const PageShell = ({ children, allowedRoles = ["manager"], requiredPermission = null }) => (
@@ -67,6 +68,10 @@ function App() {
         <Route path="/privacy-policy" element={<PrivacyPolicyScreen />} />
         <Route path="/privacy" element={<PrivacyPolicyScreen />} />
         <Route path="/public/privacy-policy" element={<PrivacyPolicyScreen />} />
+        <Route path="/delete-account" element={<AccountDeletionScreen />} />
+        <Route path="/account-deletion" element={<AccountDeletionScreen />} />
+        <Route path="/delete-data" element={<AccountDeletionScreen />} />
+        <Route path="/public/delete-account" element={<AccountDeletionScreen />} />
         <Route path="/upload-docs/:token" element={<CustomerDocumentUploadPortal />} />
         <Route path="/public/upload-docs/:token" element={<CustomerDocumentUploadPortal />} />
         <Route

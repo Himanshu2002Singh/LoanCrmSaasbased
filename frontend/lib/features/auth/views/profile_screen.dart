@@ -168,6 +168,24 @@ class ProfileScreen extends ConsumerWidget {
                           await launchUrl(uri, mode: LaunchMode.externalApplication);
                         },
                       ),
+                      const Divider(height: 1),
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.delete_outline_rounded, color: AppColors.error),
+                        title: const Text(
+                          'Request Account Deletion',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.error,
+                          ),
+                        ),
+                        trailing: const Icon(Icons.open_in_new_rounded, size: 16, color: AppColors.textMuted),
+                        onTap: () async {
+                          final uri = Uri.parse(ApiConstants.accountDeletionUrl);
+                          await launchUrl(uri, mode: LaunchMode.externalApplication);
+                        },
+                      ),
                     ],
                   ),
                 ),

@@ -338,13 +338,28 @@ export default function PrivacyPolicyScreen() {
                 <p>
                   In compliance with Google Play Store’s <strong>Data Safety & Account Deletion Policy</strong>, users and organization administrators have the right to request deletion of their personal accounts and stored records.
                 </p>
-                <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
                   <p className="font-semibold text-slate-900 text-sm">How to Request Account or Data Deletion:</p>
-                  <ol className="list-decimal list-inside space-y-1 text-xs text-slate-600">
-                    <li>Send an email to <strong>trustingbrains@gmail.com</strong> with the subject line <em>"Account / Data Deletion Request"</em>.</li>
-                    <li>Include your registered mobile number, employee ID or customer reference number, and company name.</li>
-                    <li>Upon verification, our security team will permanently purge your authentication credentials, personal tokens, and uploaded media within <strong>30 calendar days</strong>, subject to statutory record retention laws (e.g. financial audit laws).</li>
+                  <ol className="list-decimal list-inside space-y-1.5 text-xs text-slate-600">
+                    <li>
+                      Submit a request directly via our{" "}
+                      <Link to="/delete-account" className="text-blue-600 font-semibold underline hover:text-blue-700">
+                        Online Account Deletion Request Form
+                      </Link>
+                      , or email <strong>trustingbrains@gmail.com</strong> with the subject line <em>"Account / Data Deletion Request"</em>.
+                    </li>
+                    <li>Provide your registered mobile number, email, and company name.</li>
+                    <li>Upon receiving the request, our data protection desk will permanently purge your authentication credentials, personal profile, and associated application telemetry within <strong>48 hours</strong>.</li>
                   </ol>
+                  <div className="pt-1">
+                    <Link
+                      to="/delete-account"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition-colors"
+                    >
+                      <Trash2 size={13} />
+                      <span>Submit Deletion Request Online (48 Hours Turnaround)</span>
+                    </Link>
+                  </div>
                 </div>
               </div>
             </section>
