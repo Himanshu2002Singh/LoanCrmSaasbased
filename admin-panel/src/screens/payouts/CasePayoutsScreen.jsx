@@ -36,6 +36,7 @@ import {
   Share2,
   Sliders,
   TrendingUp,
+  Upload,
   User,
   Wallet,
   Wrench,
@@ -108,6 +109,15 @@ export default function CasePayoutsScreen() {
     netMargin: 0,
     notes: "",
   });
+  const [loanProductsList, setLoanProductsList] = useState([]);
+
+  // Excel Bulk Upload Modal State
+  const [bulkUploadModalOpen, setBulkUploadModalOpen] = useState(false);
+  const [bulkUploadedFile, setBulkUploadedFile] = useState(null);
+  const [bulkParsedRows, setBulkParsedRows] = useState([]);
+  const [isReadingExcel, setIsReadingExcel] = useState(false);
+  const [isSubmittingBulk, setIsSubmittingBulk] = useState(false);
+  const [bulkImportResult, setBulkImportResult] = useState(null);
 
   // Cases List State
   const [cases, setCases] = useState([]);
@@ -257,6 +267,13 @@ export default function CasePayoutsScreen() {
     const timer = setTimeout(() => setDebouncedSearch(searchTerm), 300);
     return () => clearTimeout(timer);
   }, [searchTerm]);
+
+  useEffect(() => {
+    axios
+      .get(`${API_URL}/master-configs/LOAN_PRODUCT`, { params: { includeInactive: false } })
+      .then((res) => setLoanProductsList(res.data?.data || []))
+      .catch(() => setLoanProductsList([]));
+  }, []);
 
   // Fetch Disbursed Case Payouts
   const fetchCasePayouts = useCallback(async () => {
@@ -780,6 +797,356 @@ export default function CasePayoutsScreen() {
     }
   };
 
+  // -------------------------------------------------------------
+  // EXCEL BULK UPLOAD & SAMPLE TEMPLATE HANDLERS
+  // -------------------------------------------------------------
+  const resetBulkUpload = () => {
+    setBulkUploadedFile(null);
+    setBulkParsedRows([]);
+    setBulkImportResult(null);
+    setIsReadingExcel(false);
+    setIsSubmittingBulk(false);
+  };
+
+  // Helper to parse dates from Excel (numeric serials, DD-MM-YYYY, YYYY-MM-DD)
+  const parseExcelDate = (val) => {
+    if (!val) return new Date().toISOString().split("T")[0];
+    if (typeof val === "number") {
+      const date = new Date(Math.round((val - 25569) * 86400 * 1000));
+      if (!isNaN(date.getTime())) {
+        return date.toISOString().split("T")[0];
+      }
+    }
+    const str = String(val).trim();
+    const dmyMatch = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+    if (dmyMatch) {
+      const day = dmyMatch[1].padStart(2, "0");
+      const month = dmyMatch[2].padStart(2, "0");
+      const year = dmyMatch[3];
+      return `${year}-${month}-${day}`;
+    }
+    const parsed = new Date(str);
+    if (!isNaN(parsed.getTime())) {
+      return parsed.toISOString().split("T")[0];
+    }
+    return new Date().toISOString().split("T")[0];
+  };
+
+  // Step 1: Download Pre-Formatted Excel Template with Dummy Data
+  const downloadSampleExcelTemplate = () => {
+    const todayStr = new Date().toISOString().split("T")[0];
+    const sampleRows = [
+      {
+        "Customer Name*": "Ramesh Kumar Sharma",
+        "Customer Mobile": "9876543210",
+        "Customer Email": "ramesh.sharma@example.com",
+        "Loan Product": "Personal Loan",
+        "Bank / Lender Name*": "HDFC Bank",
+        "Loan Disbursed Amount*": 500000,
+        "Bank Commission %": 2.0,
+        "Base Commission Amount (Optional)": "",
+        "Corporate DSA %": 0,
+        "Bank TDS %": 5,
+        "Bank GST %": 18,
+        "Disbursal Date (YYYY-MM-DD)": todayStr,
+        "Payout Type (Self/Vendor)": "Vendor",
+        "Party / Connector Name": "Apex Finance DSA",
+        "Party Code": "DSA-101",
+        "Party Commission %": 50.0,
+        "Extra Charges / Staff Cost": 0,
+        "Notes": "October personal loan batch case",
+      },
+      {
+        "Customer Name*": "Priya Rajesh Patel",
+        "Customer Mobile": "9812345678",
+        "Customer Email": "priya.patel@example.com",
+        "Loan Product": "Home Loan",
+        "Bank / Lender Name*": "State Bank of India",
+        "Loan Disbursed Amount*": 3500000,
+        "Bank Commission %": 1.5,
+        "Base Commission Amount (Optional)": "",
+        "Corporate DSA %": 0,
+        "Bank TDS %": 5,
+        "Bank GST %": 18,
+        "Disbursal Date (YYYY-MM-DD)": todayStr,
+        "Payout Type (Self/Vendor)": "Self",
+        "Party / Connector Name": "Self",
+        "Party Code": "",
+        "Party Commission %": 0,
+        "Extra Charges / Staff Cost": 0,
+        "Notes": "Direct branch walk-in customer",
+      },
+      {
+        "Customer Name*": "Rajesh Kumar Verma",
+        "Customer Mobile": "9823456789",
+        "Customer Email": "rajesh.verma@example.com",
+        "Loan Product": "Business Loan",
+        "Bank / Lender Name*": "ICICI Bank",
+        "Loan Disbursed Amount*": 1500000,
+        "Bank Commission %": 2.5,
+        "Base Commission Amount (Optional)": "",
+        "Corporate DSA %": 0,
+        "Bank TDS %": 5,
+        "Bank GST %": 18,
+        "Disbursal Date (YYYY-MM-DD)": todayStr,
+        "Payout Type (Self/Vendor)": "Vendor",
+        "Party / Connector Name": "Smart Capital Partners",
+        "Party Code": "DSA-204",
+        "Party Commission %": 60.0,
+        "Extra Charges / Staff Cost": 500,
+        "Notes": "MSME business expansion loan",
+      },
+    ];
+
+    const worksheet = XLSX.utils.json_to_sheet(sampleRows);
+
+    // Set clean column widths for optimal viewing
+    worksheet["!cols"] = [
+      { wch: 25 }, // Customer Name*
+      { wch: 18 }, // Customer Mobile
+      { wch: 28 }, // Customer Email
+      { wch: 18 }, // Loan Product
+      { wch: 24 }, // Bank / Lender Name*
+      { wch: 24 }, // Loan Disbursed Amount*
+      { wch: 20 }, // Bank Commission %
+      { wch: 32 }, // Base Commission Amount (Optional)
+      { wch: 18 }, // Corporate DSA %
+      { wch: 14 }, // Bank TDS %
+      { wch: 14 }, // Bank GST %
+      { wch: 26 }, // Disbursal Date (YYYY-MM-DD)
+      { wch: 24 }, // Payout Type (Self/Vendor)
+      { wch: 26 }, // Party / Connector Name
+      { wch: 16 }, // Party Code
+      { wch: 20 }, // Party Commission %
+      { wch: 26 }, // Extra Charges / Staff Cost
+      { wch: 32 }, // Notes
+    ];
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Sample Payout Cases");
+    XLSX.writeFile(workbook, "Sample_Case_Payouts_Template.xlsx");
+    toast.success("Sample Excel Template downloaded with dummy data!");
+  };
+
+  // Step 2: Handle Excel File Upload & Parse Rows
+  const handleExcelFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setBulkUploadedFile(file);
+    setIsReadingExcel(true);
+    setBulkImportResult(null);
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const data = new Uint8Array(evt.target.result);
+        const workbook = XLSX.read(data, { type: "array" });
+        const firstSheetName = workbook.SheetNames[0];
+        if (!firstSheetName) {
+          toast.error("The uploaded file does not contain any sheets.");
+          setIsReadingExcel(false);
+          return;
+        }
+
+        const worksheet = workbook.Sheets[firstSheetName];
+        const rawJson = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+
+        if (!rawJson || rawJson.length === 0) {
+          toast.warning("The selected sheet is empty.");
+          setBulkParsedRows([]);
+          setIsReadingExcel(false);
+          return;
+        }
+
+        // Helper to find value from row case-insensitively
+        const findVal = (row, ...keys) => {
+          const rowKeys = Object.keys(row);
+          for (const k of keys) {
+            const normalizedK = k.toLowerCase().replace(/[^a-z0-9]/g, "");
+            const match = rowKeys.find(
+              (rk) => rk.toLowerCase().replace(/[^a-z0-9]/g, "") === normalizedK
+            );
+            if (match && row[match] !== undefined && row[match] !== null && String(row[match]).trim() !== "") {
+              return row[match];
+            }
+          }
+          return "";
+        };
+
+        const parsedRows = rawJson.map((row, idx) => {
+          const customerName = String(
+            findVal(row, "customer name", "client name", "customer", "name", "applicant name")
+          ).trim();
+          const customerMobile = String(
+            findVal(row, "customer mobile", "mobile", "phone", "contact", "mobile number")
+          ).trim();
+          const customerEmail = String(
+            findVal(row, "customer email", "email", "email address")
+          ).trim();
+          const loanProduct = String(
+            findVal(row, "loan product", "loan type", "product", "loan_type") || "Personal Loan"
+          ).trim();
+          const bankName = String(
+            findVal(row, "bank lender name", "bank / lender name", "bank name", "bank", "lender") || "Bank"
+          ).trim();
+
+          const rawAmount = findVal(
+            row,
+            "loan disbursed amount",
+            "loan amount",
+            "disbursed amount",
+            "disbursement amount",
+            "amount",
+            "sanctioned amount"
+          );
+          const loanAmount = parseFloat(String(rawAmount).replace(/[^0-9.]/g, "")) || 0;
+
+          const rawBankPct = findVal(row, "bank commission %", "bank comm %", "bank commission", "bank %");
+          const bankCommissionPercent = rawBankPct !== "" ? parseFloat(rawBankPct) : 2.0;
+
+          const rawBaseAmt = findVal(row, "base commission amount", "base amount", "gross bank comm base");
+          const baseAmount = rawBaseAmt !== "" ? parseFloat(rawBaseAmt) : Math.round((loanAmount * (bankCommissionPercent || 2.0)) / 100);
+
+          const rawCorpDsaPct = findVal(row, "corporate dsa %", "corp dsa %", "dsa %");
+          const corporateDsaPercent = rawCorpDsaPct !== "" ? parseFloat(rawCorpDsaPct) : 0;
+          const corporateDsaAmount = Math.round((baseAmount * corporateDsaPercent) / 100);
+          const actualAmount = Math.max(0, baseAmount - corporateDsaAmount);
+
+          const rawBankTdsPct = findVal(row, "bank tds %", "tds %", "bank tds");
+          const bankTdsPercent = rawBankTdsPct !== "" ? parseFloat(rawBankTdsPct) : 5;
+          const bankTdsAmount = Math.round((actualAmount * bankTdsPercent) / 100);
+
+          const rawBankGstPct = findVal(row, "bank gst %", "gst %", "bank gst");
+          const bankGstPercent = rawBankGstPct !== "" ? parseFloat(rawBankGstPct) : 18;
+          const bankGstAmount = Math.round((actualAmount * bankGstPercent) / 100);
+
+          const bankNetReceivable = Math.max(0, actualAmount - bankTdsAmount);
+
+          const rawDate = findVal(row, "disbursal date", "date", "disbursement date");
+          const disbursalDate = parseExcelDate(rawDate);
+
+          const rawPartyName = String(
+            findVal(row, "party connector name", "connector / party", "party name", "connector name", "party", "source") || "Self"
+          ).trim();
+          const rawPayoutType = String(findVal(row, "payout type", "type", "sourcing type") || "").toUpperCase();
+          const isSelf =
+            rawPartyName.toLowerCase() === "self" ||
+            rawPartyName.toLowerCase() === "direct" ||
+            rawPayoutType === "SELF";
+          const payoutType = isSelf ? "SELF" : "VENDOR";
+
+          const partyCode = String(findVal(row, "party code", "connector code", "code") || "").trim();
+
+          const rawPartyCommPct = findVal(row, "party commission %", "party comm %", "party %", "connector %");
+          const partyCommissionPercent = isSelf ? 0 : rawPartyCommPct !== "" ? parseFloat(rawPartyCommPct) : 50.0;
+          const partyCommissionDue = isSelf ? 0 : Math.round((baseAmount * partyCommissionPercent) / 100);
+
+          const rawExtra = findVal(row, "extra charges", "staff cost", "manpower cost", "deductions");
+          const extraCharges = rawExtra !== "" ? parseFloat(rawExtra) : 0;
+          const partyNetPayable = isSelf ? 0 : Math.max(0, partyCommissionDue - extraCharges);
+          const netMargin = Math.round(bankNetReceivable - (isSelf ? 0 : partyNetPayable) - extraCharges);
+
+          const notes = String(findVal(row, "notes", "remarks", "comment") || "").trim();
+
+          const issues = [];
+          if (!customerName) issues.push("Missing Customer Name");
+          if (!loanAmount || loanAmount <= 0) issues.push("Invalid / Missing Loan Amount");
+
+          return {
+            rowIndex: idx + 1,
+            customerName,
+            customerMobile,
+            customerEmail,
+            loanProduct,
+            bankName,
+            loanAmount,
+            bankCommissionPercent,
+            baseAmount,
+            corporateDsaPercent,
+            corporateDsaAmount,
+            actualAmount,
+            bankTdsPercent,
+            bankTdsAmount,
+            bankGstPercent,
+            bankGstAmount,
+            bankNetReceivable,
+            disbursalDate,
+            payoutType,
+            partyName: rawPartyName,
+            partyCode,
+            partyCommissionPercent,
+            partyCommissionDue,
+            extraCharges,
+            partyNetPayable,
+            netMargin,
+            notes,
+            isValid: issues.length === 0,
+            issues,
+          };
+        });
+
+        setBulkParsedRows(parsedRows);
+        toast.info(`Parsed ${parsedRows.length} rows from file. Please review and confirm.`);
+      } catch (err) {
+        console.error("Error reading Excel:", err);
+        toast.error("Failed to parse Excel file. Please verify the format.");
+      } finally {
+        setIsReadingExcel(false);
+      }
+    };
+
+    reader.readAsArrayBuffer(file);
+  };
+
+  // Step 3: Submit Valid Parsed Cases to Backend API
+  const handleBulkImportSubmit = async () => {
+    const validRows = bulkParsedRows.filter((r) => r.isValid);
+    if (!validRows.length) {
+      toast.error("No valid rows to import. Please fix rows with errors.");
+      return;
+    }
+
+    try {
+      setIsSubmittingBulk(true);
+      const payload = validRows.map((r) => ({
+        customerName: r.customerName,
+        customerMobile: r.customerMobile,
+        customerEmail: r.customerEmail,
+        loanProduct: r.loanProduct,
+        bankName: r.bankName,
+        loanAmount: r.loanAmount,
+        bankCommissionPercent: r.bankCommissionPercent,
+        baseAmount: r.baseAmount,
+        corporateDsaPercent: r.corporateDsaPercent,
+        corporateDsaAmount: r.corporateDsaAmount,
+        bankTdsPercent: r.bankTdsPercent,
+        bankGstPercent: r.bankGstPercent,
+        disbursalDate: r.disbursalDate,
+        payoutType: r.payoutType,
+        partyName: r.partyName,
+        partyCode: r.partyCode,
+        partyCommissionPercent: r.partyCommissionPercent,
+        extraCharges: r.extraCharges,
+        notes: r.notes,
+      }));
+
+      const res = await axios.post(`${API_URL}/payouts/cases/bulk`, { cases: payload });
+      if (res.data?.success) {
+        setBulkImportResult(res.data);
+        toast.success(`Successfully imported ${res.data.importedCount} case(s)!`);
+        fetchCasePayouts();
+      } else {
+        toast.warn(res.data?.message || "Import completed with warnings");
+      }
+    } catch (err) {
+      console.error("Bulk import failed:", err);
+      toast.error(err.response?.data?.message || "Bulk import failed. Please try again.");
+    } finally {
+      setIsSubmittingBulk(false);
+    }
+  };
+
   // Open Bank Receipt Modal with exact max calculation
   const openBankReceiptModal = (item) => {
     setReceiptTargetCase(item);
@@ -1116,6 +1483,30 @@ export default function CasePayoutsScreen() {
                 title="Create / Record a new Case Payout"
               >
                 <Plus size={16} /> + Record Case Payout
+              </button>
+            )}
+
+            {canManagePayouts && activeMainTab === "cases" && (
+              <button
+                type="button"
+                className="cc-pbtn secondary"
+                onClick={() => {
+                  resetBulkUpload();
+                  setBulkUploadModalOpen(true);
+                }}
+                style={{
+                  background: "#f0fdf4",
+                  color: "#166534",
+                  borderColor: "#86efac",
+                  fontWeight: 700,
+                  boxShadow: "0 1px 3px rgba(22,101,52,0.1)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+                title="Bulk upload cases via Excel sheet with sample template"
+              >
+                <Upload size={16} /> Import from Excel
               </button>
             )}
 
@@ -3365,6 +3756,52 @@ export default function CasePayoutsScreen() {
             </div>
 
             <form onSubmit={handleAddPayoutSubmit} className="cc-modal-form" style={{ padding: "16px 20px" }}>
+              {/* BULK EXCEL SHORTCUT BANNER */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  background: "linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)",
+                  padding: "10px 14px",
+                  borderRadius: 8,
+                  border: "1px solid #bbf7d0",
+                  marginBottom: 14,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <FileSpreadsheet size={18} color="#15803d" />
+                  <span style={{ fontSize: 12.5, color: "#166534", fontWeight: 600 }}>
+                    Adding multiple loan cases? You can bulk import via Excel with sample template!
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAddPayoutModalOpen(false);
+                    resetBulkUpload();
+                    setBulkUploadModalOpen(true);
+                  }}
+                  style={{
+                    background: "#16a34a",
+                    color: "#ffffff",
+                    border: "none",
+                    padding: "5px 12px",
+                    borderRadius: 6,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 5,
+                    whiteSpace: "nowrap",
+                    boxShadow: "0 1px 3px rgba(22,163,74,0.3)",
+                  }}
+                >
+                  <Upload size={13} /> Excel Import
+                </button>
+              </div>
+
               {/* SECTION 0: LINK TO AN EXISTING LEAD (OPTIONAL SHORTCUT) */}
               <div style={{ background: "#f8fafc", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", marginBottom: 12 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
@@ -3512,23 +3949,36 @@ export default function CasePayoutsScreen() {
                 <div className="cc-form-row" style={{ gridTemplateColumns: "1fr 1fr 1.2fr 1fr", marginTop: 8 }}>
                   <div className="cc-fgroup">
                     <label>Loan Product / Type</label>
-                    <input
-                      type="text"
-                      list="loanProductSuggestions"
-                      placeholder="e.g. Personal Loan"
+                    <select
                       value={addForm.loanProduct}
                       onChange={(e) => setAddForm({ ...addForm, loanProduct: e.target.value })}
-                    />
-                    <datalist id="loanProductSuggestions">
-                      <option value="Personal Loan" />
-                      <option value="Business Loan" />
-                      <option value="Home Loan" />
-                      <option value="Loan Against Property (LAP)" />
-                      <option value="Car Loan" />
-                      <option value="Gold Loan" />
-                      <option value="Education Loan" />
-                      <option value="Professional Loan" />
-                    </datalist>
+                    >
+                      <option value="">-- Select Loan Product --</option>
+                      {loanProductsList && loanProductsList.length > 0 ? (
+                        loanProductsList.map((p) => {
+                          const val = p.label || p.value || p.configLabel || p.configValue;
+                          return (
+                            <option key={p.id || val} value={val}>
+                              {p.label || p.value || p.configLabel || p.configValue}
+                            </option>
+                          );
+                        })
+                      ) : (
+                        <>
+                          <option value="Personal Loan">Personal Loan</option>
+                          <option value="Business Loan">Business Loan</option>
+                          <option value="Home Loan">Home Loan</option>
+                          <option value="Loan Against Property (LAP)">Loan Against Property (LAP)</option>
+                          <option value="Car Loan">Car Loan</option>
+                          <option value="Gold Loan">Gold Loan</option>
+                          <option value="Education Loan">Education Loan</option>
+                          <option value="Professional Loan">Professional Loan</option>
+                        </>
+                      )}
+                      {addForm.loanProduct && loanProductsList.length > 0 && !loanProductsList.some(p => (p.label || p.value || p.configValue || p.configLabel || "").toLowerCase() === addForm.loanProduct.toLowerCase()) && (
+                        <option value={addForm.loanProduct}>{addForm.loanProduct} (Current)</option>
+                      )}
+                    </select>
                   </div>
 
                   <div className="cc-fgroup">
@@ -3822,6 +4272,535 @@ export default function CasePayoutsScreen() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* BULK EXCEL UPLOAD MODAL */}
+      {bulkUploadModalOpen && (
+        <div className="cc-modal-overlay" onClick={() => setBulkUploadModalOpen(false)}>
+          <div
+            className="cc-modal-box"
+            style={{ maxWidth: 960, width: "95%", maxHeight: "92vh", overflowY: "auto" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              className="cc-modal-header"
+              style={{
+                position: "sticky",
+                top: 0,
+                background: "#fff",
+                zIndex: 10,
+                borderBottom: "1px solid #e2e8f0",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                padding: "16px 20px",
+              }}
+            >
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#0f172a" }}>
+                    Bulk Import Disbursed Cases from Excel
+                  </h3>
+                  <span
+                    style={{
+                      background: "#ecfdf5",
+                      color: "#047857",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      padding: "2px 8px",
+                      borderRadius: 999,
+                      border: "1px solid #a7f3d0",
+                    }}
+                  >
+                    Excel / CSV Upload
+                  </span>
+                </div>
+                <p style={{ margin: "3px 0 0", fontSize: 12.5, color: "#64748b" }}>
+                  Upload multiple loan disbursal cases at once. Financials, bank receivables, vendor payouts &amp; margins calculate automatically.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="cc-modal-close"
+                onClick={() => setBulkUploadModalOpen(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ padding: "20px" }}>
+              {/* STEP 1: DOWNLOAD SAMPLE EXCEL BANNER */}
+              <div
+                style={{
+                  background: "linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)",
+                  border: "1px solid #bbf7d0",
+                  borderRadius: 10,
+                  padding: "14px 18px",
+                  marginBottom: 20,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  flexWrap: "wrap",
+                  gap: 12,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                  <div
+                    style={{
+                      background: "#dcfce7",
+                      color: "#166534",
+                      borderRadius: 8,
+                      padding: "9px",
+                      display: "flex",
+                    }}
+                  >
+                    <FileSpreadsheet size={24} />
+                  </div>
+                  <div>
+                    <h4 style={{ margin: "0 0 3px", fontSize: 14, fontWeight: 700, color: "#166534" }}>
+                      Step 1: Download Sample Excel Template (With Realistic Sample Data)
+                    </h4>
+                    <p style={{ margin: 0, fontSize: 12.5, color: "#15803d" }}>
+                      Download our ready-to-fill template pre-populated with sample cases (Self case, Vendor/DSA case) to match column headers accurately.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={downloadSampleExcelTemplate}
+                  style={{
+                    background: "#16a34a",
+                    color: "#ffffff",
+                    border: "none",
+                    borderRadius: 8,
+                    padding: "9px 16px",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    boxShadow: "0 2px 5px rgba(22,163,74,0.3)",
+                  }}
+                >
+                  <Download size={16} /> Download Sample Template (.xlsx)
+                </button>
+              </div>
+
+              {/* STEP 2: UPLOAD FILE AREA / DROPZONE */}
+              <div style={{ marginBottom: 20 }}>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: "#334155",
+                    marginBottom: 8,
+                  }}
+                >
+                  Step 2: Upload Your Excel File (.xlsx, .xls, .csv)
+                </label>
+                <div
+                  style={{
+                    border: "2px dashed #cbd5e1",
+                    borderRadius: 12,
+                    padding: "26px 20px",
+                    textAlign: "center",
+                    background: "#f8fafc",
+                    position: "relative",
+                    cursor: "pointer",
+                    transition: "all 0.2s ease",
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.currentTarget.style.borderColor = "#0284c7";
+                    e.currentTarget.style.background = "#f0f9ff";
+                  }}
+                  onDragLeave={(e) => {
+                    e.preventDefault();
+                    e.currentTarget.style.borderColor = "#cbd5e1";
+                    e.currentTarget.style.background = "#f8fafc";
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    e.currentTarget.style.borderColor = "#cbd5e1";
+                    e.currentTarget.style.background = "#f8fafc";
+                    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                      handleExcelFileChange({ target: { files: e.dataTransfer.files } });
+                    }
+                  }}
+                >
+                  <input
+                    type="file"
+                    accept=".xlsx, .xls, .csv"
+                    onChange={handleExcelFileChange}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      height: "100%",
+                      opacity: 0,
+                      cursor: "pointer",
+                    }}
+                  />
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+                    <div
+                      style={{
+                        background: "#e0f2fe",
+                        color: "#0369a1",
+                        borderRadius: "50%",
+                        padding: 12,
+                        display: "inline-flex",
+                      }}
+                    >
+                      <Upload size={28} />
+                    </div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#1e293b" }}>
+                      {bulkUploadedFile ? bulkUploadedFile.name : "Click to browse or drag and drop your Excel sheet here"}
+                    </div>
+                    <div style={{ fontSize: 12, color: "#64748b" }}>
+                      {bulkUploadedFile
+                        ? `${(bulkUploadedFile.size / 1024).toFixed(1)} KB • Click or drop another file to change`
+                        : "Supports .xlsx, .xls, and .csv files"}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {isReadingExcel && (
+                <div style={{ textAlign: "center", padding: "20px 0", color: "#0284c7" }}>
+                  <RefreshCw size={24} className="spin" style={{ animation: "spin 1s linear infinite" }} />
+                  <p style={{ marginTop: 8, fontSize: 13, fontWeight: 600 }}>Reading and validating Excel sheet...</p>
+                </div>
+              )}
+
+              {/* STEP 3: PREVIEW OF PARSED ROWS */}
+              {bulkParsedRows.length > 0 && (
+                <div style={{ marginTop: 20 }}>
+                  {/* KPI SUMMARY CARDS */}
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+                      gap: 12,
+                      marginBottom: 16,
+                    }}
+                  >
+                    <div
+                      style={{
+                        background: "#f8fafc",
+                        padding: "10px 14px",
+                        borderRadius: 8,
+                        border: "1px solid #e2e8f0",
+                      }}
+                    >
+                      <div style={{ fontSize: 11, color: "#64748b", fontWeight: 700 }}>TOTAL ROWS</div>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: "#0f172a", marginTop: 2 }}>
+                        {bulkParsedRows.length}
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        background: "#f0fdf4",
+                        padding: "10px 14px",
+                        borderRadius: 8,
+                        border: "1px solid #bbf7d0",
+                      }}
+                    >
+                      <div style={{ fontSize: 11, color: "#166534", fontWeight: 700 }}>READY TO IMPORT</div>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: "#15803d", marginTop: 2 }}>
+                        {bulkParsedRows.filter((r) => r.isValid).length}
+                      </div>
+                    </div>
+
+                    {bulkParsedRows.filter((r) => !r.isValid).length > 0 && (
+                      <div
+                        style={{
+                          background: "#fef2f2",
+                          padding: "10px 14px",
+                          borderRadius: 8,
+                          border: "1px solid #fecaca",
+                        }}
+                      >
+                        <div style={{ fontSize: 11, color: "#991b1b", fontWeight: 700 }}>ERRORS / SKIPPED</div>
+                        <div style={{ fontSize: 18, fontWeight: 800, color: "#dc2626", marginTop: 2 }}>
+                          {bulkParsedRows.filter((r) => !r.isValid).length}
+                        </div>
+                      </div>
+                    )}
+
+                    <div
+                      style={{
+                        background: "#eff6ff",
+                        padding: "10px 14px",
+                        borderRadius: 8,
+                        border: "1px solid #bfdbfe",
+                      }}
+                    >
+                      <div style={{ fontSize: 11, color: "#1e40af", fontWeight: 700 }}>TOTAL LOAN VOLUME</div>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: "#1d4ed8", marginTop: 2 }}>
+                        ₹
+                        {numberFormatter.format(
+                          bulkParsedRows
+                            .filter((r) => r.isValid)
+                            .reduce((sum, r) => sum + (parseFloat(r.loanAmount) || 0), 0)
+                        )}
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        background: "#fdf4ff",
+                        padding: "10px 14px",
+                        borderRadius: 8,
+                        border: "1px solid #f0abfc",
+                      }}
+                    >
+                      <div style={{ fontSize: 11, color: "#86198f", fontWeight: 700 }}>EST. NET MARGIN</div>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: "#a21caf", marginTop: 2 }}>
+                        ₹
+                        {numberFormatter.format(
+                          bulkParsedRows
+                            .filter((r) => r.isValid)
+                            .reduce((sum, r) => sum + (parseFloat(r.netMargin) || 0), 0)
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* PREVIEW TABLE */}
+                  <div
+                    style={{
+                      border: "1px solid #e2e8f0",
+                      borderRadius: 8,
+                      overflowX: "auto",
+                      maxHeight: 340,
+                      overflowY: "auto",
+                    }}
+                  >
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                      <thead>
+                        <tr
+                          style={{
+                            background: "#f8fafc",
+                            borderBottom: "1px solid #e2e8f0",
+                            position: "sticky",
+                            top: 0,
+                            zIndex: 2,
+                          }}
+                        >
+                          <th style={{ padding: "8px 10px", textAlign: "center" }}>#</th>
+                          <th style={{ padding: "8px 10px", textAlign: "left" }}>Status</th>
+                          <th style={{ padding: "8px 10px", textAlign: "left" }}>Customer Name</th>
+                          <th style={{ padding: "8px 10px", textAlign: "left" }}>Mobile</th>
+                          <th style={{ padding: "8px 10px", textAlign: "left" }}>Loan Product</th>
+                          <th style={{ padding: "8px 10px", textAlign: "left" }}>Bank / Lender</th>
+                          <th style={{ padding: "8px 10px", textAlign: "right" }}>Loan Disbursed</th>
+                          <th style={{ padding: "8px 10px", textAlign: "right" }}>Bank Comm %</th>
+                          <th style={{ padding: "8px 10px", textAlign: "right" }}>Net Receivable</th>
+                          <th style={{ padding: "8px 10px", textAlign: "left" }}>Party / Sourcing</th>
+                          <th style={{ padding: "8px 10px", textAlign: "right" }}>Party Payable</th>
+                          <th style={{ padding: "8px 10px", textAlign: "right" }}>Net Margin</th>
+                          <th style={{ padding: "8px 10px", textAlign: "left" }}>Disbursal Date</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {bulkParsedRows.map((r, i) => (
+                          <tr
+                            key={i}
+                            style={{
+                              borderBottom: "1px solid #f1f5f9",
+                              background: r.isValid ? (i % 2 === 0 ? "#ffffff" : "#fcfcfc") : "#fff1f2",
+                            }}
+                          >
+                            <td style={{ padding: "8px 10px", textAlign: "center", color: "#64748b" }}>
+                              {r.rowIndex}
+                            </td>
+                            <td style={{ padding: "8px 10px" }}>
+                              {r.isValid ? (
+                                <span
+                                  style={{
+                                    background: "#dcfce7",
+                                    color: "#166534",
+                                    fontSize: 10,
+                                    fontWeight: 700,
+                                    padding: "2px 6px",
+                                    borderRadius: 4,
+                                  }}
+                                >
+                                  ✓ Valid
+                                </span>
+                              ) : (
+                                <span
+                                  style={{
+                                    background: "#fee2e2",
+                                    color: "#991b1b",
+                                    fontSize: 10,
+                                    fontWeight: 700,
+                                    padding: "2px 6px",
+                                    borderRadius: 4,
+                                  }}
+                                  title={r.issues.join(", ")}
+                                >
+                                  ⚠ {r.issues[0]}
+                                </span>
+                              )}
+                            </td>
+                            <td style={{ padding: "8px 10px", fontWeight: 600, color: "#0f172a" }}>
+                              {r.customerName || "—"}
+                            </td>
+                            <td style={{ padding: "8px 10px", color: "#475569" }}>{r.customerMobile || "—"}</td>
+                            <td style={{ padding: "8px 10px", color: "#475569" }}>{r.loanProduct}</td>
+                            <td style={{ padding: "8px 10px", color: "#475569" }}>{r.bankName}</td>
+                            <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "#047857" }}>
+                              ₹{numberFormatter.format(r.loanAmount || 0)}
+                            </td>
+                            <td style={{ padding: "8px 10px", textAlign: "right", color: "#475569" }}>
+                              {r.bankCommissionPercent}%
+                            </td>
+                            <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 600, color: "#1d4ed8" }}>
+                              ₹{numberFormatter.format(r.bankNetReceivable || 0)}
+                            </td>
+                            <td style={{ padding: "8px 10px", color: "#475569" }}>
+                              {r.partyName} {r.partyCode ? `(${r.partyCode})` : ""}
+                            </td>
+                            <td style={{ padding: "8px 10px", textAlign: "right", color: "#b91c1c" }}>
+                              ₹{numberFormatter.format(r.partyNetPayable || 0)}
+                            </td>
+                            <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "#15803d" }}>
+                              ₹{numberFormatter.format(r.netMargin || 0)}
+                            </td>
+                            <td style={{ padding: "8px 10px", color: "#64748b" }}>{r.disbursalDate || "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* IMPORT RESULT NOTIFICATION */}
+                  {bulkImportResult && (
+                    <div
+                      style={{
+                        marginTop: 16,
+                        padding: "12px 16px",
+                        borderRadius: 8,
+                        background: bulkImportResult.failedCount === 0 ? "#f0fdf4" : "#fffbeb",
+                        border: `1px solid ${bulkImportResult.failedCount === 0 ? "#86efac" : "#fde68a"}`,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          fontWeight: 700,
+                          color: bulkImportResult.failedCount === 0 ? "#166534" : "#b45309",
+                        }}
+                      >
+                        <CheckCircle2 size={18} />
+                        <span>{bulkImportResult.message}</span>
+                      </div>
+                      {bulkImportResult.errors && bulkImportResult.errors.length > 0 && (
+                        <div style={{ marginTop: 8, fontSize: 12, color: "#b91c1c" }}>
+                          <div style={{ fontWeight: 600 }}>Failed rows details:</div>
+                          <ul style={{ margin: "4px 0 0", paddingLeft: 20 }}>
+                            {bulkImportResult.errors.map((err, idx) => (
+                              <li key={idx}>
+                                Row {err.row} ({err.customerName}): {err.error}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* MODAL FOOTER */}
+              <div
+                style={{
+                  marginTop: 24,
+                  paddingTop: 16,
+                  borderTop: "1px solid #e2e8f0",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                }}
+              >
+                <div>
+                  {bulkParsedRows.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={resetBulkUpload}
+                      disabled={isSubmittingBulk}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "#64748b",
+                        fontSize: 13,
+                        cursor: "pointer",
+                        fontWeight: 600,
+                        textDecoration: "underline",
+                      }}
+                    >
+                      Clear / Choose another file
+                    </button>
+                  )}
+                </div>
+
+                <div style={{ display: "flex", gap: 10 }}>
+                  <button
+                    type="button"
+                    className="cc-pbtn secondary"
+                    onClick={() => setBulkUploadModalOpen(false)}
+                    disabled={isSubmittingBulk}
+                  >
+                    Close
+                  </button>
+                  <button
+                    type="button"
+                    className="cc-pbtn primary"
+                    onClick={handleBulkImportSubmit}
+                    disabled={
+                      isSubmittingBulk ||
+                      bulkParsedRows.filter((r) => r.isValid).length === 0 ||
+                      (bulkImportResult && bulkImportResult.importedCount > 0)
+                    }
+                    style={{
+                      background: "linear-gradient(135deg, #059669 0%, #047857 100%)",
+                      color: "#ffffff",
+                      borderColor: "#059669",
+                      fontWeight: 700,
+                      boxShadow: "0 2px 6px rgba(5,150,105,0.25)",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    {isSubmittingBulk ? (
+                      <>
+                        <RefreshCw size={15} className="spin" style={{ animation: "spin 1s linear infinite" }} />
+                        Importing Cases...
+                      </>
+                    ) : bulkImportResult && bulkImportResult.importedCount > 0 ? (
+                      <>
+                        <CheckCircle2 size={15} /> Cases Imported!
+                      </>
+                    ) : (
+                      <>
+                        <Upload size={15} />
+                        Import {bulkParsedRows.filter((r) => r.isValid).length || 0} Case(s) to CRM
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}

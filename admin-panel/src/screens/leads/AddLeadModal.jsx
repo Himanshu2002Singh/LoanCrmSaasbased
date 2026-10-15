@@ -15,6 +15,7 @@ import {
   ChevronUp,
   CheckCircle2,
   AlertCircle,
+  Coins,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import API_URL from "../../config";
@@ -29,11 +30,13 @@ export default function AddLeadModal({ open, onClose, onCreated }) {
   const [name, setName] = useState("");
   const [contact, setContact] = useState("");
   const [source, setSource] = useState("Self");
+  const [loanType, setLoanType] = useState("");
   const [commissionPercent, setCommissionPercent] = useState("");
   const [initialRemark, setInitialRemark] = useState("");
   const [excelDefaultSource, setExcelDefaultSource] = useState("Self");
   const [excelDefaultCommission, setExcelDefaultCommission] = useState("");
   const [sourcesList, setSourcesList] = useState([]);
+  const [loanProductsList, setLoanProductsList] = useState([]);
   const [file, setFile] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [showFormatGuide, setShowFormatGuide] = useState(false);
@@ -60,13 +63,15 @@ export default function AddLeadModal({ open, onClose, onCreated }) {
 
   useEffect(() => {
     if (!open) return;
-    const fetchSources = async () => {
+    const fetchConfigs = async () => {
       try {
-        const res = await axios.get(`${API_URL}/master-configs/LEAD_SOURCE`, {
-          params: { includeInactive: false },
-        });
-        const items = res.data?.data || [];
+        const [sourceRes, loanProdRes] = await Promise.all([
+          axios.get(`${API_URL}/master-configs/LEAD_SOURCE`, { params: { includeInactive: false } }),
+          axios.get(`${API_URL}/master-configs/LOAN_PRODUCT`, { params: { includeInactive: false } }).catch(() => ({ data: { data: [] } })),
+        ]);
+        const items = sourceRes.data?.data || [];
         setSourcesList(items);
+        setLoanProductsList(loanProdRes.data?.data || []);
         // Ensure "Self" exists in choices even if not returned
         const hasSelf = items.some(
           (s) => String(s.value || "").toLowerCase() === "self" || String(s.label || "").toLowerCase() === "self"
@@ -75,11 +80,11 @@ export default function AddLeadModal({ open, onClose, onCreated }) {
           setSourcesList((prev) => [{ id: "self-default", label: "Self", value: "Self" }, ...prev]);
         }
       } catch (err) {
-        console.error("Could not fetch lead sources", err);
+        console.error("Could not fetch master configs", err);
         setSourcesList([{ id: "self-default", label: "Self", value: "Self" }]);
       }
     };
-    fetchSources();
+    fetchConfigs();
   }, [open]);
 
   // Live duplicate phone check on 10 digits
@@ -147,6 +152,7 @@ export default function AddLeadModal({ open, onClose, onCreated }) {
     setName("");
     setContact("");
     setSource("Self");
+    setLoanType("");
     setCommissionPercent("");
     setInitialRemark("");
     setExcelDefaultSource("Self");
@@ -188,6 +194,7 @@ export default function AddLeadModal({ open, onClose, onCreated }) {
           name: name.trim(),
           number: contact.trim(),
           source: (source || "").trim() || "Self",
+          loan_type: (loanType || "").trim() || undefined,
           remark: initialRemark.trim() || undefined,
           commission_percent:
             commissionPercent !== "" && !isNaN(parseFloat(commissionPercent))
@@ -491,6 +498,23 @@ export default function AddLeadModal({ open, onClose, onCreated }) {
                   </div>
                 </label>
               )}
+
+              <label className="cc-modal-field" style={{ gridColumn: "1 / -1" }}>
+                <span>
+                  <Coins size={12} /> Loan Product / Type <span style={{ fontWeight: 400, color: "#94a3b8" }}>(Optional)</span>
+                </span>
+                <select
+                  value={loanType}
+                  onChange={(event) => setLoanType(event.target.value)}
+                >
+                  <option value="">Select Loan Product (Optional)</option>
+                  {loanProductsList.map((lp) => (
+                    <option key={lp.id || lp.value} value={lp.label || lp.value}>
+                      {lp.label || lp.value}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
               <label className="cc-modal-field" style={{ gridColumn: "1 / -1" }}>
                 <span>Initial Remark <span style={{ fontWeight: 400, color: "#94a3b8" }}>(Optional)</span></span>

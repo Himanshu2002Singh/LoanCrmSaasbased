@@ -146,6 +146,7 @@ const createDocumentRequest = async (req, res, next) => {
       docType: String(doc.docType || "OTHER_DOCUMENT").toUpperCase().replace(/\s+/g, "_"),
       category: doc.category || "KYC",
       isRequired: doc.isRequired !== false,
+      isHidden: Boolean(doc.isHidden),
       description: doc.description || "",
       status: "PENDING",
       documentId: null,
@@ -154,6 +155,8 @@ const createDocumentRequest = async (req, res, next) => {
       fileSize: null,
       uploadedAt: null,
     }));
+
+    const visibleDocs = formattedDocs.filter((d) => !d.isHidden);
 
     const request = await LeadDocumentRequest.create({
       companyId: req.companyId,
@@ -173,15 +176,15 @@ const createDocumentRequest = async (req, res, next) => {
       recordType: "Lead",
       recordId: lead.id,
       action: "UPDATED",
-      remarks: `Generated secure document collection link for ${formattedDocs.length} documents (${formattedDocs.map((d) => d.title).join(", ")})`,
+      remarks: `Generated secure document collection link for ${visibleDocs.length} visible documents (${visibleDocs.map((d) => d.title).join(", ")})${formattedDocs.length > visibleDocs.length ? ` (${formattedDocs.length - visibleDocs.length} hidden)` : ""}`,
     });
 
-    // Build pre-composed WhatsApp message
+    // Build pre-composed WhatsApp message (only lists visible docs)
     const customerName = lead.customer?.name || "Valued Customer";
     const companyName = lead.company?.name || "CapitalCare Financial";
     const loanInfo = lead.loanType ? `${lead.loanType} application` : "loan application";
 
-    const docBulletList = formattedDocs
+    const docBulletList = (visibleDocs.length > 0 ? visibleDocs : formattedDocs)
       .map((d) => `• ${d.title}${d.isRequired ? " *(Required)*" : ""}`)
       .join("\n");
 
@@ -202,6 +205,8 @@ const createDocumentRequest = async (req, res, next) => {
         customerPhone: lead.customer?.mobile || null,
         customerName,
         whatsappMessageTemplate: whatsappMessage,
+        visibleDocsCount: visibleDocs.length,
+        hiddenDocsCount: formattedDocs.length - visibleDocs.length,
       },
     });
   } catch (error) {
@@ -238,14 +243,20 @@ const getRequestsByLead = async (req, res, next) => {
     const enriched = requests.map((reqItem) => {
       const data = reqItem.toJSON();
       const isExpired = data.expiresAt && new Date(data.expiresAt) < now;
-      const totalDocs = (data.requiredDocs || []).length;
-      const uploadedDocs = (data.requiredDocs || []).filter((d) => d.status === "UPLOADED").length;
-      const requiredPending = (data.requiredDocs || []).filter((d) => d.isRequired && d.status !== "UPLOADED").length;
+      const allDocs = data.requiredDocs || [];
+      const visibleDocs = allDocs.filter((d) => !d.isHidden);
+      const hiddenDocs = allDocs.filter((d) => d.isHidden);
+      const totalDocs = visibleDocs.length;
+      const uploadedDocs = visibleDocs.filter((d) => d.status === "UPLOADED").length;
+      const requiredPending = visibleDocs.filter((d) => d.isRequired && d.status !== "UPLOADED").length;
 
       return {
         ...data,
         isExpired,
         totalDocs,
+        totalConfiguredDocs: allDocs.length,
+        visibleDocsCount: visibleDocs.length,
+        hiddenDocsCount: hiddenDocs.length,
         uploadedDocs,
         requiredPending,
         isCompleted: totalDocs > 0 && requiredPending === 0,
@@ -286,6 +297,216 @@ const cancelDocumentRequest = async (req, res, next) => {
       success: true,
       message: "Document upload link has been cancelled",
       data: request,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * @desc    Toggle or set isHidden on a specific document slot in an active request link
+ * @route   PATCH /api/document-requests/:id/slots/:slotId/toggle-hidden
+ */
+const toggleSlotHidden = async (req, res, next) => {
+  try {
+    const { id, slotId } = req.params;
+    const { isHidden } = req.body;
+    const request = await LeadDocumentRequest.findByPk(id, {
+      include: [
+        {
+          model: Lead,
+          as: "lead",
+          include: [
+            { model: Customer, as: "customer" },
+            { model: Company, as: "company" },
+          ],
+        },
+        { model: Company, as: "company" },
+      ],
+    });
+
+    if (!request || !belongsToScope(req, request)) {
+      return res.status(404).json({ message: "Document request not found" });
+    }
+
+    const docs = Array.isArray(request.requiredDocs) ? [...request.requiredDocs] : [];
+    const targetIndex = docs.findIndex(
+      (d) => String(d.id) === String(slotId) || String(d.docType) === String(slotId)
+    );
+
+    if (targetIndex === -1) {
+      return res.status(404).json({ message: "Document slot not found in this request" });
+    }
+
+    const newHidden = typeof isHidden === "boolean" ? isHidden : !docs[targetIndex].isHidden;
+    docs[targetIndex] = {
+      ...docs[targetIndex],
+      isHidden: newHidden,
+    };
+
+    // Recalculate status based on visible docs
+    const visibleDocs = docs.filter((d) => !d.isHidden);
+    const requiredPending = visibleDocs.filter((d) => d.isRequired && d.status !== "UPLOADED").length;
+    if (request.status !== "CANCELLED" && request.status !== "EXPIRED") {
+      if (visibleDocs.length > 0 && requiredPending === 0) {
+        request.status = "COMPLETED";
+      } else {
+        request.status = "PENDING";
+      }
+    }
+
+    request.requiredDocs = docs;
+    await request.save();
+
+    const lead = request.lead;
+    const customer = lead?.customer;
+    const company = request.company || lead?.company;
+    const customerName = customer?.name || "Valued Customer";
+    const companyName = company?.name || "CapitalCare Financial";
+    const loanInfo = lead?.loanType ? `${lead.loanType} application` : "loan application";
+    const clientPortalUrl = process.env.CLIENT_PORTAL_URL || "https://loan-crm-saasbased.vercel.app";
+    const liveUploadUrl = `${clientPortalUrl.replace(/\/+$/, "")}/upload-docs/${request.token}`;
+
+    const docBulletList = (visibleDocs.length > 0 ? visibleDocs : docs)
+      .map((d) => `• ${d.title}${d.isRequired ? " *(Required)*" : ""}`)
+      .join("\n");
+
+    const expiryText = request.expiresAt
+      ? `\n⏳ *Link valid till:* ${new Date(request.expiresAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}`
+      : "";
+
+    const whatsappMessage = `Dear ${customerName},\n\nGreetings from *${companyName}*!\n\nTo proceed with your *${loanInfo}*, please upload the required documents using our secure portal link below:\n\n🔗 *Upload Link:* ${liveUploadUrl}\n\n📋 *Requested Documents:*\n${docBulletList}${expiryText}\n\n💡 *Note:* You can take photos from your phone or upload PDF files. No login or password is required.\n\nThank you,\n*${companyName}*`;
+
+    await logActivity(req, {
+      recordType: "Lead",
+      recordId: request.leadId,
+      action: "UPDATED",
+      remarks: `${newHidden ? "Hidden" : "Unhid"} document "${docs[targetIndex].title}" in upload link #${request.id}`,
+    });
+
+    return res.json({
+      success: true,
+      message: `Document "${docs[targetIndex].title}" is now ${newHidden ? "hidden from customer" : "visible to customer"}`,
+      data: {
+        ...request.toJSON(),
+        uploadUrl: liveUploadUrl,
+        whatsappMessageTemplate: whatsappMessage,
+        updatedSlot: docs[targetIndex],
+        visibleDocsCount: visibleDocs.length,
+        hiddenDocsCount: docs.length - visibleDocs.length,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * @desc    Batch update, add, or edit document slots in an active request link
+ * @route   PATCH /api/document-requests/:id/slots
+ */
+const updateDocumentSlots = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { requiredDocs, newDoc } = req.body;
+    const request = await LeadDocumentRequest.findByPk(id, {
+      include: [
+        {
+          model: Lead,
+          as: "lead",
+          include: [
+            { model: Customer, as: "customer" },
+            { model: Company, as: "company" },
+          ],
+        },
+        { model: Company, as: "company" },
+      ],
+    });
+
+    if (!request || !belongsToScope(req, request)) {
+      return res.status(404).json({ message: "Document request not found" });
+    }
+
+    let docs = Array.isArray(request.requiredDocs) ? [...request.requiredDocs] : [];
+
+    if (Array.isArray(requiredDocs)) {
+      docs = requiredDocs.map((d, idx) => ({
+        ...d,
+        id: d.id || `doc_${Date.now()}_${idx + 1}`,
+        title: String(d.title || d.docType || `Document ${idx + 1}`).trim(),
+        docType: String(d.docType || "OTHER_DOCUMENT").toUpperCase().replace(/\s+/g, "_"),
+        category: d.category || "KYC",
+        isRequired: d.isRequired !== false,
+        isHidden: Boolean(d.isHidden),
+        status: d.status || "PENDING",
+      }));
+    } else if (newDoc && newDoc.title) {
+      docs.push({
+        id: `doc_${Date.now()}_${docs.length + 1}`,
+        title: String(newDoc.title).trim(),
+        docType: String(newDoc.docType || newDoc.title.toUpperCase().replace(/\s+/g, "_")),
+        category: newDoc.category || "OTHER",
+        isRequired: newDoc.isRequired !== false,
+        isHidden: Boolean(newDoc.isHidden),
+        description: newDoc.description || "",
+        status: "PENDING",
+        documentId: null,
+        fileName: null,
+        fileUrl: null,
+        fileSize: null,
+        uploadedAt: null,
+      });
+    }
+
+    const visibleDocs = docs.filter((d) => !d.isHidden);
+    const requiredPending = visibleDocs.filter((d) => d.isRequired && d.status !== "UPLOADED").length;
+    if (request.status !== "CANCELLED" && request.status !== "EXPIRED") {
+      if (visibleDocs.length > 0 && requiredPending === 0) {
+        request.status = "COMPLETED";
+      } else {
+        request.status = "PENDING";
+      }
+    }
+
+    request.requiredDocs = docs;
+    await request.save();
+
+    const lead = request.lead;
+    const customer = lead?.customer;
+    const company = request.company || lead?.company;
+    const customerName = customer?.name || "Valued Customer";
+    const companyName = company?.name || "CapitalCare Financial";
+    const loanInfo = lead?.loanType ? `${lead.loanType} application` : "loan application";
+    const clientPortalUrl = process.env.CLIENT_PORTAL_URL || "https://loan-crm-saasbased.vercel.app";
+    const liveUploadUrl = `${clientPortalUrl.replace(/\/+$/, "")}/upload-docs/${request.token}`;
+
+    const docBulletList = (visibleDocs.length > 0 ? visibleDocs : docs)
+      .map((d) => `• ${d.title}${d.isRequired ? " *(Required)*" : ""}`)
+      .join("\n");
+
+    const expiryText = request.expiresAt
+      ? `\n⏳ *Link valid till:* ${new Date(request.expiresAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}`
+      : "";
+
+    const whatsappMessage = `Dear ${customerName},\n\nGreetings from *${companyName}*!\n\nTo proceed with your *${loanInfo}*, please upload the required documents using our secure portal link below:\n\n🔗 *Upload Link:* ${liveUploadUrl}\n\n📋 *Requested Documents:*\n${docBulletList}${expiryText}\n\n💡 *Note:* You can take photos from your phone or upload PDF files. No login or password is required.\n\nThank you,\n*${companyName}*`;
+
+    await logActivity(req, {
+      recordType: "Lead",
+      recordId: request.leadId,
+      action: "UPDATED",
+      remarks: `Updated document slots for upload link #${request.id} (${docs.length} total, ${visibleDocs.length} visible)`,
+    });
+
+    return res.json({
+      success: true,
+      message: "Document slots updated successfully",
+      data: {
+        ...request.toJSON(),
+        uploadUrl: liveUploadUrl,
+        whatsappMessageTemplate: whatsappMessage,
+        visibleDocsCount: visibleDocs.length,
+        hiddenDocsCount: docs.length - visibleDocs.length,
+      },
     });
   } catch (error) {
     next(error);
@@ -371,8 +592,10 @@ const getPublicRequest = async (req, res, next) => {
         ? `${"*".repeat(rawMobile.length - 4)}${rawMobile.slice(-4)}`
         : rawMobile;
 
-    const totalDocs = (request.requiredDocs || []).length;
-    const uploadedDocs = (request.requiredDocs || []).filter((d) => d.status === "UPLOADED").length;
+    const allDocs = request.requiredDocs || [];
+    const visibleDocs = allDocs.filter((d) => !d.isHidden);
+    const totalDocs = visibleDocs.length;
+    const uploadedDocs = visibleDocs.filter((d) => d.status === "UPLOADED").length;
     const allCompleted = totalDocs > 0 && uploadedDocs === totalDocs;
 
     return res.json({
@@ -383,7 +606,7 @@ const getPublicRequest = async (req, res, next) => {
         status: request.status,
         expiresAt: request.expiresAt,
         customMessage: request.customMessage,
-        requiredDocs: request.requiredDocs || [],
+        requiredDocs: visibleDocs,
         totalDocs,
         uploadedDocs,
         allCompleted,
@@ -720,7 +943,9 @@ const sendDocumentRequestEmail = async (req, res, next) => {
     const companyName = company?.name || "CapitalCare Financial";
     const loanProduct = lead?.loanType || "Loan";
 
-    const docsListHtml = (request.requiredDocs || [])
+    const visibleDocs = (request.requiredDocs || []).filter((d) => !d.isHidden);
+    const docsToRender = visibleDocs.length > 0 ? visibleDocs : request.requiredDocs || [];
+    const docsListHtml = docsToRender
       .map(
         (d) => `
         <tr style="border-bottom: 1px solid #e2e8f0;">
@@ -1088,6 +1313,8 @@ module.exports = {
   createDocumentRequest,
   getRequestsByLead,
   cancelDocumentRequest,
+  toggleSlotHidden,
+  updateDocumentSlots,
   getPublicRequest,
   publicUploadDocument,
   publicSubmitNotes,

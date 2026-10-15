@@ -37,6 +37,7 @@ export default function CustomerDocumentUploadPortal() {
   const [uploadingSlots, setUploadingSlots] = useState({}); // { [slotId]: boolean }
   const [customerNotes, setCustomerNotes] = useState("");
   const [savingNotes, setSavingNotes] = useState(false);
+  const [notesSubmitted, setNotesSubmitted] = useState(false);
   const [customDocTitle, setCustomDocTitle] = useState("");
   const [showAddCustomDoc, setShowAddCustomDoc] = useState(false);
 
@@ -148,22 +149,25 @@ export default function CustomerDocumentUploadPortal() {
     }
   };
 
-  // Submit optional customer notes
+  // Submit optional customer notes / confirm submission
   const handleSubmitNotes = async (e) => {
-    e.preventDefault();
-    if (!customerNotes.trim()) return;
+    if (e) e.preventDefault();
 
     setSavingNotes(true);
     try {
       const res = await axios.post(`${API_URL}/public/document-requests/${token}/submit-notes`, {
-        customerNotes,
+        customerNotes: customerNotes.trim() || undefined,
       });
       if (res.data?.success) {
-        toast.success("Notes saved for your loan manager!");
-        setCustomerNotes("");
+        if (customerNotes.trim()) {
+          toast.success("Remarks saved for your loan manager!");
+        } else {
+          toast.success("Document submission confirmed successfully!");
+        }
+        setNotesSubmitted(true);
       }
     } catch (err) {
-      toast.error("Failed to submit notes.");
+      toast.error("Failed to submit.");
     } finally {
       setSavingNotes(false);
     }
@@ -222,7 +226,10 @@ export default function CustomerDocumentUploadPortal() {
     );
   }
 
-  const { requiredDocs = [], totalDocs = 0, uploadedDocs = 0, company, leadSummary } = portalData || {};
+  const { requiredDocs: rawRequiredDocs = [], company, leadSummary } = portalData || {};
+  const requiredDocs = rawRequiredDocs.filter((d) => !d.isHidden);
+  const totalDocs = requiredDocs.length;
+  const uploadedDocs = requiredDocs.filter((d) => d.status === "UPLOADED").length;
   const progressPercent = totalDocs > 0 ? Math.round((uploadedDocs / totalDocs) * 100) : 0;
   const isAllCompleted = totalDocs > 0 && uploadedDocs === totalDocs;
 
@@ -666,14 +673,24 @@ export default function CustomerDocumentUploadPortal() {
           </div>
         </div>
 
-        {/* Optional Notes for Loan Officer */}
+        {/* Optional Notes & Submission for Loan Officer */}
         <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
-          <h4 className="text-sm font-bold text-slate-900 mb-1 flex items-center gap-1.5">
-            <HelpCircle size={15} className="text-blue-600" />
-            <span>Have any remarks or questions for your loan manager?</span>
-          </h4>
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <h4 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+              <HelpCircle size={15} className="text-blue-600" />
+              <span>
+                Remarks / Notes for Loan Team{" "}
+                <span className="text-xs font-normal text-slate-500">(Optional / ऐच्छिक)</span>
+              </span>
+            </h4>
+            {notesSubmitted && (
+              <span className="text-[11px] font-bold text-emerald-700 bg-emerald-100 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                <CheckCircle2 size={12} /> Confirmed
+              </span>
+            )}
+          </div>
           <p className="text-xs text-slate-500 mb-3">
-            If any document is missing or you have questions, leave a message below.
+            Agar aap documents ke baare me koi jankari likhna chahte hain to yahan likh sakte hain. Yeh bilkul optional hai, aap ise bina likhe bhi direct submit kar sakte hain.
           </p>
 
           <form onSubmit={handleSubmitNotes} className="flex flex-col gap-2.5">
@@ -681,26 +698,38 @@ export default function CustomerDocumentUploadPortal() {
               rows={3}
               value={customerNotes}
               onChange={(e) => setCustomerNotes(e.target.value)}
-              placeholder="e.g. My latest month salary slip will be generated next Monday, uploaded last 2 months for now..."
+              placeholder="Kuch likhna chahein to yahan likhein (optional)... Ya bina kuch likhe direct Submit karein."
               className="w-full bg-white border border-slate-300 rounded-xl p-3 text-xs sm:text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all resize-none"
             />
-            <button
-              type="submit"
-              disabled={savingNotes || !customerNotes.trim()}
-              className="self-end py-2 px-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm"
-            >
-              {savingNotes ? (
-                <>
-                  <RefreshCw size={13} className="animate-spin" />
-                  <span>Saving...</span>
-                </>
-              ) : (
-                <>
-                  <span>Send Message to Team</span>
-                  <ArrowRight size={13} />
-                </>
-              )}
-            </button>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1">
+              <span className="text-[11px] text-slate-400">
+                {customerNotes.trim()
+                  ? "Note entered (will be shared with loan officer)"
+                  : "Notes are optional — you can submit anytime"}
+              </span>
+              <button
+                type="submit"
+                disabled={savingNotes}
+                className="py-2.5 px-5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-sm self-end sm:self-auto cursor-pointer"
+              >
+                {savingNotes ? (
+                  <>
+                    <RefreshCw size={13} className="animate-spin" />
+                    <span>Submitting...</span>
+                  </>
+                ) : notesSubmitted ? (
+                  <>
+                    <CheckCircle2 size={13} className="text-emerald-300" />
+                    <span>{customerNotes.trim() ? "Update Remarks" : "Submitted Successfully"}</span>
+                  </>
+                ) : (
+                  <>
+                    <span>{customerNotes.trim() ? "Submit with Remarks" : "Submit Documents"}</span>
+                    <ArrowRight size={13} />
+                  </>
+                )}
+              </button>
+            </div>
           </form>
         </div>
       </main>

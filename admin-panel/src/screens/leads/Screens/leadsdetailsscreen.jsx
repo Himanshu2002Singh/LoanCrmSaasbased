@@ -16,6 +16,7 @@ import {
   Download,
   ExternalLink,
   Eye,
+  EyeOff,
   FileCheck,
   FileSpreadsheet,
   Check,
@@ -100,6 +101,10 @@ export default function LeadDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [docRequests, setDocRequests] = useState([]);
   const [docReqModalOpen, setDocReqModalOpen] = useState(false);
+  const [manageSlotsReq, setManageSlotsReq] = useState(null);
+  const [togglingSlotId, setTogglingSlotId] = useState(null);
+  const [newSlotTitle, setNewSlotTitle] = useState("");
+  const [addingSlot, setAddingSlot] = useState(false);
   const [allEmployeesList, setAllEmployeesList] = useState([]);
   const [reassignModalOpen, setReassignModalOpen] = useState(false);
   const [reassignTargetEmpId, setReassignTargetEmpId] = useState("");
@@ -155,6 +160,7 @@ export default function LeadDetailScreen() {
 
   // Create Application Modal state
   const [createAppModalOpen, setCreateAppModalOpen] = useState(false);
+  const [loanProductsList, setLoanProductsList] = useState([]);
   const [appForm, setAppForm] = useState({
     loanProduct: "",
     appliedAmount: "",
@@ -322,12 +328,14 @@ export default function LeadDetailScreen() {
 
   const fetchMasterConfigs = async () => {
     try {
-      const [lendersRes, docTypesRes] = await Promise.all([
+      const [lendersRes, docTypesRes, loanProductsRes] = await Promise.all([
         axios.get(`${API_URL}/lenders`).catch(() => ({ data: { data: [] } })),
         axios.get(`${API_URL}/master-configs/DOC_TYPE`, { params: { includeInactive: false } }).catch(() => ({ data: { data: [] } })),
+        axios.get(`${API_URL}/master-configs/LOAN_PRODUCT`, { params: { includeInactive: false } }).catch(() => ({ data: { data: [] } })),
       ]);
       setLendersList(lendersRes.data?.data || lendersRes.data?.lenders || []);
       setDocTypesList(docTypesRes.data?.data || []);
+      setLoanProductsList(loanProductsRes.data?.data || []);
       if (docTypesRes.data?.data?.length) {
         setSelectedDocType(docTypesRes.data.data[0].value || docTypesRes.data.data[0].label);
       }
@@ -427,6 +435,66 @@ export default function LeadDetailScreen() {
       fetchDocRequests();
     } catch (err) {
       toast.error("Failed to cancel link");
+    }
+  };
+
+  const handleToggleSlotHidden = async (reqId, slotId) => {
+    try {
+      setTogglingSlotId(slotId);
+      const token = localStorage.getItem("token");
+      const res = await axios.patch(
+        `${API_URL}/document-requests/${reqId}/slots/${slotId}/toggle-hidden`,
+        {},
+        { headers: { ...(token && { Authorization: `Bearer ${token}` }) } }
+      );
+      if (res.data?.success) {
+        toast.success(res.data.message || "Document visibility updated");
+        const updatedReq = res.data.data;
+        setDocRequests((prev) =>
+          prev.map((r) => (r.id === reqId ? { ...r, ...updatedReq } : r))
+        );
+        if (manageSlotsReq && manageSlotsReq.id === reqId) {
+          setManageSlotsReq((prev) => ({ ...prev, ...updatedReq }));
+        }
+      }
+    } catch (err) {
+      console.error("Error toggling slot visibility:", err);
+      toast.error(err.response?.data?.message || "Failed to update document visibility");
+    } finally {
+      setTogglingSlotId(null);
+    }
+  };
+
+  const handleAddNewSlot = async (e) => {
+    e.preventDefault();
+    if (!newSlotTitle.trim() || !manageSlotsReq) return;
+    try {
+      setAddingSlot(true);
+      const token = localStorage.getItem("token");
+      const res = await axios.patch(
+        `${API_URL}/document-requests/${manageSlotsReq.id}/slots`,
+        {
+          newDoc: {
+            title: newSlotTitle.trim(),
+            isRequired: false,
+            isHidden: false,
+          },
+        },
+        { headers: { ...(token && { Authorization: `Bearer ${token}` }) } }
+      );
+      if (res.data?.success) {
+        toast.success(`"${newSlotTitle.trim()}" added to document link!`);
+        setNewSlotTitle("");
+        const updatedReq = res.data.data;
+        setDocRequests((prev) =>
+          prev.map((r) => (r.id === manageSlotsReq.id ? { ...r, ...updatedReq } : r))
+        );
+        setManageSlotsReq((prev) => ({ ...prev, ...updatedReq }));
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to add document");
+    } finally {
+      setAddingSlot(false);
     }
   };
 
@@ -1455,8 +1523,11 @@ export default function LeadDetailScreen() {
                   const uploadUrl = `${baseUrl.replace(/\/+$/, "")}/upload-docs/${req.token}`;
                   const isCompleted = req.status === "COMPLETED";
                   const isCancelled = req.status === "CANCELLED";
-                  const total = (req.requiredDocs || []).length;
-                  const uploaded = (req.requiredDocs || []).filter((d) => d.status === "UPLOADED").length;
+                  const allDocs = req.requiredDocs || [];
+                  const visibleDocs = allDocs.filter((d) => !d.isHidden);
+                  const hiddenDocs = allDocs.filter((d) => d.isHidden);
+                  const total = visibleDocs.length;
+                  const uploaded = visibleDocs.filter((d) => d.status === "UPLOADED").length;
 
                   return (
                     <div
@@ -1483,7 +1554,7 @@ export default function LeadDetailScreen() {
                             color: isCompleted ? "#15803d" : isCancelled ? "#b91c1c" : "#4338ca",
                           }}
                         >
-                          {req.status} ({uploaded}/{total})
+                          {req.status} ({uploaded}/{total} visible{hiddenDocs.length > 0 ? `, ${hiddenDocs.length} hidden` : ""})
                         </span>
                       </div>
 
@@ -1541,6 +1612,30 @@ export default function LeadDetailScreen() {
                         >
                           <MessageSquare size={11} /> WhatsApp
                         </button>
+
+                        {/* Manage Hide / Unhide Docs */}
+                        {!isReadOnly && !isCancelled && (
+                          <button
+                            type="button"
+                            onClick={() => setManageSlotsReq(req)}
+                            style={{
+                              padding: "4px 8px",
+                              fontSize: "11px",
+                              borderRadius: "6px",
+                              background: "#fffbeb",
+                              color: "#b45309",
+                              border: "1px solid #fde68a",
+                              cursor: "pointer",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              fontWeight: 600,
+                            }}
+                            title="Hide or Unhide documents for customer on this active link"
+                          >
+                            <Eye size={11} /> Hide/Unhide Docs ({hiddenDocs.length > 0 ? `${hiddenDocs.length} Hidden` : "Manage"})
+                          </button>
+                        )}
 
                         <a
                           href={uploadUrl}
@@ -2242,15 +2337,28 @@ export default function LeadDetailScreen() {
             <form onSubmit={handleCreateApplication} className="cc-modal-form">
               <div className="form-group">
                 <label>
-                  Loan Product <span className="req">*</span>
+                  Select Loan Product / Type <span className="req">*</span>
                 </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Home Loan, Business Loan, Personal Loan..."
+                <select
                   value={appForm.loanProduct}
                   onChange={(e) => setAppForm({ ...appForm, loanProduct: e.target.value })}
                   required
-                />
+                >
+                  <option value="">Select Loan Product</option>
+                  {loanProductsList.map((lp) => (
+                    <option key={lp.id || lp.value} value={lp.label || lp.value}>
+                      {lp.label || lp.value}
+                    </option>
+                  ))}
+                  {appForm.loanProduct &&
+                    !loanProductsList.some(
+                      (lp) => (lp.label || lp.value).toLowerCase() === appForm.loanProduct.toLowerCase()
+                    ) && (
+                      <option value={appForm.loanProduct}>
+                        {appForm.loanProduct} (Current)
+                      </option>
+                    )}
+                </select>
               </div>
 
               <div className="form-group">
@@ -2398,6 +2506,217 @@ export default function LeadDetailScreen() {
           fetchDocRequests();
         }}
       />
+
+      {/* MODAL: MANAGE / HIDE & UNHIDE DOCUMENTS FOR ACTIVE LINK */}
+      {manageSlotsReq && (
+        <div
+          className="cc-modal-overlay"
+          onClick={() => setManageSlotsReq(null)}
+          style={{ zIndex: 9999 }}
+        >
+          <div
+            className="cc-modal-card"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: 640, width: "100%", maxHeight: "90vh", display: "flex", flexDirection: "column" }}
+          >
+            <div className="cc-modal-header" style={{ padding: "16px 20px", borderBottom: "1px solid #e2e8f0" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: "#fef3c7", color: "#b45309", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <Eye size={18} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#0f172a" }}>
+                    Manage Requested Documents (Hide / Unhide)
+                  </h3>
+                  <p style={{ margin: "2px 0 0", fontSize: 12, color: "#64748b" }}>
+                    Active Link #{manageSlotsReq.id} • {lead?.customer?.name || lead?.name} ({lead?.loanType || "Loan"})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="cc-modal-close-btn"
+                onClick={() => setManageSlotsReq(null)}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8" }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ padding: "16px 20px", overflowY: "auto", flex: 1 }}>
+              {/* Info banner */}
+              <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 12, color: "#1e40af", lineHeight: 1.5 }}>
+                💡 <strong>Hide / Unhide Feature:</strong> Jo documents customer ko upload nahi karne dene, unko aap <strong>"Hide"</strong> kar sakte hain. Jab bhi dubara chahiye ho, direct <strong>"Unhide"</strong> par click karein—customer ke portal link par instantly reflect ho jayega!
+              </div>
+
+              {/* Status Counters */}
+              {(() => {
+                const docs = manageSlotsReq.requiredDocs || [];
+                const visibleDocs = docs.filter((d) => !d.isHidden);
+                const hiddenDocs = docs.filter((d) => d.isHidden);
+                return (
+                  <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 20, background: "#ecfdf5", color: "#065f46", border: "1px solid #a7f3d0" }}>
+                      ✓ {visibleDocs.length} Visible on Portal
+                    </span>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 20, background: "#fffbeb", color: "#92400e", border: "1px solid #fde68a" }}>
+                      👁️‍🗨️ {hiddenDocs.length} Hidden from Customer
+                    </span>
+                    <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 20, background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0" }}>
+                      Total {docs.length} Configured Slots
+                    </span>
+                  </div>
+                );
+              })()}
+
+              {/* Slots List */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+                {(manageSlotsReq.requiredDocs || []).map((slot, sIdx) => {
+                  const isSlotHidden = Boolean(slot.isHidden);
+                  const isUploaded = slot.status === "UPLOADED";
+                  const isToggling = togglingSlotId === slot.id;
+
+                  return (
+                    <div
+                      key={slot.id || sIdx}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        padding: "10px 12px",
+                        borderRadius: 10,
+                        border: isSlotHidden ? "1px dashed #cbd5e1" : "1px solid #e2e8f0",
+                        background: isSlotHidden ? "#f8fafc" : "#ffffff",
+                        transition: "all 0.2s ease",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, overflow: "hidden" }}>
+                        <FileCheck size={16} color={isSlotHidden ? "#94a3b8" : isUploaded ? "#10b981" : "#2563eb"} />
+                        <div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                            <strong style={{ fontSize: 13, color: isSlotHidden ? "#64748b" : "#0f172a", textDecoration: isSlotHidden ? "line-through" : "none" }}>
+                              {slot.title}
+                            </strong>
+                            <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "#f1f5f9", color: "#475569" }}>
+                              {slot.category || "KYC"}
+                            </span>
+                            {slot.isRequired && (
+                              <span style={{ fontSize: 10, fontWeight: 700, color: "#dc2626" }}>*Required</span>
+                            )}
+                          </div>
+                          <div style={{ display: "flex", gap: 8, marginTop: 2, fontSize: 11 }}>
+                            <span style={{ color: isUploaded ? "#16a34a" : "#ca8a04", fontWeight: 600 }}>
+                              {isUploaded ? "✓ Uploaded by Customer" : "⏳ Pending Upload"}
+                            </span>
+                            <span style={{ color: isSlotHidden ? "#d97706" : "#2563eb", fontWeight: 600 }}>
+                              {isSlotHidden ? "• Hidden from customer portal" : "• Visible on portal"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, shrink: 0 }}>
+                        <button
+                          type="button"
+                          disabled={isToggling}
+                          onClick={() => handleToggleSlotHidden(manageSlotsReq.id, slot.id)}
+                          style={{
+                            padding: "6px 12px",
+                            fontSize: 11,
+                            fontWeight: 700,
+                            borderRadius: 8,
+                            cursor: isToggling ? "not-allowed" : "pointer",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 5,
+                            transition: "all 0.15s ease",
+                            background: isSlotHidden ? "#ecfdf5" : "#fffbeb",
+                            color: isSlotHidden ? "#047857" : "#b45309",
+                            border: isSlotHidden ? "1px solid #a7f3d0" : "1px solid #fde68a",
+                          }}
+                          title={isSlotHidden ? "Make this document visible to customer" : "Hide this document so customer won't see it"}
+                        >
+                          {isSlotHidden ? <Eye size={12} /> : <EyeOff size={12} />}
+                          <span>{isToggling ? "Updating..." : isSlotHidden ? "Unhide for Customer" : "Hide from Customer"}</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Add Extra Slot to Active Link */}
+              <form onSubmit={handleAddNewSlot} style={{ display: "flex", gap: 8, background: "#f8fafc", padding: "10px 12px", borderRadius: 10, border: "1px solid #e2e8f0" }}>
+                <input
+                  type="text"
+                  placeholder="+ Add another document to this active link..."
+                  value={newSlotTitle}
+                  onChange={(e) => setNewSlotTitle(e.target.value)}
+                  style={{ flex: 1, padding: "8px 12px", fontSize: 12, borderRadius: 8, border: "1px solid #cbd5e1" }}
+                />
+                <button
+                  type="submit"
+                  disabled={addingSlot || !newSlotTitle.trim()}
+                  style={{
+                    padding: "8px 14px",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    borderRadius: 8,
+                    background: "#2563eb",
+                    color: "#ffffff",
+                    border: "none",
+                    cursor: addingSlot || !newSlotTitle.trim() ? "not-allowed" : "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                  }}
+                >
+                  <Plus size={13} /> {addingSlot ? "Adding..." : "Add Doc"}
+                </button>
+              </form>
+            </div>
+
+            <div className="cc-modal-footer" style={{ padding: "12px 20px", borderTop: "1px solid #e2e8f0", background: "#f8fafc", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ display: "flex", gap: 8 }}>
+                {(() => {
+                  const baseUrl = CLIENT_PORTAL_URL || "https://loan-crm-saasbased.vercel.app";
+                  const uploadUrl = `${baseUrl.replace(/\/+$/, "")}/upload-docs/${manageSlotsReq.token}`;
+                  return (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(uploadUrl);
+                          toast.success("Customer link copied!");
+                        }}
+                        style={{ padding: "6px 12px", fontSize: 11, fontWeight: 600, borderRadius: 6, background: "#eff6ff", color: "#1d4ed8", border: "1px solid #bfdbfe", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}
+                      >
+                        <Copy size={11} /> Copy Link
+                      </button>
+                      <a
+                        href={uploadUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ padding: "6px 12px", fontSize: 11, fontWeight: 600, borderRadius: 6, background: "#ffffff", color: "#475569", border: "1px solid #cbd5e1", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}
+                      >
+                        <ExternalLink size={11} /> View Customer Portal
+                      </a>
+                    </>
+                  );
+                })()}
+              </div>
+              <button
+                type="button"
+                className="cc-modal-btn primary"
+                onClick={() => setManageSlotsReq(null)}
+                style={{ padding: "6px 16px", fontSize: 12, fontWeight: 700 }}
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL: REASSIGN LEAD */}
       {reassignModalOpen && (

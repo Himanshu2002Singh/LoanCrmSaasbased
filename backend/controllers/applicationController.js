@@ -882,9 +882,33 @@ const updateApplication = async (req, res, next) => {
       });
     }
 
+    if (payload.lenderId !== undefined && String(payload.lenderId) !== String(before.lenderId)) {
+      const oldLender = before.lenderId ? await Lender.findByPk(before.lenderId) : null;
+      const newLender = payload.lenderId ? await Lender.findByPk(payload.lenderId) : null;
+      await OperationStatusHistory.create({
+        companyId: application.companyId,
+        applicationId: application.id,
+        leadId: application.leadId,
+        statusType: "BANK_UPDATE",
+        oldStatus: oldLender ? oldLender.name : "Unassigned",
+        newStatus: newLender ? newLender.name : "Unassigned",
+        remarks: `Bank updated from ${oldLender ? oldLender.name : "Unassigned"} to ${newLender ? newLender.name : "Unassigned"} by ${req.user.name || "Operations"}`,
+        updatedBy: req.user.id,
+      }).catch((e) => console.error("Error creating OperationStatusHistory:", e.message));
+    }
+
+    const updatedApp = await Application.findByPk(application.id, {
+      include: [
+        { model: Customer, as: "customer" },
+        { model: Lead, as: "lead" },
+        { model: Lender, as: "lender" },
+        { model: User, as: "assignedBanker", attributes: ["id", "name", "email", "phone", "role"] },
+      ],
+    });
+
     return res.json({
       message: "Application updated successfully",
-      application,
+      application: updatedApp || application,
     });
   } catch (error) {
     next(error);

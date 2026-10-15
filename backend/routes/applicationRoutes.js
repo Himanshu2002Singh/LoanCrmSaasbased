@@ -37,9 +37,18 @@ router.get("/queries/all", controller.listAllQueries);
 router.get("/", controller.listApplications);
 router.get("/:id", controller.getApplicationById);
 
+const canManageApp = (req, res, next) => {
+  if (!req.user) return res.status(401).json({ message: "Authentication required" });
+  if (req.user.role === ROLES.SUPERADMIN || req.user.role === ROLES.COMPANY_ADMIN) return next();
+  if ([ROLES.MANAGER, ROLES.OPS].includes(req.user.role)) return next();
+  const permissions = req.permissions || {};
+  if (permissions.manageOperations || permissions.createLoanApplication) return next();
+  return res.status(403).json({ message: "You do not have access to update this application" });
+};
+
 router.patch(
   "/:id",
-  requireRole(ROLES.COMPANY_ADMIN, ROLES.MANAGER, ROLES.OPS),
+  canManageApp,
   controller.updateApplication
 );
 

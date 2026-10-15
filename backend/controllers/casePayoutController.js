@@ -1566,6 +1566,227 @@ exports.createCasePayout = async (req, res) => {
 };
 
 /**
+ * POST /api/payouts/cases/bulk
+ * Allows Finance role and Admin to bulk create/import case payouts from Excel
+ */
+exports.bulkCreateCasePayouts = async (req, res) => {
+  try {
+    const companyId = resolveCompanyId(req);
+    const casesList = Array.isArray(req.body)
+      ? req.body
+      : Array.isArray(req.body.cases)
+      ? req.body.cases
+      : [];
+
+    if (!casesList || casesList.length === 0) {
+      return res.status(400).json({ message: "No cases provided for import" });
+    }
+
+    const imported = [];
+    const errors = [];
+
+    for (let i = 0; i < casesList.length; i++) {
+      const rowNum = i + 1;
+      const item = casesList[i] || {};
+      const t = await sequelize.transaction();
+
+      try {
+        const customerName = item.customerName ? String(item.customerName).trim() : "";
+        if (!customerName) {
+          throw new Error("Customer Name is required");
+        }
+
+        const newLoan = parseFloat(item.loanAmount || 0);
+        if (isNaN(newLoan) || newLoan <= 0) {
+          throw new Error(`Valid loan amount is required (received: ${item.loanAmount})`);
+        }
+
+        const customerMobile = item.customerMobile ? String(item.customerMobile).trim() : "";
+        const customerEmail = item.customerEmail ? String(item.customerEmail).trim() : null;
+        const loanProd = item.loanProduct ? String(item.loanProduct).trim() : "Personal Loan";
+        const finalBank = item.bankName ? String(item.bankName).trim() : "Bank";
+
+        // Find or create customer
+        let targetCustomer = null;
+        if (customerMobile) {
+          targetCustomer = await Customer.findOne({
+            where: { companyId, mobile: customerMobile },
+            transaction: t,
+          });
+        }
+
+        if (!targetCustomer) {
+          const mobileVal = customerMobile || `9999${Date.now().toString().slice(-6)}${Math.floor(Math.random() * 100)}`;
+          targetCustomer = await Customer.create(
+            {
+              companyId,
+              name: customerName,
+              mobile: mobileVal,
+              email: customerEmail || null,
+            },
+            { transaction: t }
+          );
+        } else if (customerName || customerEmail) {
+          await targetCustomer.update(
+            {
+              name: customerName || targetCustomer.name,
+              email: customerEmail || targetCustomer.email,
+            },
+            { transaction: t }
+          );
+        }
+
+        const effectivePartyName = item.partyName ? String(item.partyName).trim() : "Self";
+        const isSelf =
+          effectivePartyName.toLowerCase() === "self" ||
+          effectivePartyName.toLowerCase() === "direct" ||
+          (item.payoutType && String(item.payoutType).toUpperCase() === "SELF");
+        const payoutType = isSelf ? "SELF" : "VENDOR";
+
+        let partyCommPct = isSelf ? 0.0 : parseFloat(item.partyCommissionPercent ?? 50.0);
+        if (isNaN(partyCommPct)) partyCommPct = 0.0;
+
+        // Create Disbursed Lead
+        const targetLead = await Lead.create(
+          {
+            companyId,
+            customerId: targetCustomer.id,
+            loanType: loanProd,
+            leadSource: effectivePartyName,
+            requiredAmount: newLoan,
+            sanctioned_amount: newLoan,
+            bank_name: finalBank,
+            status: "DISBURSED",
+            priority: "HIGH",
+            commissionPercent: partyCommPct,
+            createdById: req.user?.id || null,
+          },
+          { transaction: t }
+        );
+
+        // Calculate commission financials
+        const newBankPct = parseFloat(item.bankCommissionPercent ?? 2.0) || 2.0;
+        let newBase =
+          item.baseAmount !== undefined && item.baseAmount !== "" && !isNaN(parseFloat(item.baseAmount))
+            ? parseFloat(item.baseAmount)
+            : Math.round((newLoan * newBankPct) / 100);
+
+        const newCorpDsaPct = parseFloat(item.corporateDsaPercent ?? 0) || 0;
+        const newCorpDsaAmt =
+          item.corporateDsaAmount !== undefined && item.corporateDsaAmount !== "" && !isNaN(parseFloat(item.corporateDsaAmount))
+            ? parseFloat(item.corporateDsaAmount)
+            : Math.round((newBase * newCorpDsaPct) / 100);
+        const actualAmount = Math.max(0, newBase - newCorpDsaAmt);
+
+        const newBankTdsPct = parseFloat(item.bankTdsPercent ?? 5.0) || 0;
+        const newBankTdsAmt = Math.round((actualAmount * newBankTdsPct) / 100);
+        const newBankGstPct = parseFloat(item.bankGstPercent ?? 18.0) || 0;
+        const newBankGstAmt = Math.round((actualAmount * newBankGstPct) / 100);
+
+        // Bank Net Receivable = actualAmount - TDS (GST is separate!)
+        const bankNetReceivable = Math.max(0, actualAmount - newBankTdsAmt);
+        const bankCommissionDue = bankNetReceivable;
+
+        const partyCommissionDue = isSelf ? 0.0 : Math.round((newBase * partyCommPct) / 100);
+        let newExtra = parseFloat(item.extraCharges || 0) || 0;
+        let partyNetPayable = isSelf ? 0.0 : Math.max(0, partyCommissionDue - newExtra);
+        let netMargin = Math.round(bankNetReceivable - (isSelf ? 0 : partyNetPayable) - newExtra);
+
+        const disbDateVal = item.disbursalDate
+          ? String(item.disbursalDate).slice(0, 10)
+          : new Date().toISOString().slice(0, 10);
+
+        const currentYear = new Date().getFullYear();
+        const invoiceNumber = `INV-${currentYear}-${String(targetLead.id).padStart(4, "0")}`;
+
+        const payout = await CasePayout.create(
+          {
+            companyId,
+            leadId: targetLead.id,
+            customerName,
+            customerMobile: targetCustomer.mobile,
+            loanProduct: loanProd,
+            bankName: finalBank,
+            lenderId: item.lenderId || null,
+            disbursalDate: disbDateVal,
+            loanAmount: newLoan,
+            baseAmount: newBase,
+            corporateDsaPercent: newCorpDsaPct,
+            corporateDsaAmount: newCorpDsaAmt,
+            actualAmount,
+            bankCommissionPercent: newBankPct,
+            bankCommissionDue,
+            bankGstPercent: newBankGstPct,
+            bankGstAmount: newBankGstAmt,
+            bankTdsPercent: newBankTdsPct,
+            bankTdsAmount: newBankTdsAmt,
+            bankNetReceivable,
+            bankReceivedAmount: 0.0,
+            bankRemainingDue: bankCommissionDue,
+            payoutType,
+            partyName: effectivePartyName,
+            partyCode: item.partyCode ? String(item.partyCode).trim() : null,
+            partyCommissionPercent: partyCommPct,
+            partyCommissionDue,
+            partyTdsPercent: 0,
+            partyTdsAmount: 0,
+            partyGstPercent: 0,
+            partyGstAmount: 0,
+            extraCharges: newExtra,
+            partyNetPayable,
+            partyPaidAmount: 0.0,
+            partyRemainingDue: partyNetPayable,
+            netMargin,
+            gstrStatus: "PENDING",
+            gstrAmount: newBankGstAmt,
+            gstrReceivedAmount: 0.0,
+            invoiceNumber,
+            invoiceDate: new Date(),
+            status: "PENDING",
+            notes: item.notes ? String(item.notes).trim() : "Imported via Excel",
+          },
+          { transaction: t }
+        );
+
+        await t.commit();
+        imported.push(payout);
+      } catch (err) {
+        await t.rollback();
+        errors.push({
+          row: rowNum,
+          customerName: item.customerName || "—",
+          error: err.message || "Failed to process row",
+        });
+      }
+    }
+
+    if (imported.length > 0) {
+      await logActivity(req, {
+        recordType: "CASE_PAYOUT",
+        recordId: imported[0].id,
+        action: "BULK_IMPORT_CASE_PAYOUTS",
+        remarks: `Bulk imported ${imported.length} case payout(s) from Excel file (${errors.length} failed)`,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Excel Import Completed: ${imported.length} cases added successfully${
+        errors.length > 0 ? `, ${errors.length} rows had errors` : ""
+      }`,
+      importedCount: imported.length,
+      failedCount: errors.length,
+      errors,
+      importedCases: imported,
+    });
+  } catch (error) {
+    console.error("[casePayoutController] bulkCreateCasePayouts error:", error);
+    return res.status(500).json({ message: "Failed to process bulk import", error: error.message });
+  }
+};
+
+
+/**
  * PUT /api/payouts/cases/:id/gstr-status
  * Updates GSTR reflection status (PENDING / COMPLETE / PARTIALLY_COMPLETE) and received amount
  */

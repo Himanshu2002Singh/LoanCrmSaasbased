@@ -18,6 +18,8 @@ import {
   FileCheck,
   Check,
   Mail,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import API_URL, { CLIENT_PORTAL_URL } from "../../config";
 
@@ -43,6 +45,7 @@ export default function LeadDocumentRequestModal({
   const [sendAlsoEmail, setSendAlsoEmail] = useState(true);
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emailSentSuccess, setEmailSentSuccess] = useState(false);
+  const [docFilterTab, setDocFilterTab] = useState("ALL"); // "ALL", "VISIBLE", "HIDDEN"
 
   useEffect(() => {
     if (lead?.customer?.email) {
@@ -111,6 +114,7 @@ export default function LeadDocumentRequestModal({
         docType: doc.docType,
         category: doc.category || "KYC",
         isRequired: doc.isRequired !== false,
+        isHidden: Boolean(doc.isHidden),
         description: doc.description || "",
       }))
     );
@@ -135,6 +139,7 @@ export default function LeadDocumentRequestModal({
           docType: doc.docType,
           category: doc.category || "KYC",
           isRequired: true,
+          isHidden: false,
           description: doc.description || "",
         },
       ]);
@@ -145,6 +150,17 @@ export default function LeadDocumentRequestModal({
     setSelectedDocs((prev) =>
       prev.map((d, idx) => (idx === docIndex ? { ...d, isRequired: !d.isRequired } : d))
     );
+  };
+
+  const handleToggleHidden = (docIndex) => {
+    setSelectedDocs((prev) =>
+      prev.map((d, idx) => (idx === docIndex ? { ...d, isHidden: !d.isHidden } : d))
+    );
+  };
+
+  const handleBulkSetHidden = (makeHidden) => {
+    setSelectedDocs((prev) => prev.map((d) => ({ ...d, isHidden: makeHidden })));
+    toast.info(makeHidden ? "All documents marked as hidden" : "All documents marked as visible");
   };
 
   const handleRemoveDoc = (docIndex) => {
@@ -161,6 +177,7 @@ export default function LeadDocumentRequestModal({
       docType: customDocTitle.trim().toUpperCase().replace(/\s+/g, "_"),
       category: customDocCategory,
       isRequired: true,
+      isHidden: false,
       description: "Custom requested document",
     };
 
@@ -173,6 +190,11 @@ export default function LeadDocumentRequestModal({
     if (selectedDocs.length === 0) {
       toast.error("Please select at least one document to request from the customer");
       return;
+    }
+
+    const visibleDocs = selectedDocs.filter((d) => !d.isHidden);
+    if (visibleDocs.length === 0) {
+      toast.warning("Notice: All documents are hidden. Customer will not see any documents until you unhide them.");
     }
 
     try {
@@ -430,7 +452,10 @@ export default function LeadDocumentRequestModal({
               {/* Summary of Selected Documents */}
               <div className="border border-slate-200 rounded-xl p-3.5 bg-slate-50">
                 <div className="text-xs font-bold text-slate-700 mb-2 flex items-center justify-between">
-                  <span>Requested Documents ({selectedDocs.length}):</span>
+                  <span>
+                    Requested Documents ({selectedDocs.filter((d) => !d.isHidden).length} visible
+                    {selectedDocs.some((d) => d.isHidden) ? `, ${selectedDocs.filter((d) => d.isHidden).length} hidden` : ""}):
+                  </span>
                   {expiryDays > 0 && (
                     <span className="text-amber-700 text-[11px] font-semibold flex items-center gap-1">
                       <Clock size={11} /> Valid for {expiryDays} days
@@ -438,17 +463,28 @@ export default function LeadDocumentRequestModal({
                   )}
                 </div>
                 <div className="flex flex-wrap gap-1.5">
-                  {selectedDocs.map((d, i) => (
-                    <span
-                      key={i}
-                      className="px-2.5 py-1 rounded-lg text-xs bg-white border border-slate-200 text-slate-700 font-medium flex items-center gap-1 shadow-sm"
-                    >
-                      <FileCheck size={12} className="text-blue-600" />
-                      <span>{d.title}</span>
-                      {d.isRequired && <span className="text-rose-600 text-[10px] font-bold">*</span>}
-                    </span>
-                  ))}
+                  {selectedDocs
+                    .filter((d) => !d.isHidden)
+                    .map((d, i) => (
+                      <span
+                        key={i}
+                        className="px-2.5 py-1 rounded-lg text-xs bg-white border border-slate-200 text-slate-700 font-medium flex items-center gap-1 shadow-sm"
+                      >
+                        <FileCheck size={12} className="text-blue-600" />
+                        <span>{d.title}</span>
+                        {d.isRequired && <span className="text-rose-600 text-[10px] font-bold">*</span>}
+                      </span>
+                    ))}
                 </div>
+                {selectedDocs.some((d) => d.isHidden) && (
+                  <div className="mt-2.5 pt-2 border-t border-slate-200 flex items-center gap-1.5 text-[11px] text-amber-700 font-medium">
+                    <EyeOff size={12} className="shrink-0" />
+                    <span>
+                      {selectedDocs.filter((d) => d.isHidden).length} document(s) hidden from customer view:{" "}
+                      {selectedDocs.filter((d) => d.isHidden).map((d) => d.title).join(", ")}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           ) : (
@@ -489,6 +525,15 @@ export default function LeadDocumentRequestModal({
                   >
                     🪪 Basic KYC
                   </button>
+                  {masterDocs.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => applyPreset(masterDocs)}
+                      className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 text-xs font-semibold transition-all"
+                    >
+                      📂 All Master Docs
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => setSelectedDocs([])}
@@ -499,15 +544,81 @@ export default function LeadDocumentRequestModal({
                 </div>
               </div>
 
-              {/* Selected Documents Checklist */}
+              {/* Selected Documents Checklist with Hide / Unhide Controls */}
               <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                    Selected Documents to Request ({selectedDocs.length})
-                  </label>
-                  <span className="text-[11px] text-slate-500 font-medium">
-                    Click *Required to toggle mandatory status
-                  </span>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2.5">
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                      Documents Checklist ({selectedDocs.length})
+                    </label>
+                    <span className="text-[11px] text-emerald-700 font-semibold bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                      {selectedDocs.filter((d) => !d.isHidden).length} Visible to Customer
+                    </span>
+                    {selectedDocs.some((d) => d.isHidden) && (
+                      <span className="text-[11px] text-amber-700 font-semibold bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+                        {selectedDocs.filter((d) => d.isHidden).length} Hidden
+                      </span>
+                    )}
+                  </div>
+
+                  {selectedDocs.length > 0 && (
+                    <div className="flex items-center gap-1.5 self-start sm:self-auto">
+                      {/* Filter Segmented Buttons */}
+                      <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-[11px]">
+                        <button
+                          type="button"
+                          onClick={() => setDocFilterTab("ALL")}
+                          className={`px-2 py-0.5 rounded-md font-semibold transition-all ${
+                            docFilterTab === "ALL"
+                              ? "bg-white text-slate-900 shadow-sm"
+                              : "text-slate-600 hover:text-slate-900"
+                          }`}
+                        >
+                          All ({selectedDocs.length})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDocFilterTab("VISIBLE")}
+                          className={`px-2 py-0.5 rounded-md font-semibold transition-all flex items-center gap-1 ${
+                            docFilterTab === "VISIBLE"
+                              ? "bg-white text-emerald-700 shadow-sm"
+                              : "text-slate-600 hover:text-emerald-700"
+                          }`}
+                        >
+                          <Eye size={10} /> Visible ({selectedDocs.filter((d) => !d.isHidden).length})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDocFilterTab("HIDDEN")}
+                          className={`px-2 py-0.5 rounded-md font-semibold transition-all flex items-center gap-1 ${
+                            docFilterTab === "HIDDEN"
+                              ? "bg-white text-amber-700 shadow-sm"
+                              : "text-slate-600 hover:text-amber-700"
+                          }`}
+                        >
+                          <EyeOff size={10} /> Hidden ({selectedDocs.filter((d) => d.isHidden).length})
+                        </button>
+                      </div>
+
+                      {/* Quick Bulk Hide / Unhide */}
+                      <button
+                        type="button"
+                        onClick={() => handleBulkSetHidden(false)}
+                        className="px-2 py-1 rounded-lg text-[10px] font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 transition-all"
+                        title="Make all documents visible to customer"
+                      >
+                        Unhide All
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleBulkSetHidden(true)}
+                        className="px-2 py-1 rounded-lg text-[10px] font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 transition-all"
+                        title="Hide all documents from customer"
+                      >
+                        Hide All
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {selectedDocs.length === 0 ? (
@@ -515,43 +626,94 @@ export default function LeadDocumentRequestModal({
                     No documents selected yet. Choose a preset above or add documents below.
                   </div>
                 ) : (
-                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                    {selectedDocs.map((doc, idx) => (
-                      <div
-                        key={idx}
-                        className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs"
-                      >
-                        <div className="flex items-center gap-2 overflow-hidden">
-                          <FileCheck size={14} className="text-blue-600 shrink-0" />
-                          <span className="font-semibold text-slate-900 truncate">{doc.title}</span>
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-600 font-medium">
-                            {doc.category || "KYC"}
-                          </span>
-                        </div>
+                  <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                    {selectedDocs
+                      .map((doc, originalIdx) => ({ doc, originalIdx }))
+                      .filter(({ doc }) => {
+                        if (docFilterTab === "VISIBLE") return !doc.isHidden;
+                        if (docFilterTab === "HIDDEN") return doc.isHidden;
+                        return true;
+                      })
+                      .map(({ doc, originalIdx }) => (
+                        <div
+                          key={originalIdx}
+                          className={`flex items-center justify-between rounded-xl px-3 py-2 text-xs transition-all ${
+                            doc.isHidden
+                              ? "bg-slate-100/75 border border-dashed border-slate-300 text-slate-500"
+                              : "bg-white border border-slate-200 shadow-xs text-slate-900 hover:border-slate-300"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 overflow-hidden">
+                            <FileCheck
+                              size={14}
+                              className={doc.isHidden ? "text-slate-400 shrink-0" : "text-blue-600 shrink-0"}
+                            />
+                            <span
+                              className={`font-semibold truncate ${
+                                doc.isHidden ? "text-slate-500 line-through decoration-slate-300" : "text-slate-900"
+                              }`}
+                            >
+                              {doc.title}
+                            </span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-600 font-medium">
+                              {doc.category || "KYC"}
+                            </span>
+                            {doc.isHidden ? (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                                Hidden
+                              </span>
+                            ) : (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                Visible
+                              </span>
+                            )}
+                          </div>
 
-                        <div className="flex items-center gap-2 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleRequired(idx)}
-                            className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all ${
-                              doc.isRequired
-                                ? "bg-rose-50 text-rose-700 border border-rose-200"
-                                : "bg-slate-100 text-slate-600 border border-slate-200"
-                            }`}
-                          >
-                            {doc.isRequired ? "Mandatory *" : "Optional"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveDoc(idx)}
-                            className="p-1 text-slate-400 hover:text-rose-600 transition-all"
-                            title="Remove"
-                          >
-                            <Trash2 size={13} />
-                          </button>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {/* Hide / Unhide Toggle */}
+                            <button
+                              type="button"
+                              onClick={() => handleToggleHidden(originalIdx)}
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all flex items-center gap-1 ${
+                                doc.isHidden
+                                  ? "bg-amber-100 hover:bg-emerald-50 text-amber-800 hover:text-emerald-700 border border-amber-300"
+                                  : "bg-slate-100 hover:bg-amber-50 text-slate-600 hover:text-amber-700 border border-slate-200"
+                              }`}
+                              title={
+                                doc.isHidden
+                                  ? "Unhide this document so customer sees it on portal"
+                                  : "Hide this document from customer portal"
+                              }
+                            >
+                              {doc.isHidden ? <Eye size={11} className="text-emerald-600" /> : <EyeOff size={11} className="text-amber-600" />}
+                              <span>{doc.isHidden ? "Unhide" : "Hide"}</span>
+                            </button>
+
+                            {/* Mandatory Toggle */}
+                            <button
+                              type="button"
+                              onClick={() => handleToggleRequired(originalIdx)}
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all ${
+                                doc.isRequired
+                                  ? "bg-rose-50 text-rose-700 border border-rose-200"
+                                  : "bg-slate-100 text-slate-600 border border-slate-200"
+                              }`}
+                            >
+                              {doc.isRequired ? "Mandatory *" : "Optional"}
+                            </button>
+
+                            {/* Remove from list */}
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveDoc(originalIdx)}
+                              className="p-1 text-slate-400 hover:text-rose-600 transition-all"
+                              title="Delete from list"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      ))}
                   </div>
                 )}
               </div>

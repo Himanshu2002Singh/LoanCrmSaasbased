@@ -31,6 +31,7 @@ const LeadEditScreen = () => {
 
   const [employees, setEmployees] = useState([]);
   const [sources, setSources] = useState([]);
+  const [loanProducts, setLoanProducts] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isFetching, setIsFetching] = useState(true);
 
@@ -70,6 +71,7 @@ const LeadEditScreen = () => {
     fetchLeadDetails();
     fetchEmployees();
     fetchSources();
+    fetchLoanProducts();
   }, [id, canEditLead]);
 
   const fetchLeadDetails = async () => {
@@ -130,6 +132,17 @@ const LeadEditScreen = () => {
       setSources(res.data?.data || []);
     } catch (err) {
       console.error("Error fetching sources:", err);
+    }
+  };
+
+  const fetchLoanProducts = async () => {
+    try {
+      const res = await axios.get(`${API_URL}/master-configs/LOAN_PRODUCT`, {
+        params: { includeInactive: false },
+      });
+      setLoanProducts(res.data?.data || []);
+    } catch (err) {
+      console.error("Error fetching loan products:", err);
     }
   };
 
@@ -335,14 +348,28 @@ const LeadEditScreen = () => {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700">Loan Type</label>
-            <input
-              type="text"
+            <label className="block text-sm font-medium text-gray-700">Loan Type / Product</label>
+            <select
               name="loan_type"
               value={lead.loan_type}
               onChange={handleInputChange}
-              className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
-            />
+              className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 bg-white"
+            >
+              <option value="">Select Loan Type</option>
+              {loanProducts.map((lp) => (
+                <option key={lp.id || lp.value} value={lp.label || lp.value}>
+                  {lp.label || lp.value}
+                </option>
+              ))}
+              {lead.loan_type &&
+                !loanProducts.some(
+                  (lp) => (lp.label || lp.value).toLowerCase() === lead.loan_type.toLowerCase()
+                ) && (
+                  <option value={lead.loan_type}>
+                    {lead.loan_type} (Current)
+                  </option>
+                )}
+            </select>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700">Estimated Budget</label>

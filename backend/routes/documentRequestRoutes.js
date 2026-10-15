@@ -10,6 +10,8 @@ router.get("/config-docs", controller.getConfigDocs);
 router.post("/", controller.createDocumentRequest);
 router.get("/lead/:leadId", controller.getRequestsByLead);
 router.patch("/:id/cancel", controller.cancelDocumentRequest);
+router.patch("/:id/slots", controller.updateDocumentSlots);
+router.patch("/:id/slots/:slotId/toggle-hidden", controller.toggleSlotHidden);
 router.post("/:id/send-email", controller.sendDocumentRequestEmail);
 
 module.exports = router;

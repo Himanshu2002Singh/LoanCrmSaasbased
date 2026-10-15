@@ -790,6 +790,7 @@ export default function OperationsRedesign() {
   const [convertLead, setConvertLead] = useState(null);
   const [lenders, setLenders] = useState([]);
   const [bankers, setBankers] = useState([]);
+  const [loanProducts, setLoanProducts] = useState([]);
   const [convertForm, setConvertForm] = useState({
     loanProduct: "Personal Loan",
     appliedAmount: "",
@@ -797,6 +798,15 @@ export default function OperationsRedesign() {
     assignedBankerId: "",
   });
   const [convertSubmitting, setConvertSubmitting] = useState(false);
+
+  // Edit Bank / Lender Modal State
+  const [editBankModalApp, setEditBankModalApp] = useState(null);
+  const [editBankForm, setEditBankForm] = useState({
+    lenderId: "",
+    assignedBankerId: "",
+    loanProduct: "",
+  });
+  const [editBankSubmitting, setEditBankSubmitting] = useState(false);
 
   // Bank Email Dispatch Modal State
   const [bankMailModalApp, setBankMailModalApp] = useState(null);
@@ -904,12 +914,13 @@ export default function OperationsRedesign() {
   // Fetch Auxiliary Lenders, Bankers, and Master Document Types
   const fetchAuxData = async () => {
     try {
-      const [lenderRes, bankerRes, docTypeRes, usersRes, leadSrcRes] = await Promise.all([
+      const [lenderRes, bankerRes, docTypeRes, usersRes, leadSrcRes, loanProdRes] = await Promise.all([
         axios.get(`${API_URL}/lenders`, { params: { includeInactive: false } }),
         axios.get(`${API_URL}/users`, { params: { role: "BANKER", limit: 100 } }),
         axios.get(`${API_URL}/master-configs/DOC_TYPE`, { params: { includeInactive: false } }).catch(() => ({ data: { data: [] } })),
         axios.get(`${API_URL}/users`, { params: { limit: 200 } }).catch(() => ({ data: { users: [] } })),
         axios.get(`${API_URL}/master-configs/LEAD_SOURCE`, { params: { includeInactive: false } }).catch(() => ({ data: { data: [] } })),
+        axios.get(`${API_URL}/master-configs/LOAN_PRODUCT`, { params: { includeInactive: false } }).catch(() => ({ data: { data: [] } })),
       ]);
       const lenderList = lenderRes.data?.lenders || lenderRes.data?.data || [];
       setLenders(lenderList);
@@ -923,6 +934,8 @@ export default function OperationsRedesign() {
       setEmployees(userList);
       const leadSources = leadSrcRes.data?.data || [];
       setAssociationsList(leadSources);
+      const loanProdList = loanProdRes.data?.data || [];
+      setLoanProducts(loanProdList);
     } catch (error) {
       console.error("Error fetching aux data:", error);
     }
@@ -2705,7 +2718,7 @@ export default function OperationsRedesign() {
   const openConvertModal = (lead) => {
     setConvertLead(lead);
     setConvertForm({
-      loanProduct: lead.loan_type || "Personal Loan",
+      loanProduct: lead.loan_type || loanProducts[0]?.label || loanProducts[0]?.value || "Personal Loan",
       appliedAmount: lead.est_budget || lead.appliedAmount || "",
       lenderId: lenders[0]?.lender_id || lenders[0]?.id || "",
       assignedBankerId: bankers[0]?.id || "",
@@ -2740,6 +2753,82 @@ export default function OperationsRedesign() {
       toast.error(error.response?.data?.message || "Failed to convert lead to application");
     } finally {
       setConvertSubmitting(false);
+    }
+  };
+
+  // Edit Bank / Lender & Banker Partner for Application
+  const openEditBankModal = (app) => {
+    setEditBankModalApp(app);
+    setEditBankForm({
+      lenderId: app.lenderId || app.lender?.id || (app.lender?.lender_id ? String(app.lender.lender_id) : "") || "",
+      assignedBankerId: app.assignedBankerId || app.assignedBanker?.id || "",
+      loanProduct: app.loanProduct || "",
+    });
+  };
+
+  const handleEditBankSubmit = async (e) => {
+    e.preventDefault();
+    if (!editBankForm.lenderId) {
+      toast.warning("Please select a Bank / NBFC Institution");
+      return;
+    }
+    setEditBankSubmitting(true);
+    try {
+      const payload = {
+        lenderId: parseInt(editBankForm.lenderId, 10),
+        assignedBankerId: editBankForm.assignedBankerId ? parseInt(editBankForm.assignedBankerId, 10) : null,
+      };
+      if (editBankForm.loanProduct) {
+        payload.loanProduct = editBankForm.loanProduct;
+      }
+      const res = await axios.patch(`${API_URL}/applications/${editBankModalApp.id}`, payload);
+      const updated = res.data?.application;
+
+      const selectedLender = lenders.find((l) => String(l.lender_id || l.id) === String(payload.lenderId));
+      const selectedBanker = bankers.find((b) => String(b.id) === String(payload.assignedBankerId));
+
+      const patchApp = (prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          ...updated,
+          lenderId: payload.lenderId,
+          assignedBankerId: payload.assignedBankerId,
+          loanProduct: payload.loanProduct || prev.loanProduct,
+          lender: selectedLender || updated?.lender || prev.lender,
+          assignedBanker: selectedBanker || updated?.assignedBanker || prev.assignedBanker,
+        };
+      };
+
+      setApplications((prev) =>
+        prev.map((a) => (a.id === editBankModalApp.id ? patchApp(a) : a))
+      );
+      setFilteredApplications((prev) =>
+        prev.map((a) => (a.id === editBankModalApp.id ? patchApp(a) : a))
+      );
+      if (verificationApp && verificationApp.id === editBankModalApp.id) {
+        setVerificationApp((prev) => patchApp(prev));
+      }
+
+      setLeads((prev) =>
+        prev.map((ld) => {
+          if (ld.application_id === editBankModalApp.id || ld.lead_id === editBankModalApp.leadId) {
+            return {
+              ...ld,
+              bank_name: selectedLender?.name || ld.bank_name,
+            };
+          }
+          return ld;
+        })
+      );
+
+      toast.success(`Bank successfully updated to ${selectedLender?.name || "selected Bank"}!`);
+      setEditBankModalApp(null);
+    } catch (error) {
+      console.error("Error updating bank:", error);
+      toast.error(error.response?.data?.message || "Failed to update Bank");
+    } finally {
+      setEditBankSubmitting(false);
     }
   };
 
@@ -2964,8 +3053,17 @@ export default function OperationsRedesign() {
                               </div>
 
                               <div className="cc-kcard-footer">
-                                <span className="cc-kcard-lender">
+                                <span
+                                  className="cc-kcard-lender"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openEditBankModal(app);
+                                  }}
+                                  title="Click to change or edit assigned Bank"
+                                  style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}
+                                >
                                   <Building2 size={12} /> {app.lender?.shortCode || app.lender?.name || "Direct Bank"}
+                                  <Pencil size={10} style={{ opacity: 0.8 }} />
                                 </span>
                                 {app.assignedBanker?.name ? (
                                   <span className="cc-kcard-banker">
@@ -3106,6 +3204,19 @@ export default function OperationsRedesign() {
                                 <User size={11} /> {app.lead.assignedEmployee.name}
                               </span>
                             ) : null}
+                            <div style={{ marginTop: 4 }}>
+                              <button
+                                type="button"
+                                className="cc-ops-edit-bank-btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openEditBankModal(app);
+                                }}
+                                title="Click to change or update assigned Bank & Banker"
+                              >
+                                <Pencil size={11} /> Edit Bank
+                              </button>
+                            </div>
                           </td>
 
                           {/* 3. Workflow Stage */}
@@ -3660,11 +3771,34 @@ export default function OperationsRedesign() {
                         </td>
                         <td>
                           {lead.bank_name ? (
-                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                              <Building2 size={14} color="#4f46e5" />
-                              <span style={{ fontWeight: 600, color: "#1e293b", fontSize: 12.5 }}>
-                                {lead.bank_name}
-                              </span>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                <Building2 size={14} color="#4f46e5" />
+                                <span style={{ fontWeight: 600, color: "#1e293b", fontSize: 12.5 }}>
+                                  {lead.bank_name}
+                                </span>
+                              </div>
+                              {lead.application_id && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openEditBankModal({
+                                      id: lead.application_id,
+                                      applicationNumber: lead.application_number || `Lead #${lead.lead_id}`,
+                                      customer: { name: lead.name, mobile: lead.number },
+                                      lender: { name: lead.bank_name },
+                                      leadId: lead.lead_id,
+                                      loanProduct: lead.loan_type,
+                                    });
+                                  }}
+                                  className="cc-ops-edit-bank-btn"
+                                  style={{ alignSelf: "flex-start", padding: "1px 6px", fontSize: 10.5 }}
+                                  title="Edit assigned Bank"
+                                >
+                                  <Pencil size={10} /> Edit Bank
+                                </button>
+                              )}
                             </div>
                           ) : (
                             <span style={{ color: "#94a3b8", fontSize: 12, fontStyle: "italic" }}>
@@ -3751,7 +3885,16 @@ export default function OperationsRedesign() {
                   <strong>{verificationApp.customer?.name}</strong> ({verificationApp.customer?.mobile})
                 </p>
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginLeft: "auto" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="cc-drawer-mail-btn"
+                  onClick={() => openEditBankModal(verificationApp)}
+                  title="Change or update assigned Bank Institution & RM"
+                  style={{ background: "#eef2ff", borderColor: "#c7d2fe", color: "#4338ca" }}
+                >
+                  <Building2 size={13} /> {verificationApp.lender?.shortCode || verificationApp.lender?.name || "Assign Bank"} ✏️
+                </button>
                 <button
                   type="button"
                   className="cc-drawer-mail-btn"
@@ -3778,6 +3921,62 @@ export default function OperationsRedesign() {
                 </div>
               ) : (
                 <>
+                  {/* Bank & Banker Partner Info Strip with Quick Edit */}
+                  <div
+                    style={{
+                      background: "#f8fafc",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: 10,
+                      padding: "10px 14px",
+                      marginBottom: 12,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      flexWrap: "wrap",
+                      gap: 8,
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div
+                        style={{
+                          width: 34,
+                          height: 34,
+                          borderRadius: 8,
+                          background: "#e0e7ff",
+                          color: "#4338ca",
+                          display: "grid",
+                          placeItems: "center",
+                          border: "1px solid #c7d2fe",
+                          flexShrink: 0,
+                        }}
+                      >
+                        <Building2 size={17} />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>
+                          Bank: {verificationApp.lender?.name || "Unassigned"}
+                          {verificationApp.lender?.shortCode ? ` (${verificationApp.lender.shortCode})` : ""}
+                        </div>
+                        <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 2 }}>
+                          {verificationApp.assignedBanker?.name ? (
+                            <span>Banker / RM: <strong>{verificationApp.assignedBanker.name}</strong> ({verificationApp.assignedBanker.phone || verificationApp.assignedBanker.email || "RM"})</span>
+                          ) : (
+                            <span style={{ fontStyle: "italic" }}>No specific Banker RM assigned</span>
+                          )}
+                          {" • "}Product: <strong>{verificationApp.loanProduct || "Loan"}</strong>
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => openEditBankModal(verificationApp)}
+                      className="cc-ops-edit-bank-btn"
+                      title="Edit / Update Assigned Bank Institution & Banker"
+                    >
+                      <Pencil size={11} /> Edit Bank
+                    </button>
+                  </div>
+
                   {/* Pipeline Stage Quick Changer */}
                   <div className="cc-ops-stage-selector-box">
                     <label>
@@ -4720,14 +4919,27 @@ export default function OperationsRedesign() {
               </div>
 
               <label className="cc-modal-field">
-                <span>Loan Product *</span>
-                <input
-                  type="text"
+                <span>Select Loan Product / Type *</span>
+                <select
                   value={convertForm.loanProduct}
                   onChange={(e) => setConvertForm({ ...convertForm, loanProduct: e.target.value })}
-                  placeholder="e.g. Personal Loan, Home Loan, Business Loan"
                   required
-                />
+                >
+                  <option value="">Select Loan Product</option>
+                  {loanProducts.map((lp) => (
+                    <option key={lp.id || lp.value} value={lp.label || lp.value}>
+                      {lp.label || lp.value}
+                    </option>
+                  ))}
+                  {convertForm.loanProduct &&
+                    !loanProducts.some(
+                      (lp) => (lp.label || lp.value).toLowerCase() === convertForm.loanProduct.toLowerCase()
+                    ) && (
+                      <option value={convertForm.loanProduct}>
+                        {convertForm.loanProduct} (Current)
+                      </option>
+                    )}
+                </select>
               </label>
 
               <label className="cc-modal-field">
@@ -4781,6 +4993,113 @@ export default function OperationsRedesign() {
                 </button>
                 <button type="submit" className="cc-modal-btn primary" disabled={convertSubmitting}>
                   <Send size={15} /> {convertSubmitting ? "Creating..." : "Submit to Bank"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Bank & Banker Partner Modal */}
+      {editBankModalApp && (
+        <div className="cc-modal-overlay" onClick={() => setEditBankModalApp(null)}>
+          <div className="cc-modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
+            <div className="cc-modal-head">
+              <div>
+                <p>Operations / Bank Partner Assignment</p>
+                <h3>Edit / Update Bank Partner</h3>
+              </div>
+              <button type="button" onClick={() => setEditBankModalApp(null)}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <form className="cc-modal-form" onSubmit={handleEditBankSubmit}>
+              <div
+                style={{
+                  background: "#eff6ff",
+                  border: "1px solid #bfdbfe",
+                  borderRadius: 10,
+                  padding: "10px 14px",
+                  fontSize: 13,
+                  color: "#1e40af",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 3,
+                }}
+              >
+                <div>
+                  <strong>Application:</strong> {editBankModalApp.applicationNumber || `#${editBankModalApp.id}`}
+                </div>
+                <div>
+                  <strong>Applicant:</strong> {editBankModalApp.customer?.name || editBankModalApp.customerName || "Customer"} 
+                  {editBankModalApp.customer?.mobile ? ` (${editBankModalApp.customer.mobile})` : ""}
+                </div>
+                <div style={{ fontSize: 12, color: "#2563eb", marginTop: 2 }}>
+                  Current Bank: <strong>{editBankModalApp.lender?.name || "Unassigned"}</strong>
+                </div>
+              </div>
+
+              <label className="cc-modal-field">
+                <span>Select Bank / NBFC Institution (Lender) *</span>
+                <select
+                  value={editBankForm.lenderId}
+                  onChange={(e) => setEditBankForm({ ...editBankForm, lenderId: e.target.value })}
+                  required
+                >
+                  <option value="">Select Bank / NBFC Partner</option>
+                  {lenders.map((l) => (
+                    <option key={l.lender_id || l.id} value={l.lender_id || l.id}>
+                      {l.name} ({l.short_code || l.shortCode || l.lenderType || "Bank"})
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="cc-modal-field">
+                <span>Assign Banker / RM Officer (Optional)</span>
+                <select
+                  value={editBankForm.assignedBankerId}
+                  onChange={(e) => setEditBankForm({ ...editBankForm, assignedBankerId: e.target.value })}
+                >
+                  <option value="">Select Banker RM (Optional)</option>
+                  {bankers.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name} ({b.email || b.phone || "Banker"})
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="cc-modal-field">
+                <span>Loan Product / Type (Optional)</span>
+                <select
+                  value={editBankForm.loanProduct}
+                  onChange={(e) => setEditBankForm({ ...editBankForm, loanProduct: e.target.value })}
+                >
+                  <option value="">Keep Current ({editBankModalApp.loanProduct || "Default"})</option>
+                  {loanProducts.map((lp) => (
+                    <option key={lp.id || lp.value} value={lp.label || lp.value}>
+                      {lp.label || lp.value}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="cc-modal-actions">
+                <button
+                  type="button"
+                  className="cc-modal-btn ghost"
+                  onClick={() => setEditBankModalApp(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="cc-modal-btn primary"
+                  disabled={editBankSubmitting}
+                >
+                  <Building2 size={15} /> {editBankSubmitting ? "Updating..." : "Update Bank"}
                 </button>
               </div>
             </form>
@@ -8686,6 +9005,26 @@ const opsStyles = `
   }
   .cc-ops-badge.lender { background: #eef2ff; color: #4338ca; }
   .cc-ops-badge.banker { background: #eef7f2; color: #047857; }
+
+  .cc-ops-edit-bank-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    background: #eff6ff;
+    color: #2563eb;
+    border: 1px solid #bfdbfe;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .cc-ops-edit-bank-btn:hover {
+    background: #2563eb;
+    color: #ffffff;
+    border-color: #2563eb;
+  }
 
   .cc-ops-status-tag {
     display: inline-flex;

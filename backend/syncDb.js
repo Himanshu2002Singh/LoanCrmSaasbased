@@ -30,23 +30,45 @@ const syncAndSeed = async () => {
     // Disable foreign key checks during sync so tables can sync in any order without constraint errors
     await db.sequelize.query("SET FOREIGN_KEY_CHECKS = 0;");
 
-    // Ensure standalone tables exist first
-    if (db.LeadDocumentRequest) {
-      await db.LeadDocumentRequest.sync();
-    }
-    if (db.Note) {
-      await db.Note.sync();
-    }
-    if (db.OperationStatusHistory) {
-      await db.OperationStatusHistory.sync();
+    // 1. Run direct SQL schema updates/migrations for ENUMs and special columns
+    try {
+      await db.sequelize.query(`
+        ALTER TABLE \`users\` MODIFY COLUMN \`role\` ENUM('SUPERADMIN', 'COMPANY_ADMIN', 'MANAGER', 'EMPLOYEE', 'OPS', 'BANKER', 'FINANCE') NOT NULL DEFAULT 'EMPLOYEE';
+      `);
+      console.log("- Checked users.role ENUM (includes FINANCE).");
+    } catch (e) {
+      // Ignore if table does not exist yet (will be created below)
     }
 
-    // Sync all models safely without dropping any existing columns or data
+    try {
+      await db.sequelize.query(`ALTER TABLE \`companies\` ADD COLUMN \`smtp_config\` JSON NULL;`);
+      console.log("- Added smtp_config column to companies.");
+    } catch (e) {}
+
+    try {
+      await db.sequelize.query(`ALTER TABLE \`companies\` ADD COLUMN \`role_permissions\` JSON NULL;`);
+      console.log("- Added role_permissions column to companies.");
+    } catch (e) {}
+
+    // 2. Sync all models safely with alter: { drop: false } so new columns are automatically added
     await db.sequelize.sync({ force, alter });
+
+    // 3. Guarantee that each individual model schema is synchronized and updated
+    const modelKeys = Object.keys(db.sequelize.models);
+    for (const modelKey of modelKeys) {
+      try {
+        const model = db.sequelize.models[modelKey];
+        if (model && typeof model.sync === "function") {
+          await model.sync({ force, alter });
+        }
+      } catch (err) {
+        console.warn(`- Model sync note for ${modelKey}: ${err.message}`);
+      }
+    }
 
     // Re-enable foreign key checks
     await db.sequelize.query("SET FOREIGN_KEY_CHECKS = 1;");
-    console.log("All SaaS Tables synchronized successfully without data loss!");
+    console.log("All SaaS Tables and updated columns synchronized successfully without data loss!");
 
     // Seed Initial Platform Data
     console.log("\nSeeding Initial Platform Data...");

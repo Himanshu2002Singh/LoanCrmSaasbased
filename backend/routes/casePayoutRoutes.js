@@ -4,6 +4,7 @@ const { isAuthenticated, requirePermission } = require("../middlewares/auth");
 const {
   getDisbursedPayouts,
   createCasePayout,
+  bulkCreateCasePayouts,
   updateCasePayoutRates,
   recordBankReceipt,
   recordPartyPayoutForCase,
@@ -15,6 +16,7 @@ const {
 
 router.get("/cases", isAuthenticated, requirePermission("viewPayouts"), getDisbursedPayouts);
 router.post("/cases", isAuthenticated, requirePermission("managePayouts"), createCasePayout);
+router.post("/cases/bulk", isAuthenticated, requirePermission("managePayouts"), bulkCreateCasePayouts);
 router.put("/cases/:id", isAuthenticated, requirePermission("managePayouts"), updateCasePayoutRates);
 router.put("/cases/:id/gstr-status", isAuthenticated, requirePermission("managePayouts"), updateGstrStatus);
 router.post("/cases/:id/bank-receipt", isAuthenticated, requirePermission("managePayouts"), recordBankReceipt);
