@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../../../core/constants/api_constants.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/widgets/custom_button.dart';
 import '../../../core/widgets/status_badge.dart';
@@ -147,6 +149,24 @@ class ProfileScreen extends ConsumerWidget {
                         ),
                         trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16, color: AppColors.textMuted),
                         onTap: () => context.push('/change-password'),
+                      ),
+                      const Divider(height: 1),
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.privacy_tip_outlined, color: AppColors.primary),
+                        title: const Text(
+                          'Privacy Policy',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                        trailing: const Icon(Icons.open_in_new_rounded, size: 16, color: AppColors.textMuted),
+                        onTap: () async {
+                          final uri = Uri.parse(ApiConstants.privacyPolicyUrl);
+                          await launchUrl(uri, mode: LaunchMode.externalApplication);
+                        },
                       ),
                     ],
                   ),

@@ -55,6 +55,30 @@ class AttendanceModel {
     }
   }
 
+  bool get isLate => status.toUpperCase() == 'LATE';
+  bool get isPresent => status.toUpperCase() == 'PRESENT';
+  bool get isHalfDay => status.toUpperCase() == 'HALF_DAY';
+  bool get isAbsent => status.toUpperCase() == 'ABSENT';
+
+  DateTime? get parsedDate => DateTime.tryParse(date);
+
+  String get formattedDateLong {
+    try {
+      final d = DateTime.parse(date);
+      return DateFormat('EEEE, dd MMM yyyy').format(d);
+    } catch (_) {
+      return date;
+    }
+  }
+
+  String get formattedWorkingDuration {
+    if (workingHours <= 0) return '0h';
+    final h = workingHours.floor();
+    final m = ((workingHours - h) * 60).round();
+    if (m == 0) return '${h}h';
+    return '${h}h ${m}m';
+  }
+
   factory AttendanceModel.fromJson(Map<String, dynamic> json) {
     return AttendanceModel(
       id: json['attendance_id'] ?? json['id'] ?? 0,

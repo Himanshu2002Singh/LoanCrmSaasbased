@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:intl/intl.dart';
 import 'package:capital_care/features/attendance/models/attendance_model.dart';
 import 'package:capital_care/features/attendance/services/attendance_service.dart';
 
@@ -17,6 +18,8 @@ class AttendanceState {
   final Position? currentPosition;
   final double? distanceMeters;
   final bool isInsideGeofence;
+  final DateTime selectedMonth;
+  final DateTime selectedDate;
 
   AttendanceState({
     this.today,
@@ -28,10 +31,31 @@ class AttendanceState {
     this.currentPosition,
     this.distanceMeters,
     this.isInsideGeofence = true,
-  });
+    DateTime? selectedMonth,
+    DateTime? selectedDate,
+  })  : selectedMonth = selectedMonth ?? DateTime(DateTime.now().year, DateTime.now().month, 1),
+        selectedDate = selectedDate ?? DateTime.now();
 
   bool get isCheckedIn => today != null && today!.checkInTime != null;
   bool get isCheckedOut => today != null && today!.checkOutTime != null;
+
+  Map<String, AttendanceModel> get recordsMap {
+    final map = <String, AttendanceModel>{};
+    for (final item in history) {
+      if (item.date.isNotEmpty) {
+        map[item.date] = item;
+      }
+    }
+    if (today != null && today!.date.isNotEmpty) {
+      map[today!.date] = today!;
+    }
+    return map;
+  }
+
+  AttendanceModel? get selectedRecord {
+    final key = DateFormat('yyyy-MM-dd').format(selectedDate);
+    return recordsMap[key];
+  }
 
   AttendanceState copyWith({
     AttendanceModel? today,
@@ -43,6 +67,8 @@ class AttendanceState {
     Position? currentPosition,
     double? distanceMeters,
     bool? isInsideGeofence,
+    DateTime? selectedMonth,
+    DateTime? selectedDate,
     bool clearToday = false,
   }) {
     return AttendanceState(
@@ -55,6 +81,8 @@ class AttendanceState {
       currentPosition: currentPosition ?? this.currentPosition,
       distanceMeters: distanceMeters ?? this.distanceMeters,
       isInsideGeofence: isInsideGeofence ?? this.isInsideGeofence,
+      selectedMonth: selectedMonth ?? this.selectedMonth,
+      selectedDate: selectedDate ?? this.selectedDate,
     );
   }
 }
@@ -66,14 +94,42 @@ class AttendanceNotifier extends StateNotifier<AttendanceState> {
     loadAll();
   }
 
-  Future<void> loadAll() async {
+  Future<void> loadAll({DateTime? month}) async {
     state = state.copyWith(isLoading: true, error: null);
+    final targetMonth = month ?? state.selectedMonth;
+    final monthStr = DateFormat('yyyy-MM').format(targetMonth);
     try {
       final today = await _service.getTodayStatus();
-      final summary = await _service.getAttendanceSummary();
-      final history = await _service.getAttendanceHistory();
+      final summary = await _service.getAttendanceSummary(month: monthStr);
+      final history = await _service.getAttendanceHistory(month: monthStr, limit: 60);
       state = state.copyWith(
         today: today,
+        summary: summary,
+        history: history,
+        selectedMonth: DateTime(targetMonth.year, targetMonth.month, 1),
+        isLoading: false,
+      );
+    } catch (e) {
+      state = state.copyWith(isLoading: false, error: e.toString());
+    }
+  }
+
+  void selectDate(DateTime date) {
+    state = state.copyWith(selectedDate: date);
+  }
+
+  Future<void> changeMonth(DateTime newMonth) async {
+    final monthNormalized = DateTime(newMonth.year, newMonth.month, 1);
+    state = state.copyWith(
+      selectedMonth: monthNormalized,
+      isLoading: true,
+      error: null,
+    );
+    final monthStr = DateFormat('yyyy-MM').format(monthNormalized);
+    try {
+      final summary = await _service.getAttendanceSummary(month: monthStr);
+      final history = await _service.getAttendanceHistory(month: monthStr, limit: 60);
+      state = state.copyWith(
         summary: summary,
         history: history,
         isLoading: false,

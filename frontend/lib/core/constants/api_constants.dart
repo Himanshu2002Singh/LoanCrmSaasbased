@@ -9,10 +9,11 @@ class ApiConstants {
     return 'https://loancrm.trustingbrains.com/api';
   }
 
-  // Auth Endpoints
+  // Auth & Legal Endpoints
   static String get login => '$baseUrl/auth/login';
   static String get me => '$baseUrl/auth/me';
   static String get changePassword => '$baseUrl/auth/change-password';
+  static String get privacyPolicyUrl => 'https://loancrm.trustingbrains.com/privacy-policy';
 
   // Dashboard & Reports
   static String get dashboardReport => '$baseUrl/reports/dashboard';

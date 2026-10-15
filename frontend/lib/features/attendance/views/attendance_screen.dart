@@ -9,6 +9,8 @@ import 'package:capital_care/features/auth/models/user_model.dart';
 import 'package:capital_care/features/auth/providers/auth_provider.dart';
 import 'package:capital_care/features/attendance/models/attendance_model.dart';
 import 'package:capital_care/features/attendance/providers/attendance_provider.dart';
+import 'package:capital_care/features/attendance/widgets/attendance_calendar_widget.dart';
+import 'package:capital_care/features/attendance/widgets/attendance_day_detail_sheet.dart';
 
 class AttendanceScreen extends ConsumerStatefulWidget {
   const AttendanceScreen({super.key});
@@ -18,11 +20,13 @@ class AttendanceScreen extends ConsumerStatefulWidget {
 }
 
 class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
+  bool _isCalendarView = true;
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkLocation();
+      ref.read(attendanceStateProvider.notifier).loadAll();
     });
   }
 
@@ -53,6 +57,12 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
           );
         }
       } else if (!state.isCheckedOut) {
+        // Confirmation alert dialog before closing attendance for the day
+        final shouldClose = await _showPunchOutConfirmationDialog(state);
+        if (shouldClose != true) {
+          return; // Cancelled by user - do not punch out
+        }
+
         await ref.read(attendanceStateProvider.notifier).punchOut(
           branchLat: branch?.officeLat,
           branchLng: branch?.officeLng,
@@ -60,7 +70,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
         );
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Punch-out successful! Day completed.'), backgroundColor: AppColors.success),
+            const SnackBar(content: Text('Punch-out successful! Attendance closed for the day.'), backgroundColor: AppColors.success),
           );
         }
       }
@@ -71,6 +81,167 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
         );
       }
     }
+  }
+
+  Future<bool?> _showPunchOutConfirmationDialog(AttendanceState state) {
+    final checkInFormatted = state.today?.formattedCheckIn ?? '--:--';
+
+    String durationText = '';
+    if (state.today?.checkInTime != null) {
+      try {
+        final checkInDt = DateTime.parse(state.today!.checkInTime!).toLocal();
+        final diff = DateTime.now().difference(checkInDt);
+        if (!diff.isNegative) {
+          final hours = diff.inHours;
+          final mins = diff.inMinutes.remainder(60);
+          durationText = '${hours}h ${mins}m';
+        }
+      } catch (_) {}
+    }
+
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        backgroundColor: AppColors.surface,
+        contentPadding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: AppColors.error.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Center(
+                child: Icon(Icons.logout_rounded, color: AppColors.error, size: 28),
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Close Attendance Today?',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Are you sure you want to punch out and close your workday attendance?',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 13,
+                color: AppColors.textSecondary,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.cardBorder),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  Column(
+                    children: [
+                      const Text(
+                        'PUNCHED IN AT',
+                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.textMuted),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        checkInFormatted,
+                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                      ),
+                    ],
+                  ),
+                  if (durationText.isNotEmpty) ...[
+                    Container(height: 24, width: 1, color: AppColors.cardBorder),
+                    Column(
+                      children: [
+                        const Text(
+                          'DURATION',
+                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.textMuted),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          durationText,
+                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.primary),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFFBEB),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFFDE68A)),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.info_outline_rounded, size: 16, color: AppColors.warning),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Once closed, you cannot punch in again for today.',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF92400E), fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        actions: [
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    side: const BorderSide(color: AppColors.cardBorder),
+                    foregroundColor: AppColors.textPrimary,
+                  ),
+                  onPressed: () => Navigator.of(ctx).pop(false),
+                  child: const Text('Cancel', style: TextStyle(fontWeight: FontWeight.w600)),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    backgroundColor: AppColors.error,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                  ),
+                  onPressed: () => Navigator.of(ctx).pop(true),
+                  child: const Text('Yes, Close', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -148,13 +319,59 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
               _buildMonthlySummaryRow(state.summary),
               const SizedBox(height: 24),
 
-              // Attendance History
-              const Text(
-                'Recent Attendance History',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+              // Attendance History / Calendar Header with Segmented Switcher
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Attendance Log',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.all(3),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF1F5F9),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.cardBorder),
+                    ),
+                    child: Row(
+                      children: [
+                        _buildViewTab(
+                          icon: Icons.calendar_month_rounded,
+                          label: 'Calendar',
+                          isActive: _isCalendarView,
+                          onTap: () => setState(() => _isCalendarView = true),
+                        ),
+                        _buildViewTab(
+                          icon: Icons.format_list_bulleted_rounded,
+                          label: 'List',
+                          isActive: !_isCalendarView,
+                          onTap: () => setState(() => _isCalendarView = false),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 10),
-              _buildHistorySection(state),
+              const SizedBox(height: 12),
+
+              // Calendar View or List View
+              if (_isCalendarView)
+                AttendanceCalendarWidget(
+                  selectedMonth: state.selectedMonth,
+                  selectedDate: state.selectedDate,
+                  recordsMap: state.recordsMap,
+                  summary: state.summary,
+                  isLoading: state.isLoading,
+                  onMonthChanged: (newMonth) {
+                    ref.read(attendanceStateProvider.notifier).changeMonth(newMonth);
+                  },
+                  onDateSelected: (newDate) {
+                    ref.read(attendanceStateProvider.notifier).selectDate(newDate);
+                  },
+                )
+              else
+                _buildHistorySection(state),
             ],
           ),
         ),
@@ -460,51 +677,134 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
       itemCount: state.history.length,
       itemBuilder: (context, index) {
         final item = state.history[index];
-        return Container(
-          margin: const EdgeInsets.only(bottom: 8),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppColors.cardBorder),
+        final isLate = item.isLate;
+
+        return InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => AttendanceDayDetailSheet.show(
+            context,
+            date: item.parsedDate ?? DateTime.now(),
+            record: item,
           ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      item.date,
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.textPrimary),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      'In: ${item.formattedCheckIn} • Out: ${item.formattedCheckOut}',
-                      style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isLate ? const Color(0xFFFDE68A) : AppColors.cardBorder,
               ),
-              const SizedBox(width: 8),
-              if (item.workingHours > 0) ...[
-                Text(
-                  '${item.workingHours.toStringAsFixed(1)}h',
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            item.date,
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.textPrimary),
+                          ),
+                          if (isLate) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFFFBEB),
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: const Color(0xFFFDE68A)),
+                              ),
+                              child: const Text(
+                                'LATE',
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFFB45309),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        'In: ${item.formattedCheckIn} • Out: ${item.formattedCheckOut}',
+                        style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(width: 8),
+                if (item.workingHours > 0) ...[
+                  Text(
+                    '${item.workingHours.toStringAsFixed(1)}h',
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                StatusBadge(
+                  status: item.status,
+                  fontSize: 10,
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                ),
+                const SizedBox(width: 4),
+                const Icon(Icons.chevron_right_rounded, size: 16, color: AppColors.textMuted),
               ],
-              StatusBadge(
-                status: item.status,
-                fontSize: 10,
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              ),
-            ],
+            ),
           ),
         );
       },
+    );
+  }
+
+  Widget _buildViewTab({
+    required IconData icon,
+    required String label,
+    required bool isActive,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: isActive ? AppColors.surface : Colors.transparent,
+          borderRadius: BorderRadius.circular(7),
+          boxShadow: isActive
+              ? [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.06),
+                    blurRadius: 4,
+                    offset: const Offset(0, 1),
+                  ),
+                ]
+              : null,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 13,
+              color: isActive ? AppColors.primary : AppColors.textSecondary,
+            ),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: isActive ? FontWeight.bold : FontWeight.w500,
+                color: isActive ? AppColors.primary : AppColors.textSecondary,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../constants/api_constants.dart';
 import '../constants/app_colors.dart';
 import '../widgets/status_badge.dart';
 import '../../features/auth/providers/auth_provider.dart';
@@ -171,6 +173,36 @@ class AppDrawer extends ConsumerWidget {
                   title: 'My Profile',
                   path: '/profile',
                   isSelected: currentRoute == '/profile',
+                ),
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                  child: ListTile(
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    dense: true,
+                    leading: const Icon(
+                      Icons.privacy_tip_outlined,
+                      size: 20,
+                      color: AppColors.textSecondary,
+                    ),
+                    title: const Text(
+                      'Privacy Policy',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    trailing: const Icon(
+                      Icons.open_in_new_rounded,
+                      size: 14,
+                      color: AppColors.textMuted,
+                    ),
+                    onTap: () async {
+                      Navigator.pop(context);
+                      final uri = Uri.parse(ApiConstants.privacyPolicyUrl);
+                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                    },
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Container(

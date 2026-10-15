@@ -39,11 +39,19 @@ class AttendanceService {
     return AttendanceModel.fromJson(data as Map<String, dynamic>);
   }
 
-  Future<List<AttendanceModel>> getAttendanceHistory({int page = 1, int limit = 30, String? fromDate, String? toDate}) async {
+  Future<List<AttendanceModel>> getAttendanceHistory({
+    int page = 1,
+    int limit = 60,
+    String? fromDate,
+    String? toDate,
+    String? month,
+  }) async {
     final query = <String, String>{
       'page': page.toString(),
       'limit': limit.toString(),
+      'myOnly': 'true',
     };
+    if (month != null) query['month'] = month;
     if (fromDate != null) query['fromDate'] = fromDate;
     if (toDate != null) query['toDate'] = toDate;
 
@@ -60,9 +68,16 @@ class AttendanceService {
     return rows;
   }
 
-  Future<AttendanceSummaryModel> getAttendanceSummary() async {
+  Future<AttendanceSummaryModel> getAttendanceSummary({String? month}) async {
     try {
-      final response = await ApiClient.get(ApiConstants.attendanceSummary);
+      final query = <String, String>{
+        'myOnly': 'true',
+      };
+      if (month != null) query['month'] = month;
+      final response = await ApiClient.get(
+        ApiConstants.attendanceSummary,
+        queryParameters: query.isEmpty ? null : query,
+      );
       final data = response['data'] ?? response['summary'] ?? response;
       return AttendanceSummaryModel.fromJson(data as Map<String, dynamic>);
     } catch (_) {

@@ -44,6 +44,7 @@ import FollowupWorkScreen from "./screens/followups/FollowupWorkScreen";
 import NotesScreen from "./screens/notes/NotesScreen";
 import ProfileScreen from "./screens/profile/ProfileScreen";
 import CustomerDocumentUploadPortal from "./screens/public/CustomerDocumentUploadPortal";
+import PrivacyPolicyScreen from "./screens/public/PrivacyPolicyScreen";
 
 
 const PageShell = ({ children, allowedRoles = ["manager"], requiredPermission = null }) => (
@@ -63,6 +64,9 @@ function App() {
     <Router>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/privacy-policy" element={<PrivacyPolicyScreen />} />
+        <Route path="/privacy" element={<PrivacyPolicyScreen />} />
+        <Route path="/public/privacy-policy" element={<PrivacyPolicyScreen />} />
         <Route path="/upload-docs/:token" element={<CustomerDocumentUploadPortal />} />
         <Route path="/public/upload-docs/:token" element={<CustomerDocumentUploadPortal />} />
         <Route

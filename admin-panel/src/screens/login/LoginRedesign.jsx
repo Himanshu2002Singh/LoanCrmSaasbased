@@ -245,7 +245,17 @@ function LoginRedesign() {
           </p>
         </div>
 
-        <p className="cc-login-copyright">© {new Date().getFullYear()} Trusting Brains. All rights reserved.</p>
+        <p className="cc-login-copyright">
+          © {new Date().getFullYear()} Trusting Brains. All rights reserved. •{" "}
+          <a
+            href="/privacy-policy"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:underline text-blue-600 transition-colors"
+          >
+            Privacy Policy
+          </a>
+        </p>
       </section>
     </main>
   );
