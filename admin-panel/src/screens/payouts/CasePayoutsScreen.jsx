@@ -118,6 +118,8 @@ export default function CasePayoutsScreen() {
   const [isReadingExcel, setIsReadingExcel] = useState(false);
   const [isSubmittingBulk, setIsSubmittingBulk] = useState(false);
   const [bulkImportResult, setBulkImportResult] = useState(null);
+  const [bulkImportDate, setBulkImportDate] = useState(new Date().toISOString().split("T")[0]);
+  const [bulkDateMode, setBulkDateMode] = useState("OVERRIDE_ALL"); // "OVERRIDE_ALL" | "EXCEL_OR_FALLBACK"
 
   // Cases List State
   const [cases, setCases] = useState([]);
@@ -598,7 +600,10 @@ export default function CasePayoutsScreen() {
 
   // Open Add Payout Modal
   const openAddPayoutModal = async () => {
-    const today = new Date().toISOString().split("T")[0];
+    let initialDate = new Date().toISOString().split("T")[0];
+    if (filterPeriodType === "month" && selectedMonth) {
+      initialDate = `${selectedMonth}-01`;
+    }
     const initialForm = {
       leadId: "",
       customerName: "",
@@ -617,7 +622,7 @@ export default function CasePayoutsScreen() {
       bankTdsPercent: 5,
       bankTdsAmount: 0,
       bankNetReceivable: 0,
-      disbursalDate: today,
+      disbursalDate: initialDate,
       payoutType: "VENDOR",
       partyName: "Direct",
       partyCode: "",
@@ -786,6 +791,11 @@ export default function CasePayoutsScreen() {
       };
 
       const res = await axios.post(`${API_URL}/payouts/cases`, payload);
+      const targetMonth = payload.disbursalDate ? payload.disbursalDate.slice(0, 7) : "";
+      if (targetMonth) {
+        setFilterPeriodType("month");
+        setSelectedMonth(targetMonth);
+      }
       toast.success(res.data?.message || "Case payout recorded successfully!");
       setAddPayoutModalOpen(false);
       fetchCasePayouts();
@@ -800,12 +810,33 @@ export default function CasePayoutsScreen() {
   // -------------------------------------------------------------
   // EXCEL BULK UPLOAD & SAMPLE TEMPLATE HANDLERS
   // -------------------------------------------------------------
-  const resetBulkUpload = () => {
+  const resetBulkUpload = (customDate) => {
     setBulkUploadedFile(null);
     setBulkParsedRows([]);
     setBulkImportResult(null);
     setIsReadingExcel(false);
     setIsSubmittingBulk(false);
+    if (customDate) {
+      setBulkImportDate(customDate);
+    } else if (filterPeriodType === "month" && selectedMonth) {
+      setBulkImportDate(`${selectedMonth}-01`);
+    } else {
+      setBulkImportDate(new Date().toISOString().split("T")[0]);
+    }
+  };
+
+  // Live update disbursal date for all parsed bulk rows
+  const updateBulkImportDate = (newDate, newMode = bulkDateMode) => {
+    setBulkImportDate(newDate);
+    setBulkDateMode(newMode);
+    if (bulkParsedRows && bulkParsedRows.length > 0) {
+      setBulkParsedRows((prev) =>
+        prev.map((r) => ({
+          ...r,
+          disbursalDate: newMode === "OVERRIDE_ALL" ? newDate : (r.excelDisbursalDate || newDate),
+        }))
+      );
+    }
   };
 
   // Helper to parse dates from Excel (numeric serials, DD-MM-YYYY, YYYY-MM-DD)
@@ -1024,7 +1055,8 @@ export default function CasePayoutsScreen() {
           const bankNetReceivable = Math.max(0, actualAmount - bankTdsAmount);
 
           const rawDate = findVal(row, "disbursal date", "date", "disbursement date");
-          const disbursalDate = parseExcelDate(rawDate);
+          const excelDisbursalDate = rawDate ? parseExcelDate(rawDate) : "";
+          const disbursalDate = bulkDateMode === "OVERRIDE_ALL" ? bulkImportDate : (excelDisbursalDate || bulkImportDate);
 
           const rawPartyName = String(
             findVal(row, "party connector name", "connector / party", "party name", "connector name", "party", "source") || "Self"
@@ -1072,6 +1104,7 @@ export default function CasePayoutsScreen() {
             bankGstAmount,
             bankNetReceivable,
             disbursalDate,
+            excelDisbursalDate,
             payoutType,
             partyName: rawPartyName,
             partyCode,
@@ -1134,7 +1167,12 @@ export default function CasePayoutsScreen() {
       const res = await axios.post(`${API_URL}/payouts/cases/bulk`, { cases: payload });
       if (res.data?.success) {
         setBulkImportResult(res.data);
-        toast.success(`Successfully imported ${res.data.importedCount} case(s)!`);
+        const importedMonth = bulkImportDate ? bulkImportDate.slice(0, 7) : "";
+        if (importedMonth) {
+          setFilterPeriodType("month");
+          setSelectedMonth(importedMonth);
+        }
+        toast.success(`Successfully imported ${res.data.importedCount} case(s) into ${new Date(bulkImportDate).toLocaleString("en-IN", { month: "long", year: "numeric" })}! View updated to that month.`);
         fetchCasePayouts();
       } else {
         toast.warn(res.data?.message || "Import completed with warnings");
@@ -1151,10 +1189,14 @@ export default function CasePayoutsScreen() {
   const openBankReceiptModal = (item) => {
     setReceiptTargetCase(item);
     const baseComm = parseFloat(item.baseAmount || 0);
-    const corpDsaCharge = parseFloat(item.corporateDsaAmount) || Math.round((baseComm * (parseFloat(item.corporateDsaPercent) || 0)) / 100);
+    const corpDsaPct = parseFloat(item.corporateDsaPercent || 0);
+    const corpDsaCharge =
+      item.corporateDsaAmount !== undefined && item.corporateDsaAmount !== null
+        ? parseFloat(item.corporateDsaAmount)
+        : Math.round((baseComm * corpDsaPct) / 100);
     const actualAmt = parseFloat(item.actualAmount) || Math.max(0, baseComm - corpDsaCharge);
     const tdsAmt = parseFloat(item.bankTdsAmount || 0);
-    const maxNetReceivable = Math.max(0, actualAmt - tdsAmt);
+    const maxNetReceivable = parseFloat(item.bankNetReceivable) || Math.max(0, actualAmt - tdsAmt);
     const alreadyReceived = parseFloat(item.bankReceivedAmount || 0);
     const remaining = Math.max(0, maxNetReceivable - alreadyReceived);
     const gstAmt = parseFloat(item.bankGstAmount || 0);
@@ -1179,15 +1221,19 @@ export default function CasePayoutsScreen() {
       return;
     }
     const baseComm = parseFloat(receiptTargetCase.baseAmount || 0);
-    const isSelfCase = receiptTargetCase.payoutType === "SELF" || (receiptTargetCase.partyName || "").toLowerCase() === "self" || (receiptTargetCase.partyName || "").toLowerCase() === "direct";
-    const corpDsaComm = isSelfCase ? 0 : parseFloat(receiptTargetCase.partyCommissionDue || 0);
+    const corpDsaPct = parseFloat(receiptTargetCase.corporateDsaPercent || 0);
+    const corpDsaCharge =
+      receiptTargetCase.corporateDsaAmount !== undefined && receiptTargetCase.corporateDsaAmount !== null
+        ? parseFloat(receiptTargetCase.corporateDsaAmount)
+        : Math.round((baseComm * corpDsaPct) / 100);
+    const actualAmt = parseFloat(receiptTargetCase.actualAmount) || Math.max(0, baseComm - corpDsaCharge);
     const tdsAmt = parseFloat(receiptTargetCase.bankTdsAmount || 0);
-    const maxNetReceivable = Math.max(0, baseComm - corpDsaComm - tdsAmt);
+    const maxNetReceivable = parseFloat(receiptTargetCase.bankNetReceivable) || Math.max(0, actualAmt - tdsAmt);
     const alreadyReceived = parseFloat(receiptTargetCase.bankReceivedAmount || 0);
     const maxAllowedNow = Math.max(0, maxNetReceivable - alreadyReceived);
 
     if (parseFloat(receiptForm.grossAmount) > maxAllowedNow + 0.01) {
-      toast.error(`Amount cannot exceed maximum eligible receivable of ₹${Math.round(maxAllowedNow).toLocaleString("en-IN")}`);
+      toast.error(`Amount cannot exceed maximum eligible bank net receivable of ₹${Math.round(maxAllowedNow).toLocaleString("en-IN")}`);
       return;
     }
 
@@ -2520,20 +2566,28 @@ export default function CasePayoutsScreen() {
               {/* Summary Card & Calculation Breakdown */}
               {(() => {
                 const baseComm = parseFloat(receiptTargetCase.baseAmount || receiptTargetCase.bankCommissionDue || 0);
-                const isSelfCase = receiptTargetCase.payoutType === "SELF" || (receiptTargetCase.partyName || "").toLowerCase() === "self" || (receiptTargetCase.partyName || "").toLowerCase() === "direct";
-                const corpDsaComm = isSelfCase ? 0 : parseFloat(receiptTargetCase.partyCommissionDue || 0);
-                const remainingAfterDsa = Math.max(0, baseComm - corpDsaComm);
+                const corpDsaPct = parseFloat(receiptTargetCase.corporateDsaPercent || 0);
+                const corpDsaCharge =
+                  receiptTargetCase.corporateDsaAmount !== undefined && receiptTargetCase.corporateDsaAmount !== null
+                    ? parseFloat(receiptTargetCase.corporateDsaAmount)
+                    : Math.round((baseComm * corpDsaPct) / 100);
+                const actualAmt = parseFloat(receiptTargetCase.actualAmount) || Math.max(0, baseComm - corpDsaCharge);
                 const tdsAmt = parseFloat(receiptTargetCase.bankTdsAmount || 0);
                 const gstAmt = parseFloat(receiptTargetCase.bankGstAmount || receiptTargetCase.gstrAmount || 0);
-                const maxNetReceivable = Math.max(0, remainingAfterDsa - tdsAmt);
+                const maxNetReceivable = parseFloat(receiptTargetCase.bankNetReceivable) || Math.max(0, actualAmt - tdsAmt);
                 const alreadyReceived = parseFloat(receiptTargetCase.bankReceivedAmount || 0);
                 const maxAllowedNow = Math.max(0, maxNetReceivable - alreadyReceived);
                 const enteredGross = parseFloat(receiptForm.grossAmount || 0);
                 const isExceeded = enteredGross > maxAllowedNow + 0.01;
+                const isSelfCase =
+                  receiptTargetCase.payoutType === "SELF" ||
+                  (receiptTargetCase.partyName || "").toLowerCase() === "self" ||
+                  (receiptTargetCase.partyName || "").toLowerCase() === "direct";
+                const vendorPayable = parseFloat(receiptTargetCase.partyNetPayable || receiptTargetCase.partyCommissionDue || 0);
 
                 return (
                   <>
-                    <div className="cc-modal-summary-banner" style={{ gridTemplateColumns: "1.2fr 1fr 1fr 1fr" }}>
+                    <div className="cc-modal-summary-banner" style={{ gridTemplateColumns: "1.2fr 1fr 1fr 1fr 1fr" }}>
                       <div>
                         <small>Customer &amp; Loan</small>
                         <strong>{receiptTargetCase.customerName}</strong>
@@ -2550,26 +2604,42 @@ export default function CasePayoutsScreen() {
                         </strong>
                       </div>
                       <div>
-                        <small>Corp DSA Comm</small>
-                        <strong style={{ color: "#7c3aed" }}>
-                          {corpDsaComm > 0 ? `-${currencyFormatter.format(corpDsaComm)}` : "₹0 (Self/Direct)"}
+                        <small>Corp DSA Deduction</small>
+                        <strong style={{ color: "#dc2626" }}>
+                          {corpDsaCharge > 0 ? `-${currencyFormatter.format(corpDsaCharge)}` : "₹0"}
+                        </strong>
+                      </div>
+                      <div>
+                        <small>Bank TDS (Deducted)</small>
+                        <strong style={{ color: "#dc2626" }}>
+                          {tdsAmt > 0 ? `-${currencyFormatter.format(tdsAmt)}` : "₹0"}
                         </strong>
                       </div>
                     </div>
 
                     {/* Formula Explanation Banner */}
                     <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, padding: "10px 14px", fontSize: 12 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                        <span style={{ fontWeight: 700, color: "#166534" }}>Calculation Formula: (Bank Comm − DSA Comm) − TDS</span>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, flexWrap: "wrap", gap: 6 }}>
+                        <span style={{ fontWeight: 700, color: "#166534" }}>
+                          Calculation Formula: Actual Amount (₹{Math.round(actualAmt).toLocaleString("en-IN")}) − Bank TDS (₹{Math.round(tdsAmt).toLocaleString("en-IN")})
+                        </span>
                         <span style={{ fontWeight: 800, color: "#15803d", fontSize: 13 }}>
-                          ₹{Math.round(remainingAfterDsa).toLocaleString("en-IN")} − ₹{Math.round(tdsAmt).toLocaleString("en-IN")} = ₹{Math.round(maxNetReceivable).toLocaleString("en-IN")} (Net X)
+                          = ₹{Math.round(maxNetReceivable).toLocaleString("en-IN")} (BANK NET RECEIVABLE)
                         </span>
                       </div>
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1.2fr", gap: 8, color: "#166534", fontSize: 11.5, borderTop: "1px dashed #86efac", paddingTop: 6 }}>
                         <div>Already Received: <strong>₹{Math.round(alreadyReceived).toLocaleString("en-IN")}</strong></div>
                         <div>GST [Separate] (Y): <strong style={{ color: "#0284c7" }}>₹{Math.round(gstAmt).toLocaleString("en-IN")}</strong></div>
-                        <div style={{ textAlign: "right" }}>Max Allowed Now: <strong style={{ color: isExceeded ? "#dc2626" : "#166534", fontSize: 13 }}>₹{Math.round(maxAllowedNow).toLocaleString("en-IN")}</strong></div>
+                        <div style={{ textAlign: "right" }}>Balance Due (Max Allowed): <strong style={{ color: isExceeded ? "#dc2626" : "#166534", fontSize: 13 }}>₹{Math.round(maxAllowedNow).toLocaleString("en-IN")}</strong></div>
                       </div>
+                      {!isSelfCase && receiptTargetCase.partyName && (
+                        <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px dashed #86efac", fontSize: 11.5, color: "#1e293b", display: "flex", alignItems: "center", gap: 6 }}>
+                          <span style={{ color: "#7c3aed", fontWeight: 700 }}>ℹ️ Vendor ({receiptTargetCase.partyName}):</span>
+                          <span>
+                            Vendor net payable is <strong>₹{Math.round(vendorPayable).toLocaleString("en-IN")}</strong>. Bank does <strong>NOT</strong> deduct vendor commission — bank transfers the full Net Receivable amount (₹{Math.round(maxNetReceivable).toLocaleString("en-IN")}). Vendor will be paid separately by the company.
+                          </span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Validation Alert */}
@@ -2577,7 +2647,7 @@ export default function CasePayoutsScreen() {
                       <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 12px", color: "#b91c1c", fontSize: 12, display: "flex", alignItems: "center", gap: 8 }}>
                         <AlertCircle size={18} style={{ flexShrink: 0 }} />
                         <span>
-                          <strong>Validation Restriction:</strong> You entered ₹{Math.round(enteredGross).toLocaleString("en-IN")}, which exceeds the maximum eligible balance of <strong>₹{Math.round(maxAllowedNow).toLocaleString("en-IN")}</strong>. You cannot record more than the eligible net receivable!
+                          <strong>Validation Restriction:</strong> You entered ₹{Math.round(enteredGross).toLocaleString("en-IN")}, which exceeds the maximum eligible balance of <strong>₹{Math.round(maxAllowedNow).toLocaleString("en-IN")}</strong>. You cannot record more than the eligible bank net receivable!
                         </span>
                       </div>
                     )}
@@ -2588,36 +2658,37 @@ export default function CasePayoutsScreen() {
               {/* Gross Amount & Receipt Date */}
               <div className="cc-form-row">
                 <div className="cc-fgroup">
-                  <label>Gross Commission Amount (₹) *</label>
+                  <label>Bank Net Commission Received (₹) *</label>
                   <input
                     type="number"
                     step="0.01"
                     min="1"
                     max={(() => {
                       const baseComm = parseFloat(receiptTargetCase.baseAmount || 0);
-                      const isSelfCase = receiptTargetCase.payoutType === "SELF" || (receiptTargetCase.partyName || "").toLowerCase() === "self" || (receiptTargetCase.partyName || "").toLowerCase() === "direct";
-                      const corpDsaComm = isSelfCase ? 0 : parseFloat(receiptTargetCase.partyCommissionDue || 0);
+                      const corpDsaPct = parseFloat(receiptTargetCase.corporateDsaPercent || 0);
+                      const corpDsaCharge =
+                        receiptTargetCase.corporateDsaAmount !== undefined && receiptTargetCase.corporateDsaAmount !== null
+                          ? parseFloat(receiptTargetCase.corporateDsaAmount)
+                          : Math.round((baseComm * corpDsaPct) / 100);
+                      const actualAmt = parseFloat(receiptTargetCase.actualAmount) || Math.max(0, baseComm - corpDsaCharge);
                       const tdsAmt = parseFloat(receiptTargetCase.bankTdsAmount || 0);
-                      const maxNetReceivable = Math.max(0, baseComm - corpDsaComm - tdsAmt);
+                      const maxNetReceivable = parseFloat(receiptTargetCase.bankNetReceivable) || Math.max(0, actualAmt - tdsAmt);
                       const alreadyReceived = parseFloat(receiptTargetCase.bankReceivedAmount || 0);
                       return Math.max(0, maxNetReceivable - alreadyReceived);
                     })()}
                     required
-                    placeholder="e.g. 25000"
+                    placeholder="e.g. 52504"
                     value={receiptForm.grossAmount}
                     onChange={(e) => {
-                      const val = e.target.value;
-                      const g = parseFloat(val) || 0;
-                      const gst = Math.round((g * parseFloat(receiptTargetCase.bankGstPercent || 18)) / 100);
-                      const tds = Math.round((g * parseFloat(receiptTargetCase.bankTdsPercent || 5)) / 100);
                       setReceiptForm((prev) => ({
                         ...prev,
-                        grossAmount: val,
-                        gstAmount: gst,
-                        tdsAmount: tds,
+                        grossAmount: e.target.value,
                       }));
                     }}
                   />
+                  <small style={{ color: "#64748b", marginTop: 3 }}>
+                    Eligible Bank Net Inflow (Actual Base − Bank TDS)
+                  </small>
                 </div>
                 <div className="cc-fgroup">
                   <label>Receipt Date *</label>
@@ -2633,22 +2704,28 @@ export default function CasePayoutsScreen() {
               {/* GST & TDS Row */}
               <div className="cc-form-row">
                 <div className="cc-fgroup">
-                  <label>GST ({receiptTargetCase.bankGstPercent || 18}%) ₹ [Separate]</label>
+                  <label>GST Amount (₹) [Kept Separate]</label>
                   <input
                     type="number"
                     step="0.01"
                     value={receiptForm.gstAmount}
                     onChange={(e) => setReceiptForm((prev) => ({ ...prev, gstAmount: e.target.value }))}
                   />
+                  <small style={{ color: "#64748b", marginTop: 3 }}>
+                    Bank GST amount ({receiptTargetCase.bankGstPercent || 0}%)
+                  </small>
                 </div>
                 <div className="cc-fgroup">
-                  <label>TDS Deducted ({receiptTargetCase.bankTdsPercent || 5}%) ₹</label>
+                  <label>Bank TDS Deducted (₹) [Info]</label>
                   <input
                     type="number"
                     step="0.01"
                     value={receiptForm.tdsAmount}
                     onChange={(e) => setReceiptForm((prev) => ({ ...prev, tdsAmount: e.target.value }))}
                   />
+                  <small style={{ color: "#64748b", marginTop: 3 }}>
+                    Already deducted by Bank ({receiptTargetCase.bankTdsPercent || 0}%)
+                  </small>
                 </div>
               </div>
 
@@ -2658,10 +2735,12 @@ export default function CasePayoutsScreen() {
                 <strong>
                   {currencyFormatter.format(
                     (parseFloat(receiptForm.grossAmount) || 0) +
-                      (parseFloat(receiptForm.gstAmount) || 0) -
-                      (parseFloat(receiptForm.tdsAmount) || 0)
+                      (parseFloat(receiptForm.gstAmount) || 0)
                   )}
                 </strong>
+                <span style={{ fontSize: 11, color: "#64748b", fontWeight: "normal", marginLeft: 8 }}>
+                  (Net Commission Inflow {parseFloat(receiptForm.gstAmount) > 0 ? "+ GST" : ""})
+                </span>
               </div>
 
               {/* Payment Mode & UTR */}
@@ -2715,10 +2794,14 @@ export default function CasePayoutsScreen() {
                     parseFloat(receiptForm.grossAmount) <= 0 ||
                     (() => {
                       const baseComm = parseFloat(receiptTargetCase.baseAmount || 0);
-                      const isSelfCase = receiptTargetCase.payoutType === "SELF" || (receiptTargetCase.partyName || "").toLowerCase() === "self" || (receiptTargetCase.partyName || "").toLowerCase() === "direct";
-                      const corpDsaComm = isSelfCase ? 0 : parseFloat(receiptTargetCase.partyCommissionDue || 0);
+                      const corpDsaPct = parseFloat(receiptTargetCase.corporateDsaPercent || 0);
+                      const corpDsaCharge =
+                        receiptTargetCase.corporateDsaAmount !== undefined && receiptTargetCase.corporateDsaAmount !== null
+                          ? parseFloat(receiptTargetCase.corporateDsaAmount)
+                          : Math.round((baseComm * corpDsaPct) / 100);
+                      const actualAmt = parseFloat(receiptTargetCase.actualAmount) || Math.max(0, baseComm - corpDsaCharge);
                       const tdsAmt = parseFloat(receiptTargetCase.bankTdsAmount || 0);
-                      const maxNetReceivable = Math.max(0, baseComm - corpDsaComm - tdsAmt);
+                      const maxNetReceivable = parseFloat(receiptTargetCase.bankNetReceivable) || Math.max(0, actualAmt - tdsAmt);
                       const alreadyReceived = parseFloat(receiptTargetCase.bankReceivedAmount || 0);
                       const maxAllowedNow = Math.max(0, maxNetReceivable - alreadyReceived);
                       return parseFloat(receiptForm.grossAmount || 0) > maxAllowedNow + 0.01;
@@ -4019,12 +4102,49 @@ export default function CasePayoutsScreen() {
                   </div>
 
                   <div className="cc-fgroup">
-                    <label>Disbursal Date</label>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                      <label style={{ margin: 0 }}>Disbursal Date (Payout Month) *</label>
+                      {addForm.disbursalDate && (
+                        <span style={{ fontSize: 11, color: "#166534", background: "#dcfce7", padding: "1px 6px", borderRadius: 4, fontWeight: 700 }}>
+                          {new Date(addForm.disbursalDate).toLocaleString("en-IN", { month: "short", year: "numeric" })}
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="date"
+                      required
                       value={addForm.disbursalDate}
                       onChange={(e) => setAddForm({ ...addForm, disbursalDate: e.target.value })}
                     />
+                    <div style={{ display: "flex", gap: 5, marginTop: 4, alignItems: "center", flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 10, color: "#64748b" }}>Quick:</span>
+                      <button
+                        type="button"
+                        onClick={() => setAddForm({ ...addForm, disbursalDate: new Date().toISOString().split("T")[0] })}
+                        style={{ fontSize: 10, padding: "2px 6px", background: "#f1f5f9", border: "1px solid #cbd5e1", borderRadius: 4, cursor: "pointer" }}
+                      >
+                        Today
+                      </button>
+                      {availableMonths.slice(1, 4).map((m) => (
+                        <button
+                          key={m.val}
+                          type="button"
+                          onClick={() => setAddForm({ ...addForm, disbursalDate: `${m.val}-01` })}
+                          style={{
+                            fontSize: 10,
+                            padding: "2px 6px",
+                            background: addForm.disbursalDate.slice(0, 7) === m.val ? "#dcfce7" : "#f8fafc",
+                            borderColor: addForm.disbursalDate.slice(0, 7) === m.val ? "#86efac" : "#cbd5e1",
+                            color: addForm.disbursalDate.slice(0, 7) === m.val ? "#166534" : "#475569",
+                            borderRadius: 4,
+                            cursor: "pointer",
+                            fontWeight: addForm.disbursalDate.slice(0, 7) === m.val ? 700 : 500,
+                          }}
+                        >
+                          {m.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -4389,7 +4509,134 @@ export default function CasePayoutsScreen() {
                 </button>
               </div>
 
-              {/* STEP 2: UPLOAD FILE AREA / DROPZONE */}
+              {/* STEP 2: CHOOSE DISBURSAL DATE & MONTH FOR CASES */}
+              <div
+                style={{
+                  background: "#f8fafc",
+                  border: "1px solid #e2e8f0",
+                  borderRadius: 10,
+                  padding: "14px 18px",
+                  marginBottom: 20,
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+                  <div>
+                    <h4 style={{ margin: "0 0 2px", fontSize: 13.5, fontWeight: 700, color: "#0f172a" }}>
+                      Step 2: Choose Disbursal Date &amp; Payout Month
+                    </h4>
+                    <p style={{ margin: 0, fontSize: 12, color: "#64748b" }}>
+                      Select the exact date or past month these cases belong to. Data will be credited to that month's tab, ledger &amp; totals.
+                    </p>
+                  </div>
+                  {bulkImportDate && (
+                    <span
+                      style={{
+                        background: "#ecfdf5",
+                        color: "#047857",
+                        border: "1px solid #a7f3d0",
+                        padding: "4px 10px",
+                        borderRadius: 6,
+                        fontSize: 12,
+                        fontWeight: 700,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 5,
+                      }}
+                    >
+                      <Calendar size={13} /> Target Month: {new Date(bulkImportDate).toLocaleString("en-IN", { month: "long", year: "numeric" })}
+                    </span>
+                  )}
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: "#334155" }}>Disbursal Date:</label>
+                    <input
+                      type="date"
+                      value={bulkImportDate}
+                      onChange={(e) => updateBulkImportDate(e.target.value)}
+                      style={{
+                        border: "1px solid #cbd5e1",
+                        borderRadius: 6,
+                        padding: "6px 10px",
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: "#0f172a",
+                        background: "#fff",
+                      }}
+                    />
+                  </div>
+
+                  {/* Quick Month Selectors */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>Quick Select:</span>
+                    <button
+                      type="button"
+                      onClick={() => updateBulkImportDate(new Date().toISOString().split("T")[0])}
+                      style={{
+                        fontSize: 11,
+                        padding: "4px 8px",
+                        borderRadius: 5,
+                        border: "1px solid #cbd5e1",
+                        background: bulkImportDate.slice(0, 7) === new Date().toISOString().slice(0, 7) ? "#0284c7" : "#fff",
+                        color: bulkImportDate.slice(0, 7) === new Date().toISOString().slice(0, 7) ? "#fff" : "#334155",
+                        cursor: "pointer",
+                        fontWeight: 600,
+                      }}
+                    >
+                      Current Month
+                    </button>
+                    {availableMonths.slice(1, 5).map((m) => {
+                      const isSelected = bulkImportDate.slice(0, 7) === m.val;
+                      return (
+                        <button
+                          key={m.val}
+                          type="button"
+                          onClick={() => updateBulkImportDate(`${m.val}-01`)}
+                          style={{
+                            fontSize: 11,
+                            padding: "4px 8px",
+                            borderRadius: 5,
+                            border: "1px solid #cbd5e1",
+                            background: isSelected ? "#059669" : "#fff",
+                            color: isSelected ? "#fff" : "#334155",
+                            cursor: "pointer",
+                            fontWeight: 600,
+                          }}
+                        >
+                          {m.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Date Mode Radio selection */}
+                <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px dashed #e2e8f0", display: "flex", gap: 18, flexWrap: "wrap", fontSize: 12 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: "#1e293b" }}>
+                    <input
+                      type="radio"
+                      name="bulkDateMode"
+                      value="OVERRIDE_ALL"
+                      checked={bulkDateMode === "OVERRIDE_ALL"}
+                      onChange={() => updateBulkImportDate(bulkImportDate, "OVERRIDE_ALL")}
+                    />
+                    <strong>Apply selected date ({bulkImportDate}) to all imported rows</strong> (Recommended for past-month batches)
+                  </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: "#475569" }}>
+                    <input
+                      type="radio"
+                      name="bulkDateMode"
+                      value="EXCEL_OR_FALLBACK"
+                      checked={bulkDateMode === "EXCEL_OR_FALLBACK"}
+                      onChange={() => updateBulkImportDate(bulkImportDate, "EXCEL_OR_FALLBACK")}
+                    />
+                    Use date from Excel sheet if specified in file (fallback to selected date)
+                  </label>
+                </div>
+              </div>
+
+              {/* STEP 3: UPLOAD FILE AREA / DROPZONE */}
               <div style={{ marginBottom: 20 }}>
                 <label
                   style={{
@@ -4400,7 +4647,7 @@ export default function CasePayoutsScreen() {
                     marginBottom: 8,
                   }}
                 >
-                  Step 2: Upload Your Excel File (.xlsx, .xls, .csv)
+                  Step 3: Upload Your Excel File (.xlsx, .xls, .csv)
                 </label>
                 <div
                   style={{

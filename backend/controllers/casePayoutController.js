@@ -849,20 +849,27 @@ exports.recordBankReceipt = async (req, res) => {
     const gross = parseFloat(grossAmount);
     const gst = parseFloat(gstAmount || 0);
     const tds = parseFloat(tdsAmount || 0);
-    const net = gross + gst - tds;
+    const net = gross + gst;
 
-    // Check & Validate: amount cannot exceed (Bank Commission - Corporate DSA Commission - TDS)
+    // Check & Validate: amount cannot exceed Bank Net Receivable (Actual Base Amount - Bank TDS)
+    // Corporate DSA Charge is deducted by bank/franchise directly from Gross Bank Commission.
+    // Vendor/Connector commission is NOT deducted by bank; it is paid separately by company from its own account.
     const baseComm = parseFloat(casePayout.baseAmount || 0);
-    const corpDsaComm = parseFloat(casePayout.partyCommissionDue || 0);
+    const corpDsaPct = parseFloat(casePayout.corporateDsaPercent || 0);
+    const corpDsaAmt =
+      casePayout.corporateDsaAmount !== undefined && casePayout.corporateDsaAmount !== null
+        ? parseFloat(casePayout.corporateDsaAmount)
+        : Math.round((baseComm * corpDsaPct) / 100);
+    const actualAmt = parseFloat(casePayout.actualAmount) || Math.max(0, baseComm - corpDsaAmt);
     const tdsDeducted = parseFloat(casePayout.bankTdsAmount || 0);
-    const maxNetReceivable = Math.max(0, baseComm - corpDsaComm - tdsDeducted);
+    const maxNetReceivable = parseFloat(casePayout.bankNetReceivable) || Math.max(0, actualAmt - tdsDeducted);
     const alreadyReceived = parseFloat(casePayout.bankReceivedAmount || 0);
     const maxRemainingReceivable = Math.max(0, maxNetReceivable - alreadyReceived);
 
     if (gross > maxRemainingReceivable + 0.01) {
       await t.rollback();
       return res.status(400).json({
-        message: `Receipt amount (₹${gross}) exceeds maximum eligible receivable of ₹${Math.round(maxRemainingReceivable)} (Eligible Net: ₹${Math.round(maxNetReceivable)} [Bank Comm ₹${baseComm} − Corp DSA Comm ₹${corpDsaComm} − TDS ₹${tdsDeducted}] − Already Received ₹${Math.round(alreadyReceived)}).`,
+        message: `Receipt amount (₹${gross}) exceeds maximum eligible receivable of ₹${Math.round(maxRemainingReceivable)} (Eligible Bank Net: ₹${Math.round(maxNetReceivable)} [Actual Base ₹${Math.round(actualAmt)} − Bank TDS ₹${Math.round(tdsDeducted)}] − Already Received ₹${Math.round(alreadyReceived)}). Note: Vendor commission is paid separately by company and is not deducted from bank receipts.`,
         maxEligible: Math.round(maxNetReceivable),
         alreadyReceived: Math.round(alreadyReceived),
         maxRemainingReceivable: Math.round(maxRemainingReceivable),
