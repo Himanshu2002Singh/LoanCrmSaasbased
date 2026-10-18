@@ -189,6 +189,12 @@ export default function CasePayoutsScreen() {
   });
   const [savingEdit, setSavingEdit] = useState(false);
 
+  // Quick Date Edit Modal State
+  const [quickDateModalOpen, setQuickDateModalOpen] = useState(false);
+  const [quickDateCase, setQuickDateCase] = useState(null);
+  const [quickDateValue, setQuickDateValue] = useState("");
+  const [savingQuickDate, setSavingQuickDate] = useState(false);
+
   // Bank Receipt Modal
   const [bankReceiptModalOpen, setBankReceiptModalOpen] = useState(false);
   const [receiptTargetCase, setReceiptTargetCase] = useState(null);
@@ -580,6 +586,39 @@ export default function CasePayoutsScreen() {
     });
   };
 
+  // Open Quick Date Edit Modal
+  const openQuickDateModal = (c) => {
+    setQuickDateCase(c);
+    setQuickDateValue(c.disbursalDate ? c.disbursalDate.split("T")[0] : new Date().toISOString().split("T")[0]);
+    setQuickDateModalOpen(true);
+  };
+
+  // Submit Quick Date Edit
+  const handleQuickDateSubmit = async (e) => {
+    e.preventDefault();
+    if (!quickDateCase || !quickDateValue) return;
+    setSavingQuickDate(true);
+    try {
+      await axios.put(`${API_URL}/payouts/cases/${quickDateCase.id}`, {
+        disbursalDate: quickDateValue,
+      });
+      const targetMonth = quickDateValue.slice(0, 7);
+      if (targetMonth && filterPeriodType === "month" && selectedMonth !== targetMonth) {
+        setSelectedMonth(targetMonth);
+        toast.success(`Disbursal date updated to ${quickDateValue}! Switched view to ${new Date(quickDateValue).toLocaleString("en-IN", { month: "long", year: "numeric" })}.`);
+      } else {
+        toast.success(`Disbursal date updated to ${quickDateValue}!`);
+      }
+      setQuickDateModalOpen(false);
+      fetchCasePayouts();
+    } catch (err) {
+      console.error("Error updating disbursal date:", err);
+      toast.error(err.response?.data?.message || "Failed to update date");
+    } finally {
+      setSavingQuickDate(false);
+    }
+  };
+
   // Submit Rate Edit
   const handleEditSubmit = async (e) => {
     e.preventDefault();
@@ -587,7 +626,13 @@ export default function CasePayoutsScreen() {
     setSavingEdit(true);
     try {
       await axios.put(`${API_URL}/payouts/cases/${editingCase.id}`, editForm);
-      toast.success("Case rates, credit base & deductions updated successfully!");
+      const targetMonth = editForm.disbursalDate ? editForm.disbursalDate.slice(0, 7) : "";
+      if (targetMonth && filterPeriodType === "month" && selectedMonth !== targetMonth) {
+        setSelectedMonth(targetMonth);
+        toast.success(`Case updated & moved to ${new Date(editForm.disbursalDate).toLocaleString("en-IN", { month: "long", year: "numeric" })}! View updated.`);
+      } else {
+        toast.success("Case rates, date & deductions updated successfully!");
+      }
       setEditModalOpen(false);
       fetchCasePayouts();
     } catch (err) {
@@ -1946,8 +1991,26 @@ export default function CasePayoutsScreen() {
                         {/* 2. Loan & Disbursal Date */}
                         <td>
                           <span className="cc-product-pill">{c.loanProduct}</span>
-                          <div style={{ fontSize: 11, color: "#475569", marginTop: 3 }}>
-                            {c.disbursalDate ? new Date(c.disbursalDate).toLocaleDateString("en-IN") : "—"}
+                          <div
+                            style={{
+                              fontSize: 11,
+                              color: "#475569",
+                              marginTop: 3,
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 4,
+                            }}
+                          >
+                            <Calendar size={11} color="#64748b" />
+                            <span>{c.disbursalDate ? new Date(c.disbursalDate).toLocaleDateString("en-IN") : "—"}</span>
+                            <button
+                              type="button"
+                              className="cc-inline-edit-btn"
+                              onClick={() => openQuickDateModal(c)}
+                              title="Edit Disbursal Date / Payout Month"
+                            >
+                              <Edit3 size={11} />
+                            </button>
                           </div>
                         </td>
 
@@ -2246,9 +2309,30 @@ export default function CasePayoutsScreen() {
                               type="button"
                               className="cc-action-btn edit"
                               onClick={() => openEditModal(c)}
-                              title="Edit Bank %, Base Value, Deductions & Manpower"
+                              title="Edit Bank %, Base Value, Deductions, Date & Manpower"
                             >
                               <Sliders size={12} /> Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="cc-action-btn"
+                              style={{
+                                background: "#eff6ff",
+                                border: "1px solid #bfdbfe",
+                                color: "#1d4ed8",
+                                fontWeight: 600,
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 3,
+                                padding: "4px 7px",
+                                borderRadius: 6,
+                                fontSize: 11,
+                                cursor: "pointer",
+                              }}
+                              onClick={() => openQuickDateModal(c)}
+                              title="Change Disbursal Date / Payout Month"
+                            >
+                              <Calendar size={11} /> Date
                             </button>
                             <button
                               type="button"
@@ -2943,6 +3027,211 @@ export default function CasePayoutsScreen() {
         </div>
       )}
 
+      {/* QUICK DISBURSAL DATE EDIT MODAL */}
+      {quickDateModalOpen && quickDateCase && (
+        <div className="cc-modal-overlay" onClick={() => setQuickDateModalOpen(false)}>
+          <div className="cc-modal-box" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+            <div className="cc-modal-header">
+              <div>
+                <h3 style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <Calendar size={18} color="#2563eb" />
+                  Edit Disbursal Date &amp; Payout Month
+                </h3>
+                <p>
+                  Lead #{quickDateCase.leadId} • {quickDateCase.customerName} ({quickDateCase.bankName} - {currencyFormatter.format(quickDateCase.loanAmount || quickDateCase.baseAmount)})
+                </p>
+              </div>
+              <button
+                type="button"
+                className="cc-modal-close"
+                onClick={() => setQuickDateModalOpen(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleQuickDateSubmit} className="cc-modal-form">
+              {/* CURRENT DATE VS NEW DATE COMPARISON */}
+              <div
+                style={{
+                  background: "#f8fafc",
+                  padding: "12px 14px",
+                  borderRadius: 10,
+                  border: "1px solid #e2e8f0",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  fontSize: 12.5,
+                }}
+              >
+                <div>
+                  <span style={{ color: "#64748b", display: "block", fontSize: 11 }}>Current Date</span>
+                  <strong style={{ color: "#0f172a" }}>
+                    {quickDateCase.disbursalDate
+                      ? new Date(quickDateCase.disbursalDate).toLocaleDateString("en-IN", {
+                          day: "2-digit",
+                          month: "short",
+                          year: "numeric",
+                        })
+                      : "Not set"}
+                  </strong>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <span style={{ color: "#64748b", display: "block", fontSize: 11 }}>New Month Cycle</span>
+                  <span
+                    style={{
+                      background: "#dbeafe",
+                      color: "#1e40af",
+                      padding: "2px 8px",
+                      borderRadius: 6,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      display: "inline-block",
+                    }}
+                  >
+                    {quickDateValue
+                      ? new Date(quickDateValue).toLocaleString("en-IN", { month: "long", year: "numeric" })
+                      : "Select Date"}
+                  </span>
+                </div>
+              </div>
+
+              {/* DATE PICKER */}
+              <div className="cc-fgroup" style={{ marginTop: 6 }}>
+                <label style={{ fontWeight: 700, color: "#1e293b", fontSize: 13 }}>
+                  Select New Disbursal Date *
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={quickDateValue}
+                  onChange={(e) => setQuickDateValue(e.target.value)}
+                  style={{
+                    padding: "10px 12px",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    borderRadius: 8,
+                    border: "1.5px solid #3b82f6",
+                    background: "#ffffff",
+                    color: "#0f172a",
+                    boxShadow: "0 1px 2px rgba(59, 130, 246, 0.1)",
+                  }}
+                />
+              </div>
+
+              {/* QUICK MONTH PRESET SHORTCUTS */}
+              <div>
+                <span
+                  style={{
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    color: "#475569",
+                    display: "block",
+                    marginBottom: 6,
+                  }}
+                >
+                  ⚡ Quick Pick Month / Past Date:
+                </span>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    onClick={() => setQuickDateValue(new Date().toISOString().split("T")[0])}
+                    style={{
+                      padding: "6px 11px",
+                      fontSize: 11.5,
+                      borderRadius: 6,
+                      border: "1px solid #cbd5e1",
+                      background: "#f1f5f9",
+                      color: "#334155",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Today
+                  </button>
+                  {availableMonths.slice(0, 5).map((m) => {
+                    const isActive = (quickDateValue || "").startsWith(m.val);
+                    return (
+                      <button
+                        key={m.val}
+                        type="button"
+                        onClick={() => {
+                          const curDay = quickDateValue ? quickDateValue.split("-")[2] || "01" : "01";
+                          setQuickDateValue(`${m.val}-${curDay}`);
+                        }}
+                        style={{
+                          padding: "6px 11px",
+                          fontSize: 11.5,
+                          borderRadius: 6,
+                          border: isActive ? "1.5px solid #2563eb" : "1px solid #cbd5e1",
+                          background: isActive ? "#2563eb" : "#ffffff",
+                          color: isActive ? "#ffffff" : "#475569",
+                          fontWeight: isActive ? 700 : 500,
+                          cursor: "pointer",
+                          transition: "all 0.15s",
+                        }}
+                      >
+                        {m.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* HELPER NOTICE */}
+              <div
+                style={{
+                  background: "#eff6ff",
+                  padding: "10px 12px",
+                  borderRadius: 8,
+                  border: "1px solid #bfdbfe",
+                  fontSize: 11.5,
+                  color: "#1e40af",
+                  lineHeight: 1.45,
+                }}
+              >
+                ℹ️ <strong>Auto-Sync Month:</strong> Agar aap date kisi pichle ya aage ke mahine ki select karenge, toh save hone par system automatically uss mahine ke view/filter me shift ho jayega taaki aapko payout turant saamne dikhe.
+              </div>
+
+              <div className="cc-modal-actions" style={{ marginTop: 10 }}>
+                <button
+                  type="button"
+                  className="cc-btn-cancel"
+                  onClick={() => setQuickDateModalOpen(false)}
+                  disabled={savingQuickDate}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="cc-btn-submit"
+                  disabled={savingQuickDate}
+                  style={{
+                    background: "#2563eb",
+                    color: "#ffffff",
+                    fontWeight: 700,
+                    padding: "9px 20px",
+                    borderRadius: 8,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  {savingQuickDate ? (
+                    <>Saving Date...</>
+                  ) : (
+                    <>
+                      <CheckCircle2 size={16} /> Save New Date
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* MODAL 3: EDIT RATES, CREDIT BASE & DEDUCTIONS */}
       {editModalOpen && editingCase && (
         <div className="cc-modal-overlay" onClick={() => setEditModalOpen(false)}>
@@ -3022,6 +3311,108 @@ export default function CasePayoutsScreen() {
                 >
                   <Wallet size={15} /> 🤝 Vendor / Connector Case
                 </button>
+              </div>
+
+              {/* DISBURSAL DATE & PAYOUT MONTH EDIT CARD */}
+              <div
+                style={{
+                  background: "#eff6ff",
+                  padding: "12px 14px",
+                  borderRadius: 10,
+                  border: "1.5px solid #bfdbfe",
+                  marginBottom: 10,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, flexWrap: "wrap", gap: 6 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <Calendar size={16} color="#1d4ed8" />
+                    <strong style={{ fontSize: 13, color: "#1e40af" }}>
+                      Disbursal Date &amp; Payout Month Cycle
+                    </strong>
+                  </div>
+                  {editForm.disbursalDate && (
+                    <span
+                      style={{
+                        background: "#dbeafe",
+                        color: "#1e40af",
+                        padding: "3px 8px",
+                        borderRadius: 6,
+                        fontSize: 11,
+                        fontWeight: 700,
+                      }}
+                    >
+                      Cycle: {new Date(editForm.disbursalDate).toLocaleString("en-IN", { month: "long", year: "numeric" })}
+                    </span>
+                  )}
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <div style={{ flex: "1 1 200px" }}>
+                    <input
+                      type="date"
+                      required
+                      value={editForm.disbursalDate}
+                      onChange={(e) => recomputeEditForm({ disbursalDate: e.target.value })}
+                      style={{
+                        width: "100%",
+                        padding: "7px 10px",
+                        border: "1px solid #93c5fd",
+                        borderRadius: 6,
+                        background: "#ffffff",
+                        fontWeight: 600,
+                        color: "#1e3a8a",
+                        fontSize: 13,
+                      }}
+                    />
+                  </div>
+                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
+                    <button
+                      type="button"
+                      onClick={() => recomputeEditForm({ disbursalDate: new Date().toISOString().split("T")[0] })}
+                      style={{
+                        padding: "5px 9px",
+                        fontSize: 11,
+                        borderRadius: 6,
+                        border: "1px solid #cbd5e1",
+                        background: "#ffffff",
+                        color: "#475569",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Today
+                    </button>
+                    {availableMonths.slice(0, 5).map((m) => {
+                      const isActive = (editForm.disbursalDate || "").startsWith(m.val);
+                      return (
+                        <button
+                          key={m.val}
+                          type="button"
+                          onClick={() => {
+                            const curDay = editForm.disbursalDate ? editForm.disbursalDate.split("-")[2] || "01" : "01";
+                            recomputeEditForm({ disbursalDate: `${m.val}-${curDay}` });
+                          }}
+                          style={{
+                            padding: "5px 9px",
+                            fontSize: 11,
+                            borderRadius: 6,
+                            border: isActive ? "1.5px solid #2563eb" : "1px solid #cbd5e1",
+                            background: isActive ? "#2563eb" : "#ffffff",
+                            color: isActive ? "#ffffff" : "#475569",
+                            fontWeight: isActive ? 700 : 500,
+                            cursor: "pointer",
+                            transition: "all 0.15s",
+                          }}
+                        >
+                          {m.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <small style={{ color: "#3b82f6", fontSize: 11, display: "block", marginTop: 6 }}>
+                  💡 Date change karne se yeh payout uss month ke record aur report me chala jayega. Save hone par view auto-sync hoga.
+                </small>
               </div>
 
               {/* SECTION 1: BANK INFLOW & BANK DEDUCTIONS */}
@@ -3133,7 +3524,7 @@ export default function CasePayoutsScreen() {
                   <span style={{ fontSize: 11.5, fontWeight: 700, color: "#166534", display: "block", marginBottom: 6 }}>
                     Bank Taxes (Applicable on Actual Amount: ₹{numberFormatter.format(editForm.actualAmount || 0)}):
                   </span>
-                  <div className="cc-form-row" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+                  <div className="cc-form-row" style={{ gridTemplateColumns: "1fr 1fr" }}>
                     <div className="cc-fgroup">
                       <label>Bank TDS % (Deducted)</label>
                       <input
@@ -3158,15 +3549,6 @@ export default function CasePayoutsScreen() {
                       <small style={{ color: "#2563eb", fontSize: 10.5, fontWeight: 600 }}>
                         GST Amount: ₹{numberFormatter.format(editForm.bankGstAmount || 0)} (Alag rahega)
                       </small>
-                    </div>
-
-                    <div className="cc-fgroup">
-                      <label>Disbursal Date</label>
-                      <input
-                        type="date"
-                        value={editForm.disbursalDate}
-                        onChange={(e) => recomputeEditForm({ disbursalDate: e.target.value })}
-                      />
                     </div>
                   </div>
                 </div>
