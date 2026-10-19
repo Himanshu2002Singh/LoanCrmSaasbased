@@ -61,6 +61,31 @@ export default function LendersRedesign() {
   const [submitting, setSubmitting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
+  const userRole = localStorage.getItem("userRole") || "";
+  const employeeRole = localStorage.getItem("employeeRole") || "";
+  const isCompanyAdmin =
+    ["COMPANY_ADMIN", "SUPERADMIN"].includes(userRole.toUpperCase()) ||
+    ["admin", "superadmin"].includes(employeeRole.toLowerCase());
+
+  let userPermissions = {};
+  try {
+    userPermissions = JSON.parse(localStorage.getItem("userPermissions") || "{}");
+  } catch {
+    userPermissions = {};
+  }
+
+  const canCreateLender =
+    isCompanyAdmin ||
+    userPermissions.createLender === true ||
+    (userPermissions.createLender !== false &&
+      ["MANAGER", "OPS"].includes(userRole.toUpperCase()));
+
+  const canEditLender =
+    isCompanyAdmin ||
+    userPermissions.editLender === true ||
+    (userPermissions.editLender !== false &&
+      ["MANAGER", "OPS"].includes(userRole.toUpperCase()));
+
   const fetchLoanProducts = useCallback(async () => {
     try {
       const res = await axios.get(`${API_URL}/master-configs/LOAN_PRODUCT`);
@@ -305,13 +330,15 @@ export default function LendersRedesign() {
           </select>
         </label>
 
-        <button
-          type="button"
-          className="cc-lender-btn primary cc-lender-topbar-add"
-          onClick={openCreateLender}
-        >
-          <Plus size={16} /> Add New Lender
-        </button>
+        {canCreateLender && (
+          <button
+            type="button"
+            className="cc-lender-btn primary cc-lender-topbar-add"
+            onClick={openCreateLender}
+          >
+            <Plus size={16} /> Add New Lender
+          </button>
+        )}
       </section>
 
       {/* Lenders Table */}
@@ -447,14 +474,16 @@ export default function LendersRedesign() {
                       </td>
                       <td onClick={(event) => event.stopPropagation()}>
                         <div className="cc-lender-actions">
-                          <button
-                            type="button"
-                            className="cc-lender-icon-btn"
-                            title="Edit"
-                            onClick={() => openEditLender(lender)}
-                          >
-                            <Pencil size={14} />
-                          </button>
+                          {canEditLender && (
+                            <button
+                              type="button"
+                              className="cc-lender-icon-btn"
+                              title="Edit"
+                              onClick={() => openEditLender(lender)}
+                            >
+                              <Pencil size={14} />
+                            </button>
+                          )}
                           <button
                             type="button"
                             className="cc-lender-icon-btn danger"

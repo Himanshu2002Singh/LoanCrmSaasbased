@@ -72,7 +72,7 @@ const ROLE_DEFAULTS = {
     viewLenders: true,
   },
   EMPLOYEE: {
-    viewDashboard: false,
+    viewDashboard: true,
     viewLeads: true,
     createLead: true,
     manageLeads: true,
@@ -94,7 +94,7 @@ const ROLE_DEFAULTS = {
     viewLenders: false,
   },
   FINANCE: {
-    viewDashboard: false,
+    viewDashboard: true,
     viewLeads: false,
     createLead: false,
     viewFollowupWork: false,
@@ -191,6 +191,7 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
   ];
 
   const operationsNavItems = [
+    { path: "/", label: "Dashboard", icon: "home", permission: "viewDashboard" },
     { path: "/leads", label: "Leads", icon: "document", permission: "viewLeads" },
     { path: "/followup-work", label: "Today Followup / Work", icon: "calendar", permission: "viewFollowupWork" },
     { path: "/notes", label: "Quick Notes", icon: "document", permission: "viewNotes" },
@@ -206,6 +207,7 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
   ];
 
   const employeeNavItems = [
+    { path: "/", label: "Dashboard", icon: "home", permission: "viewDashboard" },
     { path: "/leads", label: "Leads", icon: "document", permission: "viewLeads" },
     { path: "/followup-work", label: "Today Followup / Work", icon: "calendar", permission: "viewFollowupWork" },
     { path: "/notes", label: "Quick Notes", icon: "document", permission: "viewNotes" },
@@ -217,6 +219,7 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
   ];
 
   const defaultNavItems = [
+    { path: "/", label: "Dashboard", icon: "home", permission: "viewDashboard" },
     { path: "/expenses", label: "Expense by Employees", icon: "expense", permission: "viewExpenses" },
     { path: "/profile", label: "My Profile", icon: "profile" },
     { path: "/logout", label: "Logout", icon: "logout" },

@@ -48,7 +48,11 @@ import PrivacyPolicyScreen from "./screens/public/PrivacyPolicyScreen";
 import AccountDeletionScreen from "./screens/public/AccountDeletionScreen";
 
 
-const PageShell = ({ children, allowedRoles = ["manager"], requiredPermission = null }) => (
+const PageShell = ({
+  children,
+  allowedRoles = ["admin", "manager", "operations", "calling", "employee", "finance", "banker", "sales", "ops"],
+  requiredPermission = null,
+}) => (
   <ProtectedRoute allowedRoles={allowedRoles} requiredPermission={requiredPermission}>
     <AdminRedesignLayout>{children}</AdminRedesignLayout>
   </ProtectedRoute>
@@ -246,7 +250,10 @@ function App() {
         <Route
           path="/lenders"
           element={
-            <PageShell allowedRoles={["manager", "operations"]}>
+            <PageShell
+              allowedRoles={["admin", "manager", "operations", "calling", "employee", "finance", "banker"]}
+              requiredPermission="viewLenders"
+            >
               <LendersScreen />
             </PageShell>
           }

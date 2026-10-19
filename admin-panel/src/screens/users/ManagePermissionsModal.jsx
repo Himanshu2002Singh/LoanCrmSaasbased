@@ -22,6 +22,7 @@ import {
   AlertTriangle,
   Info,
   Briefcase,
+  Building2,
 } from "lucide-react";
 import API_URL from "../../config";
 
@@ -67,6 +68,32 @@ const PERMISSION_CATEGORIES = [
         label: "Manage Expense Records",
         description: "Create, update, and approve company expense logs.",
         confidential: true,
+      },
+    ],
+  },
+  {
+    category: "Bank & NBFC Management",
+    categoryKey: "lenders",
+    description: "Control permissions to view partner banks, add new banks/NBFCs, and edit RM contact details.",
+    icon: Building2,
+    permissions: [
+      {
+        key: "viewLenders",
+        label: "View Bank & NBFC (Lenders)",
+        description: "Access Bank & NBFC list (/lenders) to view partner banks, NBFCs, RM contact emails, and loan products.",
+        confidential: false,
+      },
+      {
+        key: "createLender",
+        label: "Add Bank & NBFC (Lenders)",
+        description: "Permission to register and onboard new Banks, NBFCs, and lending partners.",
+        confidential: false,
+      },
+      {
+        key: "editLender",
+        label: "Edit Bank & NBFC (Lenders)",
+        description: "Permission to modify partner bank details, RM phone/emails, and supported products.",
+        confidential: false,
       },
     ],
   },

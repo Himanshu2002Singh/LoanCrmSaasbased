@@ -1179,3 +1179,452 @@ exports.linkLeadToParty = async (req, res) => {
   }
 };
 
+/**
+ * PUT /api/party-payouts/payments/:id
+ * Edit an existing party payment / advance entry and re-sync CasePayout
+ */
+exports.updatePartyPayment = async (req, res) => {
+  const t = await sequelize.transaction();
+  try {
+    const companyId = resolveCompanyId(req);
+    const payment = await PartyPayment.findOne({
+      where: { id: req.params.id, companyId },
+      transaction: t,
+    });
+
+    if (!payment) {
+      await t.rollback();
+      return res.status(404).json({ message: "Payment entry not found" });
+    }
+
+    const previousValue = payment.toJSON();
+    const oldLeadId = payment.leadId;
+    const {
+      amount,
+      paymentDate,
+      paymentType,
+      paymentMode,
+      referenceNumber,
+      notes,
+      leadId,
+    } = req.body;
+
+    const updatedData = {};
+    if (amount !== undefined && parseFloat(amount) > 0) updatedData.amount = parseFloat(amount);
+    if (paymentDate) updatedData.paymentDate = new Date(paymentDate);
+    if (paymentType && ["LINKED_PAYMENT", "ADVANCE", "REFUND_CREDIT"].includes(paymentType)) {
+      updatedData.paymentType = paymentType;
+    }
+    if (paymentMode) updatedData.paymentMode = paymentMode.trim();
+    if (referenceNumber !== undefined) updatedData.referenceNumber = referenceNumber ? referenceNumber.trim() : null;
+    if (notes !== undefined) updatedData.notes = notes ? notes.trim() : null;
+    if (leadId !== undefined) updatedData.leadId = leadId ? parseInt(leadId, 10) : null;
+
+    await payment.update(updatedData, { transaction: t });
+
+    // Sync CasePayout for oldLeadId and new leadId if applicable
+    const leadIdsToSync = new Set([oldLeadId, updatedData.leadId || payment.leadId].filter(Boolean));
+    for (const lid of leadIdsToSync) {
+      const casePayout = await CasePayout.findOne({
+        where: { leadId: lid, companyId },
+        transaction: t,
+      });
+
+      if (casePayout) {
+        const allPartyPaymentsForLead = await PartyPayment.findAll({
+          where: { companyId, leadId: lid, paymentType: "LINKED_PAYMENT" },
+          transaction: t,
+        });
+
+        const totalPartyPaid = allPartyPaymentsForLead.reduce(
+          (sum, p) => sum + parseFloat(p.amount || 0),
+          0
+        );
+
+        const currentPartyPayable = parseFloat(
+          casePayout.partyNetPayable !== undefined && casePayout.partyNetPayable !== null
+            ? casePayout.partyNetPayable
+            : casePayout.partyCommissionDue || 0
+        );
+
+        const partyRemaining = Math.max(0, currentPartyPayable - totalPartyPaid);
+        const currentBankDue = parseFloat(casePayout.bankCommissionDue || 0);
+        const bankReceived = parseFloat(casePayout.bankReceivedAmount || 0);
+        const bankRemaining = Math.max(0, currentBankDue - bankReceived);
+
+        let newStatus = "PENDING";
+        if (partyRemaining === 0 && bankRemaining === 0 && (currentPartyPayable > 0 || currentBankDue > 0)) {
+          newStatus = "SETTLED";
+        } else if (totalPartyPaid > 0 || bankReceived > 0) {
+          newStatus = "PARTIALLY_SETTLED";
+        }
+
+        await casePayout.update(
+          {
+            partyPaidAmount: totalPartyPaid,
+            partyRemainingDue: partyRemaining,
+            status: newStatus,
+          },
+          { transaction: t }
+        );
+      }
+    }
+
+    await logActivity(
+      req,
+      {
+        recordType: "PartyPayment",
+        recordId: payment.id,
+        action: "UPDATED",
+        previousValue,
+        newValue: payment.toJSON(),
+        remarks: `Updated payment entry #${payment.id} for ${payment.partyName}`,
+      },
+      t
+    );
+
+    await t.commit();
+    return res.status(200).json({
+      message: "Payment entry updated successfully",
+      payment,
+    });
+  } catch (error) {
+    await t.rollback();
+    console.error("[partyPayouts] updatePartyPayment error:", error);
+    return res.status(500).json({ message: "Failed to update payment", error: error.message });
+  }
+};
+
+/**
+ * POST /api/party-payouts/:partyName/payments/bulk-upload
+ * Bulk upload payments for a party via Excel rows
+ * Supports default paymentDate / month so rows get assigned into that month
+ */
+exports.bulkUploadPartyPayments = async (req, res) => {
+  const t = await sequelize.transaction();
+  try {
+    const companyId = resolveCompanyId(req);
+    const { partyName } = req.params;
+    const { payments = [], defaultDate, defaultMonth } = req.body;
+
+    if (!partyName) {
+      await t.rollback();
+      return res.status(400).json({ message: "Party name is required" });
+    }
+
+    if (!Array.isArray(payments) || payments.length === 0) {
+      await t.rollback();
+      return res.status(400).json({ message: "No payment records provided for upload" });
+    }
+
+    // Resolve party code
+    const sourceConfig = await MasterConfig.findOne({
+      where: {
+        companyId,
+        configType: "LEAD_SOURCE",
+        [Op.or]: [{ label: partyName }, { value: partyName }],
+      },
+      transaction: t,
+    });
+    const partyCode = sourceConfig?.code || null;
+
+    const createdPayments = [];
+    const affectedLeadIds = new Set();
+
+    for (let i = 0; i < payments.length; i++) {
+      const row = payments[i];
+      const amountVal = parseFloat(row.amount || row.Amount || 0);
+      if (isNaN(amountVal) || amountVal <= 0) continue;
+
+      let rowDate = row.paymentDate || row.payment_date || row["Payment Date"] || defaultDate;
+      if (!rowDate && defaultMonth) {
+        rowDate = `${defaultMonth}-01`;
+      }
+      if (!rowDate) {
+        rowDate = new Date().toISOString().split("T")[0];
+      }
+
+      const pType = String(row.paymentType || row.payment_type || row["Payment Type"] || "LINKED_PAYMENT").trim().toUpperCase();
+      const validPType = ["LINKED_PAYMENT", "ADVANCE", "REFUND_CREDIT"].includes(pType)
+        ? pType
+        : "LINKED_PAYMENT";
+
+      const pMode = String(row.paymentMode || row.payment_mode || row["Payment Mode"] || "BANK_TRANSFER").trim();
+      const refNo = row.referenceNumber || row.reference_number || row["Reference Number"] || row["UTR"] || null;
+      const rowNotes = row.notes || row.Notes || null;
+      const rowLeadId = row.leadId || row.lead_id || row["Lead ID"] ? parseInt(row.leadId || row.lead_id || row["Lead ID"], 10) : null;
+
+      const p = await PartyPayment.create(
+        {
+          companyId,
+          partyName: partyName.trim(),
+          partyCode,
+          leadId: rowLeadId,
+          paymentType: validPType,
+          amount: amountVal,
+          paymentDate: new Date(rowDate),
+          paymentMode: pMode,
+          referenceNumber: refNo ? String(refNo).trim() : null,
+          notes: rowNotes ? String(rowNotes).trim() : null,
+          recordedById: req.user.id,
+        },
+        { transaction: t }
+      );
+
+      createdPayments.push(p);
+      if (rowLeadId && validPType === "LINKED_PAYMENT") {
+        affectedLeadIds.add(rowLeadId);
+      }
+    }
+
+    // Sync CasePayout for any linked leads
+    for (const lid of affectedLeadIds) {
+      const casePayout = await CasePayout.findOne({
+        where: { leadId: lid, companyId },
+        transaction: t,
+      });
+
+      if (casePayout) {
+        const allPartyPaymentsForLead = await PartyPayment.findAll({
+          where: { companyId, leadId: lid, paymentType: "LINKED_PAYMENT" },
+          transaction: t,
+        });
+
+        const totalPartyPaid = allPartyPaymentsForLead.reduce(
+          (sum, p) => sum + parseFloat(p.amount || 0),
+          0
+        );
+
+        const currentPartyPayable = parseFloat(
+          casePayout.partyNetPayable !== undefined && casePayout.partyNetPayable !== null
+            ? casePayout.partyNetPayable
+            : casePayout.partyCommissionDue || 0
+        );
+
+        const partyRemaining = Math.max(0, currentPartyPayable - totalPartyPaid);
+        const currentBankDue = parseFloat(casePayout.bankCommissionDue || 0);
+        const bankReceived = parseFloat(casePayout.bankReceivedAmount || 0);
+        const bankRemaining = Math.max(0, currentBankDue - bankReceived);
+
+        let newStatus = "PENDING";
+        if (partyRemaining === 0 && bankRemaining === 0 && (currentPartyPayable > 0 || currentBankDue > 0)) {
+          newStatus = "SETTLED";
+        } else if (totalPartyPaid > 0 || bankReceived > 0) {
+          newStatus = "PARTIALLY_SETTLED";
+        }
+
+        await casePayout.update(
+          {
+            partyPaidAmount: totalPartyPaid,
+            partyRemainingDue: partyRemaining,
+            status: newStatus,
+          },
+          { transaction: t }
+        );
+      }
+    }
+
+    await logActivity(
+      req,
+      {
+        recordType: "PartyPayment",
+        recordId: partyName,
+        action: "CREATED",
+        remarks: `Bulk uploaded ${createdPayments.length} payment(s) for Connector/Party ${partyName}`,
+      },
+      t
+    );
+
+    await t.commit();
+    return res.status(201).json({
+      message: `Successfully uploaded ${createdPayments.length} payment entries`,
+      count: createdPayments.length,
+      payments: createdPayments,
+    });
+  } catch (error) {
+    await t.rollback();
+    console.error("[partyPayouts] bulkUploadPartyPayments error:", error);
+    return res.status(500).json({ message: "Failed to bulk upload payments", error: error.message });
+  }
+};
+
+/**
+ * PUT /api/party-payouts/parties/:id
+ * Edit a party / connector config (name, code, commission %, colorCode, active)
+ */
+exports.updateParty = async (req, res) => {
+  const t = await sequelize.transaction();
+  try {
+    const companyId = resolveCompanyId(req);
+    const { id } = req.params;
+    const { partyName, partyCode, commissionPercent, colorCode, isActive } = req.body;
+
+    let config = null;
+    if (isNaN(id)) {
+      config = await MasterConfig.findOne({
+        where: {
+          companyId,
+          configType: "LEAD_SOURCE",
+          [Op.or]: [{ label: id }, { value: id }],
+        },
+        transaction: t,
+      });
+    } else {
+      config = await MasterConfig.findOne({
+        where: { id: parseInt(id, 10), companyId, configType: "LEAD_SOURCE" },
+        transaction: t,
+      });
+    }
+
+    if (!config) {
+      await t.rollback();
+      return res.status(404).json({ message: "Party / Connector config not found" });
+    }
+
+    const previousValue = config.toJSON();
+    const oldName = config.label;
+    const newName = partyName ? partyName.trim() : oldName;
+
+    const updates = {};
+    if (partyName) {
+      updates.label = newName;
+      updates.value = newName;
+    }
+    if (partyCode !== undefined) updates.code = partyCode ? partyCode.trim() : null;
+    if (commissionPercent !== undefined) updates.commissionPercent = parseFloat(commissionPercent) || 0;
+    if (colorCode !== undefined) updates.colorCode = colorCode;
+    if (isActive !== undefined) updates.isActive = Boolean(isActive);
+
+    await config.update(updates, { transaction: t });
+
+    // If party name changed, sync partyName across historic PartyPayments & CasePayouts
+    if (newName !== oldName) {
+      await PartyPayment.update(
+        { partyName: newName, ...(updates.code ? { partyCode: updates.code } : {}) },
+        { where: { companyId, partyName: oldName }, transaction: t }
+      );
+      await CasePayout.update(
+        { partyName: newName, ...(updates.code ? { partyCode: updates.code } : {}) },
+        { where: { companyId, partyName: oldName }, transaction: t }
+      );
+      await Lead.update(
+        { leadSource: newName },
+        { where: { companyId, leadSource: oldName }, transaction: t }
+      );
+    }
+
+    await logActivity(
+      req,
+      {
+        recordType: "MasterConfig",
+        recordId: config.id,
+        action: "UPDATED",
+        previousValue,
+        newValue: config.toJSON(),
+        remarks: `Updated party/connector: ${oldName} -> ${newName}`,
+      },
+      t
+    );
+
+    await t.commit();
+    return res.status(200).json({
+      message: "Party / Connector updated successfully",
+      party: config,
+    });
+  } catch (error) {
+    await t.rollback();
+    console.error("[partyPayouts] updateParty error:", error);
+    return res.status(500).json({ message: "Failed to update party", error: error.message });
+  }
+};
+
+/**
+ * POST /api/party-payouts/parties/bulk-upload
+ * Bulk upload parties / connectors via Excel
+ */
+exports.bulkUploadParties = async (req, res) => {
+  const t = await sequelize.transaction();
+  try {
+    const companyId = resolveCompanyId(req);
+    const { parties = [] } = req.body;
+
+    if (!Array.isArray(parties) || parties.length === 0) {
+      await t.rollback();
+      return res.status(400).json({ message: "No party records provided for upload" });
+    }
+
+    const createdParties = [];
+    let orderIndexCounter = 100;
+
+    for (const p of parties) {
+      const name = p.partyName || p.name || p["Party Name"] || p["Connector Name"];
+      if (!name || !String(name).trim()) continue;
+
+      const trimmedName = String(name).trim();
+      const pCode = p.partyCode || p.code || p["Party Code"] || null;
+      const commPct = parseFloat(p.commissionPercent || p.commission_percent || p["Commission Percent"] || 50.0);
+      const activeVal = p.isActive !== undefined ? p.isActive : (p["Active"] === "NO" || p["Active"] === false ? false : true);
+
+      let existing = await MasterConfig.findOne({
+        where: {
+          companyId,
+          configType: "LEAD_SOURCE",
+          [Op.or]: [{ label: trimmedName }, { value: trimmedName }],
+        },
+        transaction: t,
+      });
+
+      if (existing) {
+        await existing.update(
+          {
+            ...(pCode ? { code: String(pCode).trim() } : {}),
+            commissionPercent: isNaN(commPct) ? 50.0 : commPct,
+            isActive: activeVal,
+          },
+          { transaction: t }
+        );
+        createdParties.push(existing);
+      } else {
+        const created = await MasterConfig.create(
+          {
+            companyId,
+            configType: "LEAD_SOURCE",
+            label: trimmedName,
+            value: trimmedName,
+            code: pCode ? String(pCode).trim() : null,
+            commissionPercent: isNaN(commPct) ? 50.0 : commPct,
+            colorCode: "#3b82f6",
+            orderIndex: orderIndexCounter++,
+            isActive: activeVal,
+          },
+          { transaction: t }
+        );
+        createdParties.push(created);
+      }
+    }
+
+    await logActivity(
+      req,
+      {
+        recordType: "MasterConfig",
+        recordId: "BULK_UPLOAD",
+        action: "CREATED",
+        remarks: `Bulk imported/updated ${createdParties.length} Parties/Connectors`,
+      },
+      t
+    );
+
+    await t.commit();
+    return res.status(201).json({
+      message: `Successfully processed ${createdParties.length} Parties/Connectors`,
+      count: createdParties.length,
+      parties: createdParties,
+    });
+  } catch (error) {
+    await t.rollback();
+    console.error("[partyPayouts] bulkUploadParties error:", error);
+    return res.status(500).json({ message: "Failed to upload parties", error: error.message });
+  }
+};
+
+

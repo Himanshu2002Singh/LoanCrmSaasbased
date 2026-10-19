@@ -60,6 +60,7 @@ export default function LeadsListRedesign() {
   const [statusCategory, setStatusCategory] = useState("ALL"); // "ALL" | "PENDING" | "COMPLETED" | "WORKED"
   const [workedCount, setWorkedCount] = useState(0);
   const [selectedStatus, setSelectedStatus] = useState("ALL");
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState("ALL");
   const [statusesList, setStatusesList] = useState([]);
   const [remarkModalLead, setRemarkModalLead] = useState(null);
   const [remarkText, setRemarkText] = useState("");
@@ -256,6 +257,7 @@ export default function LeadsListRedesign() {
                 statusCategory: statusCategory !== "ALL" ? statusCategory : undefined,
               }),
           status: selectedStatus !== "ALL" ? selectedStatus : undefined,
+          assignedEmployeeId: selectedEmployeeId !== "ALL" ? selectedEmployeeId : undefined,
         },
       });
       const pagination = res.data?.pagination || {};
@@ -356,7 +358,7 @@ export default function LeadsListRedesign() {
   useEffect(() => {
     fetchLeads(currentPage, debouncedSearchTerm);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, debouncedSearchTerm, dateRange.from, dateRange.to, statusCategory, selectedStatus]);
+  }, [currentPage, debouncedSearchTerm, dateRange.from, dateRange.to, statusCategory, selectedStatus, selectedEmployeeId]);
 
   useEffect(() => {
     if (!assignFor) return;
@@ -692,6 +694,37 @@ export default function LeadsListRedesign() {
               {statusesList.map((st) => (
                 <option key={st.id || st.value} value={st.value}>
                   {st.label || st.value}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="cc-leads-date">
+            Employee
+            <select
+              value={selectedEmployeeId}
+              onChange={(e) => {
+                setSelectedEmployeeId(e.target.value);
+                setCurrentPage(1);
+              }}
+              style={{
+                height: 38,
+                padding: "8px 12px",
+                border: "1px solid #d5ded7",
+                borderRadius: 10,
+                fontSize: 13,
+                background: "#fff",
+                fontWeight: 600,
+                color: selectedEmployeeId !== "ALL" ? "#047857" : "#0f172a",
+                outline: "none",
+                cursor: "pointer",
+                minWidth: 150,
+              }}
+            >
+              <option value="ALL">All Employees</option>
+              {employees.map((emp) => (
+                <option key={emp.id} value={emp.id}>
+                  {emp.name} {emp.role ? `(${emp.role})` : ""}
                 </option>
               ))}
             </select>

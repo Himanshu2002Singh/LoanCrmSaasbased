@@ -1,5 +1,5 @@
 const { Op, fn, col, literal } = require("sequelize");
-const { Lead, Customer, CallLog, Task, Attendance, User, MasterConfig } = require("../models");
+const { Lead, Customer, CallLog, Task, Attendance, User, MasterConfig, Application, CasePayout, PartyPayment, LeadAssignmentHistory } = require("../models");
 const { buildQuery, paginated } = require("../utils/query");
 const { companyScope } = require("../middlewares/auth");
 const { visibilityScope, dateRangeWhere } = require("./leadController");
@@ -155,6 +155,245 @@ exports.getDashboard = async (req, res) => {
       totalCalls: callMap[employee.id] || 0,
     }));
 
+    // Operations Metrics & Scoped Lead Details
+    const visibleLeadRows = await Lead.findAll({
+      where: leadWhere,
+      attributes: ["id", "status", "requiredAmount"],
+      raw: true,
+    });
+    const visibleLeadIds = visibleLeadRows.map((r) => r.id);
+
+    // Reassigned Leads Count (Total leads reassigned to another employee)
+    let reassignedLeads = 0;
+    try {
+      const targetEmpId = req.query.employeeId
+        ? parseInt(req.query.employeeId, 10)
+        : req.user.role === ROLES.EMPLOYEE
+        ? req.user.id
+        : null;
+
+      const reassignedWhere = {
+        companyId: req.user.companyId,
+        isActive: false,
+      };
+      if (targetEmpId) {
+        reassignedWhere.userId = targetEmpId;
+      }
+      reassignedLeads = await LeadAssignmentHistory.count({
+        where: reassignedWhere,
+        distinct: true,
+        col: "leadId",
+      });
+    } catch (e) {
+      console.warn("Could not calculate reassigned leads", e.message);
+    }
+
+    let fileLoginCount = 0;
+    let disbursementCount = 0;
+    let sanctionedCount = 0;
+    let legalPendingCount = 0;
+    let technicalPendingCount = 0;
+    let totalDisbursedAmt = 0;
+    let totalSanctionedAmt = 0;
+
+    visibleLeadRows.forEach((lead) => {
+      const s = (lead.status || "").toUpperCase();
+      if (s.includes("LOGIN") || s.includes("SUBMITTED") || s === "FILE_LOGIN") fileLoginCount++;
+      if (s.includes("DISBURS") || s === "CLOSED") disbursementCount++;
+      if (s.includes("SANCTION") || s.includes("SECTION") || s === "APPROVED") sanctionedCount++;
+    });
+
+    if (visibleLeadIds.length > 0) {
+      try {
+        const apps = await Application.findAll({
+          where: {
+            companyId: req.user.companyId,
+            leadId: { [Op.in]: visibleLeadIds },
+          },
+          attributes: ["id", "leadId", "legalStatus", "technicalStatus", "status", "disbursedAmount", "sanctionedAmount"],
+          raw: true,
+        });
+
+        apps.forEach((app) => {
+          if (app.legalStatus === "INITIATED") legalPendingCount++;
+          if (app.technicalStatus === "INITIATED") technicalPendingCount++;
+          if (app.disbursedAmount && Number(app.disbursedAmount) > 0) {
+            totalDisbursedAmt += Number(app.disbursedAmount);
+          }
+          if (app.sanctionedAmount && Number(app.sanctionedAmount) > 0) {
+            totalSanctionedAmt += Number(app.sanctionedAmount);
+          }
+        });
+      } catch (err) {
+        console.warn("Could not query applications for ops metrics", err.message);
+      }
+    }
+
+    // Month-wise Payouts, Recent Transactions & Disbursals
+    const canViewPayouts =
+      req.user.role === ROLES.SUPERADMIN ||
+      req.user.role === ROLES.COMPANY_ADMIN ||
+      req.user.role === ROLES.FINANCE ||
+      req.permissions?.viewPayouts === true;
+
+    let monthlyPayouts = [];
+    let recentPayouts = [];
+    let grandDisbursed = 0;
+    let grandDisbursedCases = 0;
+    let grandBankCommission = 0;
+    let grandPayoutsReceivedCount = 0;
+    let grandPartyPayout = 0;
+    let grandPartyPayoutsCount = 0;
+
+    if (canViewPayouts) {
+      try {
+        const cpWhere = { companyId: req.user.companyId };
+        if (req.query.employeeId && visibleLeadIds.length > 0) {
+          cpWhere.leadId = { [Op.in]: visibleLeadIds };
+        }
+
+        const [casePayoutRecords, partyPaymentRecords] = await Promise.all([
+          CasePayout.findAll({
+            where: cpWhere,
+            attributes: [
+              "id",
+              "customerName",
+              "bankName",
+              "disbursalDate",
+              "loanAmount",
+              "bankCommissionDue",
+              "bankReceivedAmount",
+              "partyCommissionDue",
+              "partyPaidAmount",
+              "partyRemainingDue",
+              "status",
+              "createdAt",
+            ],
+            order: [["disbursalDate", "DESC"], ["id", "DESC"]],
+            raw: true,
+          }),
+          PartyPayment.findAll({
+            where: { companyId: req.user.companyId },
+            attributes: [
+              "id",
+              "partyName",
+              "amount",
+              "paymentDate",
+              "paymentType",
+              "paymentMode",
+              "referenceNumber",
+              "leadId",
+              "notes",
+              "createdAt",
+            ],
+            order: [["paymentDate", "DESC"], ["id", "DESC"]],
+            raw: true,
+          }),
+        ]);
+
+        grandDisbursedCases = casePayoutRecords.length;
+        grandPartyPayoutsCount = partyPaymentRecords.length;
+
+        const monthGroups = {};
+        const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+        casePayoutRecords.forEach((cp) => {
+          const rawDate = cp.disbursalDate || cp.createdAt;
+          const d = rawDate ? new Date(rawDate) : new Date();
+          const y = d.getFullYear();
+          const m = d.getMonth() + 1;
+          const monthKey = `${y}-${String(m).padStart(2, "0")}`;
+          const label = `${monthNames[m - 1]} ${y}`;
+
+          if (!monthGroups[monthKey]) {
+            monthGroups[monthKey] = {
+              month: monthKey,
+              label,
+              disbursedAmount: 0,
+              casesCount: 0,
+              bankCommissionReceived: 0,
+              bankCommissionDue: 0,
+              payoutsReceivedCount: 0,
+              partyPaidAmount: 0,
+              partyPaymentsCount: 0,
+            };
+          }
+
+          const loanAmt = Number(cp.loanAmount || 0);
+          const bankRcv = Number(cp.bankReceivedAmount || 0);
+          const bankDue = Number(cp.bankCommissionDue || 0);
+          const cpPartyPaid = Number(cp.partyPaidAmount || 0);
+
+          monthGroups[monthKey].disbursedAmount += loanAmt;
+          monthGroups[monthKey].casesCount += 1;
+          monthGroups[monthKey].bankCommissionReceived += bankRcv;
+          monthGroups[monthKey].bankCommissionDue += bankDue;
+          if (bankRcv > 0) monthGroups[monthKey].payoutsReceivedCount += 1;
+          monthGroups[monthKey].partyPaidAmount += cpPartyPaid;
+
+          grandDisbursed += loanAmt;
+          grandBankCommission += bankRcv;
+          if (bankRcv > 0) grandPayoutsReceivedCount += 1;
+          grandPartyPayout += cpPartyPaid;
+        });
+
+        // Also incorporate any direct / advance PartyPayment entries into monthGroups
+        partyPaymentRecords.forEach((pp) => {
+          const rawDate = pp.paymentDate || pp.createdAt;
+          const d = rawDate ? new Date(rawDate) : new Date();
+          const y = d.getFullYear();
+          const m = d.getMonth() + 1;
+          const monthKey = `${y}-${String(m).padStart(2, "0")}`;
+          const label = `${monthNames[m - 1]} ${y}`;
+
+          if (!monthGroups[monthKey]) {
+            monthGroups[monthKey] = {
+              month: monthKey,
+              label,
+              disbursedAmount: 0,
+              casesCount: 0,
+              bankCommissionReceived: 0,
+              bankCommissionDue: 0,
+              payoutsReceivedCount: 0,
+              partyPaidAmount: 0,
+              partyPaymentsCount: 0,
+            };
+          }
+
+          const amt = Number(pp.amount || 0);
+          // If this party payment was an advance or unlinked, add to partyPaidAmount
+          if (!pp.leadId) {
+            monthGroups[monthKey].partyPaidAmount += amt;
+            grandPartyPayout += amt;
+          }
+          monthGroups[monthKey].partyPaymentsCount += 1;
+        });
+
+        // If totalDisbursedAmt in ops metrics was 0, reflect from case payouts
+        if (totalDisbursedAmt === 0 && grandDisbursed > 0) {
+          totalDisbursedAmt = grandDisbursed;
+        }
+        if (disbursementCount === 0 && grandDisbursedCases > 0) {
+          disbursementCount = grandDisbursedCases;
+        }
+
+        monthlyPayouts = Object.values(monthGroups).sort((a, b) => b.month.localeCompare(a.month));
+        recentPayouts = casePayoutRecords.slice(0, 15).map((cp) => ({
+          id: cp.id,
+          customerName: cp.customerName,
+          bankName: cp.bankName || "Bank",
+          disbursalDate: cp.disbursalDate || cp.createdAt,
+          loanAmount: Number(cp.loanAmount || 0),
+          bankReceivedAmount: Number(cp.bankReceivedAmount || 0),
+          partyPaidAmount: Number(cp.partyPaidAmount || 0),
+          partyRemainingDue: Number(cp.partyRemainingDue || 0),
+          status: cp.status || "PENDING",
+        }));
+      } catch (err) {
+        console.warn("Could not query payouts for dashboard", err.message);
+      }
+    }
+
     return res.status(200).json({
       success: true,
       counts: {
@@ -165,6 +404,32 @@ exports.getDashboard = async (req, res) => {
         pendingFollowups,
         upcomingFollowups,
         unassignedLeads: await Lead.count({ where: { ...leadWhere, assignedEmployeeId: null } }),
+        fileLogins: fileLoginCount,
+        disbursements: disbursementCount,
+        legalPending: legalPendingCount,
+        technicalPending: technicalPendingCount,
+        reassignedLeads,
+      },
+      operationsMetrics: {
+        fileLoginCount,
+        disbursementCount,
+        disbursedAmount: totalDisbursedAmt,
+        sanctionedCount,
+        sanctionedAmount: totalSanctionedAmt,
+        legalPendingCount,
+        technicalPendingCount,
+        reassignedLeadsCount: reassignedLeads,
+      },
+      payoutMetrics: {
+        canView: canViewPayouts,
+        monthlyPayouts,
+        recentPayouts,
+        totalDisbursed: grandDisbursed,
+        totalDisbursedCases: grandDisbursedCases,
+        totalBankCommission: grandBankCommission,
+        totalPayoutsReceivedCount: grandPayoutsReceivedCount,
+        totalPartyPayout: grandPartyPayout,
+        totalPartyPayoutsCount: grandPartyPayoutsCount,
       },
       leadStatusCounts: labelled,
       loanTypeCounts,

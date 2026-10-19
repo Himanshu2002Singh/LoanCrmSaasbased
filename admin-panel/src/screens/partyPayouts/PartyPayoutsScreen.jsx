@@ -26,6 +26,7 @@ import {
   IndianRupee,
   Layers,
   Link as LinkIcon,
+  Pencil,
   Plus,
   Receipt,
   RefreshCw,
@@ -34,6 +35,7 @@ import {
   Share2,
   Trash2,
   TrendingUp,
+  Upload,
   User,
   Wallet,
   X,
@@ -91,6 +93,7 @@ export default function PartyPayoutsScreen() {
 
   // Payment Recording Modal State
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+  const [editingPaymentId, setEditingPaymentId] = useState(null);
   const [paymentTargetParty, setPaymentTargetParty] = useState(null);
   const [paymentForm, setPaymentForm] = useState({
     partyName: "",
@@ -105,6 +108,35 @@ export default function PartyPayoutsScreen() {
   });
   const [submittingPayment, setSubmittingPayment] = useState(false);
   const [deletingPaymentId, setDeletingPaymentId] = useState(null);
+
+  // Edit Party Modal State
+  const [editPartyModalOpen, setEditPartyModalOpen] = useState(false);
+  const [editPartyForm, setEditPartyForm] = useState({
+    id: null,
+    partyName: "",
+    partyCode: "",
+    commissionPercent: 50,
+    colorCode: "#3b82f6",
+    isActive: true,
+  });
+  const [submittingEditParty, setSubmittingEditParty] = useState(false);
+
+  // Bulk Upload Parties Modal State
+  const [uploadPartiesModalOpen, setUploadPartiesModalOpen] = useState(false);
+  const [parsedPartiesRows, setParsedPartiesRows] = useState([]);
+  const [uploadingParties, setUploadingParties] = useState(false);
+  const [partiesFileName, setPartiesFileName] = useState("");
+
+  // Drawer Payments Filtering & Bulk Upload State
+  const [drawerPaymentMonth, setDrawerPaymentMonth] = useState("ALL");
+  const [drawerPaymentType, setDrawerPaymentType] = useState("ALL");
+  const [drawerPaymentSearch, setDrawerPaymentSearch] = useState("");
+  const [uploadPaymentsModalOpen, setUploadPaymentsModalOpen] = useState(false);
+  const [bulkPaymentDate, setBulkPaymentDate] = useState(new Date().toISOString().split("T")[0]);
+  const [bulkPaymentMonth, setBulkPaymentMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [parsedPaymentsRows, setParsedPaymentsRows] = useState([]);
+  const [uploadingPayments, setUploadingPayments] = useState(false);
+  const [paymentsFileName, setPaymentsFileName] = useState("");
 
   // Searchable Lead Picker in Payment Modal
   const [modalLeadSearch, setModalLeadSearch] = useState("");
@@ -234,6 +266,7 @@ export default function PartyPayoutsScreen() {
 
   // Open Payment Modal
   const openRecordPaymentModal = (party, prefillLead = null) => {
+    setEditingPaymentId(null);
     setPaymentTargetParty(party);
     setSelectedLeadForPayment(prefillLead || null);
     setModalLeadSearch("");
@@ -263,6 +296,33 @@ export default function PartyPayoutsScreen() {
       setPartyLeadsForModal(ledgerData.cases);
     } else {
       loadLeadsForPartyModal(party.partyName);
+    }
+  };
+
+  // Open Edit Existing Payment Modal
+  const openEditPaymentModal = (payment) => {
+    setEditingPaymentId(payment.id);
+    const partyObj = summaryData.find((s) => s.partyName === payment.partyName) || selectedParty || { partyName: payment.partyName, partyCode: payment.partyCode || "" };
+    setPaymentTargetParty(partyObj);
+    const leadObj = payment.leadId ? { leadId: payment.leadId, customerName: payment.lead?.customer?.name || `Lead #${payment.leadId}` } : null;
+    setSelectedLeadForPayment(leadObj);
+    setModalLeadSearch("");
+
+    setPaymentForm({
+      partyName: payment.partyName,
+      partyCode: payment.partyCode || "",
+      paymentType: payment.paymentType || "LINKED_PAYMENT",
+      amount: String(payment.amount || ""),
+      paymentDate: payment.paymentDate ? String(payment.paymentDate).slice(0, 10) : new Date().toISOString().split("T")[0],
+      paymentMode: payment.paymentMode || "BANK_TRANSFER",
+      referenceNumber: payment.referenceNumber || "",
+      leadId: payment.leadId || "",
+      notes: payment.notes || "",
+    });
+    setPaymentModalOpen(true);
+
+    if (partyObj.partyName) {
+      loadLeadsForPartyModal(partyObj.partyName);
     }
   };
 
@@ -360,7 +420,7 @@ export default function PartyPayoutsScreen() {
     }
   };
 
-  // Submit Payment
+  // Submit Payment (Create or Edit)
   const handlePaymentSubmit = async (e) => {
     e.preventDefault();
     if (!paymentForm.partyName || !paymentForm.amount || parseFloat(paymentForm.amount) <= 0) {
@@ -370,11 +430,17 @@ export default function PartyPayoutsScreen() {
 
     setSubmittingPayment(true);
     try {
-      await axios.post(`${API_URL}/party-payouts/payments`, paymentForm);
-      toast.success(
-        `₹${numberFormatter.format(paymentForm.amount)} recorded for ${paymentForm.partyName} successfully!`
-      );
+      if (editingPaymentId) {
+        await axios.put(`${API_URL}/party-payouts/payments/${editingPaymentId}`, paymentForm);
+        toast.success(`Payment entry updated successfully!`);
+      } else {
+        await axios.post(`${API_URL}/party-payouts/payments`, paymentForm);
+        toast.success(
+          `₹${numberFormatter.format(paymentForm.amount)} recorded for ${paymentForm.partyName} successfully!`
+        );
+      }
       setPaymentModalOpen(false);
+      setEditingPaymentId(null);
 
       // Refresh summary
       fetchSummary();
@@ -384,8 +450,8 @@ export default function PartyPayoutsScreen() {
         openPartyLedger(selectedParty);
       }
     } catch (error) {
-      console.error("Error recording payment:", error);
-      toast.error(error.response?.data?.message || "Failed to record payment");
+      console.error("Error saving payment:", error);
+      toast.error(error.response?.data?.message || "Failed to save payment");
     } finally {
       setSubmittingPayment(false);
     }
@@ -409,6 +475,206 @@ export default function PartyPayoutsScreen() {
       toast.error(error.response?.data?.message || "Failed to delete payment entry");
     } finally {
       setDeletingPaymentId(null);
+    }
+  };
+
+  // Edit Party Modal Handlers
+  const openEditPartyModal = (party) => {
+    setEditPartyForm({
+      id: party.id || null,
+      partyName: party.partyName || "",
+      partyCode: party.partyCode || "",
+      commissionPercent: party.defaultCommissionPercent !== undefined ? party.defaultCommissionPercent : 50,
+      colorCode: party.colorCode || "#3b82f6",
+      isActive: party.isActive !== undefined ? party.isActive : true,
+    });
+    setEditPartyModalOpen(true);
+  };
+
+  const handleSaveParty = async (e) => {
+    e.preventDefault();
+    if (!editPartyForm.partyName.trim()) {
+      toast.warning("Party Name is required");
+      return;
+    }
+    setSubmittingEditParty(true);
+    try {
+      const idOrName = editPartyForm.id || encodeURIComponent(editPartyForm.partyName);
+      await axios.put(`${API_URL}/party-payouts/parties/${idOrName}`, editPartyForm);
+      toast.success("Party / Connector details updated successfully!");
+      setEditPartyModalOpen(false);
+      fetchSummary();
+      if (selectedParty && (selectedParty.id === editPartyForm.id || selectedParty.partyName === editPartyForm.partyName)) {
+        openPartyLedger({ ...selectedParty, partyName: editPartyForm.partyName, partyCode: editPartyForm.partyCode });
+      }
+    } catch (err) {
+      console.error("Error updating party:", err);
+      toast.error(err.response?.data?.message || "Failed to update party");
+    } finally {
+      setSubmittingEditParty(false);
+    }
+  };
+
+  // Download Sample Excel for Parties / Connectors
+  const handleDownloadPartiesSample = () => {
+    const sampleRows = [
+      {
+        "Party Name": "Sharma Financial Services",
+        "Party Code": "PTY-010",
+        "Commission Percent": 50,
+        "Active": "YES",
+      },
+      {
+        "Party Name": "Verma Associates",
+        "Party Code": "PTY-011",
+        "Commission Percent": 45,
+        "Active": "YES",
+      },
+      {
+        "Party Name": "Direct Referral DSA",
+        "Party Code": "PTY-012",
+        "Commission Percent": 60,
+        "Active": "YES",
+      },
+    ];
+    const sheet = XLSX.utils.json_to_sheet(sampleRows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, sheet, "Parties_Sample");
+    XLSX.writeFile(wb, "Party_Connectors_Import_Sample.xlsx");
+    toast.success("Sample Parties Excel downloaded!");
+  };
+
+  // Handle Parties Excel File Parsing
+  const handlePartiesFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPartiesFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target.result;
+        const wb = XLSX.read(bstr, { type: "binary" });
+        const sheetName = wb.SheetNames[0];
+        const data = XLSX.utils.sheet_to_json(wb.Sheets[sheetName]);
+        if (!data || data.length === 0) {
+          toast.warning("The selected Excel file has no records");
+          return;
+        }
+        setParsedPartiesRows(data);
+        toast.info(`Parsed ${data.length} party records from Excel`);
+      } catch (err) {
+        console.error("Error parsing parties Excel:", err);
+        toast.error("Failed to parse Excel file");
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  // Confirm Upload Parties
+  const handleConfirmUploadParties = async () => {
+    if (!parsedPartiesRows.length) {
+      toast.warning("Please choose an Excel file with party records first");
+      return;
+    }
+    setUploadingParties(true);
+    try {
+      const res = await axios.post(`${API_URL}/party-payouts/parties/bulk-upload`, {
+        parties: parsedPartiesRows,
+      });
+      toast.success(res.data?.message || "Parties imported successfully!");
+      setUploadPartiesModalOpen(false);
+      setParsedPartiesRows([]);
+      setPartiesFileName("");
+      fetchSummary();
+    } catch (err) {
+      console.error("Error uploading parties:", err);
+      toast.error(err.response?.data?.message || "Failed to upload parties");
+    } finally {
+      setUploadingParties(false);
+    }
+  };
+
+  // Download Sample Excel for Payments
+  const handleDownloadPaymentsSample = () => {
+    const sampleRows = [
+      {
+        "Date": "2026-10-15",
+        "Payment Type": "LINKED_PAYMENT",
+        "Amount": 12500,
+        "Payment Mode": "BANK_TRANSFER",
+        "Ref / UTR #": "UTR9876543210",
+        "Lead ID": 101,
+        "Notes / Remark": "Commission settlement for October disbursal",
+      },
+      {
+        "Date": "2026-10-18",
+        "Payment Type": "ADVANCE",
+        "Amount": 5000,
+        "Payment Mode": "UPI",
+        "Ref / UTR #": "UPI12345678",
+        "Lead ID": "",
+        "Notes / Remark": "Festival advance transferred",
+      },
+    ];
+    const sheet = XLSX.utils.json_to_sheet(sampleRows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, sheet, "Payments_Sample");
+    XLSX.writeFile(wb, "Party_Payments_Import_Sample.xlsx");
+    toast.success("Sample Payments Excel downloaded!");
+  };
+
+  // Handle Payments Excel File Parsing
+  const handlePaymentsFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPaymentsFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target.result;
+        const wb = XLSX.read(bstr, { type: "binary" });
+        const sheetName = wb.SheetNames[0];
+        const data = XLSX.utils.sheet_to_json(wb.Sheets[sheetName]);
+        if (!data || data.length === 0) {
+          toast.warning("The selected Excel file has no records");
+          return;
+        }
+        setParsedPaymentsRows(data);
+        toast.info(`Parsed ${data.length} payment rows from Excel`);
+      } catch (err) {
+        console.error("Error parsing payments Excel:", err);
+        toast.error("Failed to parse Excel file");
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  // Confirm Upload Payments inside Drawer
+  const handleConfirmUploadPayments = async () => {
+    if (!selectedParty?.partyName) return;
+    if (!parsedPaymentsRows.length) {
+      toast.warning("Please choose an Excel file with payment rows first");
+      return;
+    }
+    setUploadingPayments(true);
+    try {
+      const partyName = encodeURIComponent(selectedParty.partyName);
+      const res = await axios.post(`${API_URL}/party-payouts/${partyName}/payments/bulk-upload`, {
+        payments: parsedPaymentsRows,
+        defaultDate: bulkPaymentDate,
+        defaultMonth: bulkPaymentMonth,
+      });
+      toast.success(res.data?.message || "Payments imported successfully!");
+      setUploadPaymentsModalOpen(false);
+      setParsedPaymentsRows([]);
+      setPaymentsFileName("");
+      fetchSummary();
+      openPartyLedger(selectedParty);
+    } catch (err) {
+      console.error("Error bulk uploading payments:", err);
+      toast.error(err.response?.data?.message || "Failed to bulk upload payments");
+    } finally {
+      setUploadingPayments(false);
     }
   };
 
@@ -451,6 +717,31 @@ export default function PartyPayoutsScreen() {
     }
     return list;
   }, [ledgerData.cases, drawerLeadFilter, drawerLeadSearch]);
+
+  // Filtered Payments inside the Connector Drawer
+  const filteredDrawerPayments = useMemo(() => {
+    let list = ledgerData.payments || [];
+    if (drawerPaymentMonth && drawerPaymentMonth !== "ALL") {
+      list = list.filter((p) => {
+        const pMonth = p.paymentDate ? String(p.paymentDate).slice(0, 7) : "";
+        return pMonth === drawerPaymentMonth;
+      });
+    }
+    if (drawerPaymentType && drawerPaymentType !== "ALL") {
+      list = list.filter((p) => p.paymentType === drawerPaymentType);
+    }
+    if (drawerPaymentSearch && drawerPaymentSearch.trim()) {
+      const q = drawerPaymentSearch.trim().toLowerCase();
+      list = list.filter(
+        (p) =>
+          (p.referenceNumber && p.referenceNumber.toLowerCase().includes(q)) ||
+          (p.notes && p.notes.toLowerCase().includes(q)) ||
+          (p.paymentMode && p.paymentMode.toLowerCase().includes(q)) ||
+          String(p.amount).includes(q)
+      );
+    }
+    return list;
+  }, [ledgerData.payments, drawerPaymentMonth, drawerPaymentType, drawerPaymentSearch]);
 
   // Filtered Leads inside the Payment Modal Picker
   const filteredPartyLeadsForModal = useMemo(() => {
@@ -551,6 +842,26 @@ export default function PartyPayoutsScreen() {
           </div>
 
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className="cc-payout-btn secondary"
+              onClick={handleDownloadPartiesSample}
+              title="Download Sample Excel for importing connectors"
+            >
+              <FileSpreadsheet size={15} /> Sample Excel
+            </button>
+            <button
+              type="button"
+              className="cc-payout-btn secondary"
+              onClick={() => {
+                setParsedPartiesRows([]);
+                setPartiesFileName("");
+                setUploadPartiesModalOpen(true);
+              }}
+              title="Import Connectors from Excel"
+            >
+              <Upload size={15} /> Import Connectors
+            </button>
             <button
               type="button"
               className="cc-payout-btn secondary"
@@ -923,6 +1234,14 @@ export default function PartyPayoutsScreen() {
                     </td>
                     <td onClick={(e) => e.stopPropagation()}>
                       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        <button
+                          type="button"
+                          className="cc-payout-row-btn"
+                          onClick={() => openEditPartyModal(row)}
+                          title="Edit Connector details (Name, Code, Commission %)"
+                        >
+                          <Pencil size={13} /> Edit
+                        </button>
                         <button
                           type="button"
                           className="cc-payout-row-btn"
@@ -1330,74 +1649,166 @@ export default function PartyPayoutsScreen() {
                 </div>
               ) : (
                 /* TAB 2: PAYMENT & ADVANCE HISTORY */
-                <div className="cc-ledger-table-wrap">
-                  <table className="cc-ledger-table">
-                    <thead>
-                      <tr>
-                        <th>Date</th>
-                        <th>Type</th>
-                        <th>Amount (₹)</th>
-                        <th>Mode</th>
-                        <th>Ref / UTR #</th>
-                        <th>Notes / Remark</th>
-                        <th>Recorded By</th>
-                        <th>Action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(ledgerData.payments || []).length === 0 ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {/* Top Filtration & Bulk Action Bar */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      {/* Filter by Month */}
+                      <select
+                        value={drawerPaymentMonth}
+                        onChange={(e) => setDrawerPaymentMonth(e.target.value)}
+                        className="cc-payout-select"
+                        style={{ height: 34, fontSize: 12, padding: "4px 8px" }}
+                      >
+                        <option value="ALL">All Months ({ledgerData.payments?.length || 0})</option>
+                        {availableMonths.map((m) => (
+                          <option key={m.val} value={m.val}>
+                            {m.label}
+                          </option>
+                        ))}
+                      </select>
+
+                      {/* Filter by Type */}
+                      <select
+                        value={drawerPaymentType}
+                        onChange={(e) => setDrawerPaymentType(e.target.value)}
+                        className="cc-payout-select"
+                        style={{ height: 34, fontSize: 12, padding: "4px 8px" }}
+                      >
+                        <option value="ALL">All Types</option>
+                        <option value="LINKED_PAYMENT">Linked Payments</option>
+                        <option value="ADVANCE">Advances</option>
+                        <option value="REFUND_CREDIT">Refunds / Credits</option>
+                      </select>
+
+                      {/* Search Ref / Notes */}
+                      <div className="cc-drawer-search-box" style={{ width: 200, height: 34 }}>
+                        <Search size={14} color="#94a3b8" />
+                        <input
+                          type="text"
+                          placeholder="Search UTR, notes, amount..."
+                          value={drawerPaymentSearch}
+                          onChange={(e) => setDrawerPaymentSearch(e.target.value)}
+                        />
+                        {drawerPaymentSearch && (
+                          <button
+                            type="button"
+                            onClick={() => setDrawerPaymentSearch("")}
+                            style={{ border: 0, background: "transparent", cursor: "pointer", color: "#94a3b8" }}
+                          >
+                            <X size={12} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Bulk Upload & Sample Buttons */}
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <button
+                        type="button"
+                        className="cc-payout-btn secondary small"
+                        onClick={handleDownloadPaymentsSample}
+                        title="Download sample Excel for uploading payments"
+                      >
+                        <FileSpreadsheet size={13} /> Sample Excel
+                      </button>
+                      <button
+                        type="button"
+                        className="cc-payout-btn secondary small"
+                        onClick={() => {
+                          setParsedPaymentsRows([]);
+                          setPaymentsFileName("");
+                          setUploadPaymentsModalOpen(true);
+                        }}
+                        title="Bulk Upload payments from Excel"
+                      >
+                        <Upload size={13} /> Bulk Upload Excel
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="cc-ledger-table-wrap">
+                    <table className="cc-ledger-table">
+                      <thead>
                         <tr>
-                          <td colSpan={8} style={{ textAlign: "center", padding: "30px", color: "#94a3b8" }}>
-                            No payment transactions recorded for this connector yet.
-                          </td>
+                          <th>Date</th>
+                          <th>Type</th>
+                          <th>Amount (₹)</th>
+                          <th>Mode</th>
+                          <th>Ref / UTR #</th>
+                          <th>Notes / Remark</th>
+                          <th>Recorded By</th>
+                          <th>Action</th>
                         </tr>
-                      ) : (
-                        (ledgerData.payments || []).map((p) => (
-                          <tr key={p.id}>
-                            <td>
-                              <strong>{new Date(p.paymentDate).toLocaleDateString("en-IN")}</strong>
-                            </td>
-                            <td>
-                              {p.paymentType === "ADVANCE" ? (
-                                <span className="cc-tx-type advance">Advance</span>
-                              ) : p.paymentType === "REFUND_CREDIT" ? (
-                                <span className="cc-tx-type refund">Refund/Credit</span>
-                              ) : (
-                                <span className="cc-tx-type settlement">Settlement</span>
-                              )}
-                            </td>
-                            <td>
-                              <strong style={{ color: p.paymentType === "REFUND_CREDIT" ? "#dc2626" : "#047857", fontSize: 13 }}>
-                                {p.paymentType === "REFUND_CREDIT" ? "-" : "+"}
-                                {currencyFormatter.format(p.amount)}
-                              </strong>
-                            </td>
-                            <td>
-                              <span className="cc-tx-mode">{p.paymentMode?.replace(/_/g, " ")}</span>
-                            </td>
-                            <td>{p.referenceNumber || "—"}</td>
-                            <td>
-                              <small style={{ color: "#475569" }}>{p.notes || "—"}</small>
-                            </td>
-                            <td>
-                              <small style={{ color: "#64748b" }}>{p.recordedBy?.name || "Admin"}</small>
-                            </td>
-                            <td>
-                              <button
-                                type="button"
-                                className="cc-ledger-del-btn"
-                                onClick={() => handleDeletePayment(p.id)}
-                                disabled={deletingPaymentId === p.id}
-                                title="Delete / Reverse Payment"
-                              >
-                                <Trash2 size={13} />
-                              </button>
+                      </thead>
+                      <tbody>
+                        {filteredDrawerPayments.length === 0 ? (
+                          <tr>
+                            <td colSpan={8} style={{ textAlign: "center", padding: "30px", color: "#94a3b8" }}>
+                              {drawerPaymentSearch || drawerPaymentMonth !== "ALL" || drawerPaymentType !== "ALL"
+                                ? "No payment transactions match the selected filters."
+                                : "No payment transactions recorded for this connector yet."}
                             </td>
                           </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
+                        ) : (
+                          filteredDrawerPayments.map((p) => (
+                            <tr key={p.id}>
+                              <td>
+                                <strong>{new Date(p.paymentDate).toLocaleDateString("en-IN")}</strong>
+                              </td>
+                              <td>
+                                {p.paymentType === "ADVANCE" ? (
+                                  <span className="cc-tx-type advance">Advance</span>
+                                ) : p.paymentType === "REFUND_CREDIT" ? (
+                                  <span className="cc-tx-type refund">Refund/Credit</span>
+                                ) : (
+                                  <span className="cc-tx-type settlement">Settlement</span>
+                                )}
+                              </td>
+                              <td>
+                                <strong style={{ color: p.paymentType === "REFUND_CREDIT" ? "#dc2626" : "#047857", fontSize: 13 }}>
+                                  {p.paymentType === "REFUND_CREDIT" ? "-" : "+"}
+                                  {currencyFormatter.format(p.amount)}
+                                </strong>
+                              </td>
+                              <td>
+                                <span className="cc-tx-mode">{p.paymentMode?.replace(/_/g, " ")}</span>
+                              </td>
+                              <td>{p.referenceNumber || "—"}</td>
+                              <td>
+                                <small style={{ color: "#475569" }}>{p.notes || "—"}</small>
+                              </td>
+                              <td>
+                                <small style={{ color: "#64748b" }}>{p.recordedBy?.name || "Admin"}</small>
+                              </td>
+                              <td>
+                                <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                                  <button
+                                    type="button"
+                                    className="cc-ledger-del-btn"
+                                    style={{ color: "#2563eb" }}
+                                    onClick={() => openEditPaymentModal(p)}
+                                    title="Edit Payment Entry"
+                                  >
+                                    <Pencil size={13} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="cc-ledger-del-btn"
+                                    onClick={() => handleDeletePayment(p.id)}
+                                    disabled={deletingPaymentId === p.id}
+                                    title="Delete / Reverse Payment"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
             </div>
@@ -1411,13 +1822,20 @@ export default function PartyPayoutsScreen() {
           <div className="cc-payment-modal" onClick={(e) => e.stopPropagation()}>
             <div className="cc-pmodal-header">
               <div>
-                <h3>Record Payment / Advance</h3>
-                <p>Transfer payout or advance credit to connector</p>
+                <h3>{editingPaymentId ? "Edit Payment Entry" : "Record Payment / Advance"}</h3>
+                <p>
+                  {editingPaymentId
+                    ? "Update existing payout or advance transaction details"
+                    : "Transfer payout or advance credit to connector"}
+                </p>
               </div>
               <button
                 type="button"
                 className="cc-pmodal-close"
-                onClick={() => setPaymentModalOpen(false)}
+                onClick={() => {
+                  setPaymentModalOpen(false);
+                  setEditingPaymentId(null);
+                }}
               >
                 <X size={18} />
               </button>
@@ -1675,7 +2093,10 @@ export default function PartyPayoutsScreen() {
                 <button
                   type="button"
                   className="cc-payout-btn secondary"
-                  onClick={() => setPaymentModalOpen(false)}
+                  onClick={() => {
+                    setPaymentModalOpen(false);
+                    setEditingPaymentId(null);
+                  }}
                 >
                   Cancel
                 </button>
@@ -1684,7 +2105,11 @@ export default function PartyPayoutsScreen() {
                   className="cc-payout-btn primary"
                   disabled={submittingPayment}
                 >
-                  {submittingPayment ? "Recording..." : "Save Payment & Update Ledger"}
+                  {submittingPayment
+                    ? "Saving..."
+                    : editingPaymentId
+                    ? "Update Payment Entry"
+                    : "Save Payment & Update Ledger"}
                 </button>
               </div>
             </form>
@@ -1847,6 +2272,359 @@ export default function PartyPayoutsScreen() {
                     </>
                   ) : (
                     `Assign to ${selectedParty?.partyName}`
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT PARTY / CONNECTOR MODAL */}
+      {editPartyModalOpen && (
+        <div className="cc-modal-overlay" onClick={() => setEditPartyModalOpen(false)}>
+          <div className="cc-payment-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="cc-pmodal-header">
+              <div>
+                <h3>Edit Party / Connector</h3>
+                <p>Update party name, code, default commission &amp; status</p>
+              </div>
+              <button
+                type="button"
+                className="cc-pmodal-close"
+                onClick={() => setEditPartyModalOpen(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveParty} className="cc-pmodal-form">
+              <div className="cc-form-group">
+                <label>Party / Connector Name *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Sharma Financial Services"
+                  value={editPartyForm.partyName}
+                  onChange={(e) => setEditPartyForm((prev) => ({ ...prev, partyName: e.target.value }))}
+                />
+              </div>
+
+              <div className="cc-form-row">
+                <div className="cc-form-group">
+                  <label>Party Code</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. PTY-001"
+                    value={editPartyForm.partyCode}
+                    onChange={(e) => setEditPartyForm((prev) => ({ ...prev, partyCode: e.target.value }))}
+                  />
+                </div>
+                <div className="cc-form-group">
+                  <label>Default Commission % (on Bank Net)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="100"
+                    placeholder="e.g. 50"
+                    value={editPartyForm.commissionPercent}
+                    onChange={(e) => setEditPartyForm((prev) => ({ ...prev, commissionPercent: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              <div className="cc-form-row">
+                <div className="cc-form-group">
+                  <label>Badge Color</label>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <input
+                      type="color"
+                      style={{ width: 44, height: 38, padding: 2, cursor: "pointer", border: "1px solid #cbd5e1", borderRadius: 6 }}
+                      value={editPartyForm.colorCode || "#3b82f6"}
+                      onChange={(e) => setEditPartyForm((prev) => ({ ...prev, colorCode: e.target.value }))}
+                    />
+                    <input
+                      type="text"
+                      style={{ flex: 1 }}
+                      value={editPartyForm.colorCode || "#3b82f6"}
+                      onChange={(e) => setEditPartyForm((prev) => ({ ...prev, colorCode: e.target.value }))}
+                    />
+                  </div>
+                </div>
+                <div className="cc-form-group">
+                  <label>Status</label>
+                  <select
+                    value={editPartyForm.isActive ? "ACTIVE" : "INACTIVE"}
+                    onChange={(e) => setEditPartyForm((prev) => ({ ...prev, isActive: e.target.value === "ACTIVE" }))}
+                  >
+                    <option value="ACTIVE">Active</option>
+                    <option value="INACTIVE">Inactive</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="cc-pmodal-actions">
+                <button
+                  type="button"
+                  className="cc-payout-btn secondary"
+                  onClick={() => setEditPartyModalOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="cc-payout-btn primary"
+                  disabled={submittingEditParty}
+                >
+                  {submittingEditParty ? "Saving..." : "Save Changes"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* BULK UPLOAD PARTIES MODAL */}
+      {uploadPartiesModalOpen && (
+        <div className="cc-modal-overlay" onClick={() => setUploadPartiesModalOpen(false)}>
+          <div className="cc-payment-modal" style={{ maxWidth: 620 }} onClick={(e) => e.stopPropagation()}>
+            <div className="cc-pmodal-header">
+              <div>
+                <h3>Bulk Upload Parties / Connectors</h3>
+                <p>Import connector names, codes, and commission rates via Excel</p>
+              </div>
+              <button
+                type="button"
+                className="cc-pmodal-close"
+                onClick={() => setUploadPartiesModalOpen(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="cc-pmodal-form">
+              <div style={{ background: "#f8fafc", border: "1px dashed #cbd5e1", borderRadius: 10, padding: "16px", textAlign: "center" }}>
+                <p style={{ margin: "0 0 10px", fontSize: 13, color: "#475569" }}>
+                  Download the sample template to ensure correct column headers:
+                </p>
+                <button
+                  type="button"
+                  className="cc-payout-btn secondary small"
+                  onClick={handleDownloadPartiesSample}
+                >
+                  <FileSpreadsheet size={14} /> Download Sample Parties Template (.xlsx)
+                </button>
+              </div>
+
+              <div className="cc-form-group">
+                <label>Select Excel File (.xlsx, .xls) *</label>
+                <input
+                  type="file"
+                  accept=".xlsx, .xls"
+                  onChange={handlePartiesFileChange}
+                />
+                {partiesFileName && (
+                  <small style={{ color: "#059669", fontWeight: 600, marginTop: 4 }}>
+                    ✓ Selected: {partiesFileName} ({parsedPartiesRows.length} rows detected)
+                  </small>
+                )}
+              </div>
+
+              {parsedPartiesRows.length > 0 && (
+                <div style={{ maxHeight: 180, overflowY: "auto", border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, background: "#fafafa" }}>
+                  <table className="cc-ledger-table" style={{ fontSize: 11 }}>
+                    <thead>
+                      <tr>
+                        <th>Party Name</th>
+                        <th>Code</th>
+                        <th>Comm %</th>
+                        <th>Active</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {parsedPartiesRows.slice(0, 5).map((row, idx) => (
+                        <tr key={idx}>
+                          <td>{row["Party Name"] || row.partyName || "—"}</td>
+                          <td>{row["Party Code"] || row.partyCode || "—"}</td>
+                          <td>{row["Commission Percent"] || row.commissionPercent || 50}%</td>
+                          <td>{String(row["Active"] || row.isActive || "YES")}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {parsedPartiesRows.length > 5 && (
+                    <div style={{ fontSize: 11, color: "#64748b", textAlign: "center", marginTop: 6 }}>
+                      ... and {parsedPartiesRows.length - 5} more records
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="cc-pmodal-actions">
+                <button
+                  type="button"
+                  className="cc-payout-btn secondary"
+                  onClick={() => setUploadPartiesModalOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="cc-payout-btn primary"
+                  onClick={handleConfirmUploadParties}
+                  disabled={uploadingParties || parsedPartiesRows.length === 0}
+                >
+                  {uploadingParties ? (
+                    <>
+                      <RefreshCw size={14} className="cc-spin" /> Importing...
+                    </>
+                  ) : (
+                    `Import ${parsedPartiesRows.length} Connectors`
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BULK UPLOAD PAYMENTS FOR SELECTED PARTY MODAL */}
+      {uploadPaymentsModalOpen && (
+        <div className="cc-modal-overlay" onClick={() => setUploadPaymentsModalOpen(false)}>
+          <div className="cc-payment-modal" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
+            <div className="cc-pmodal-header">
+              <div>
+                <h3>Bulk Upload Payments • {selectedParty?.partyName}</h3>
+                <p>Import payments / advances from Excel and set default Date &amp; Month</p>
+              </div>
+              <button
+                type="button"
+                className="cc-pmodal-close"
+                onClick={() => setUploadPaymentsModalOpen(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="cc-pmodal-form">
+              <div style={{ background: "#f8fafc", border: "1px dashed #cbd5e1", borderRadius: 10, padding: "14px", textAlign: "center" }}>
+                <p style={{ margin: "0 0 8px", fontSize: 13, color: "#475569" }}>
+                  Download the sample template for payment entries:
+                </p>
+                <button
+                  type="button"
+                  className="cc-payout-btn secondary small"
+                  onClick={handleDownloadPaymentsSample}
+                >
+                  <FileSpreadsheet size={14} /> Download Sample Payments Template (.xlsx)
+                </button>
+              </div>
+
+              {/* Date & Month Selection Inputs as explicitly requested */}
+              <div className="cc-form-row">
+                <div className="cc-form-group">
+                  <label>Assign to Specific Date</label>
+                  <input
+                    type="date"
+                    value={bulkPaymentDate}
+                    onChange={(e) => {
+                      setBulkPaymentDate(e.target.value);
+                      if (e.target.value) {
+                        setBulkPaymentMonth(e.target.value.slice(0, 7));
+                      }
+                    }}
+                  />
+                  <small style={{ color: "#64748b", fontSize: 10.5 }}>
+                    Used for Excel rows without explicit date
+                  </small>
+                </div>
+                <div className="cc-form-group">
+                  <label>Assign to Month</label>
+                  <select
+                    value={bulkPaymentMonth}
+                    onChange={(e) => setBulkPaymentMonth(e.target.value)}
+                  >
+                    {availableMonths.map((m) => (
+                      <option key={m.val} value={m.val}>
+                        {m.label} ({m.val})
+                      </option>
+                    ))}
+                  </select>
+                  <small style={{ color: "#64748b", fontSize: 10.5 }}>
+                    Ensures records match the chosen month filter
+                  </small>
+                </div>
+              </div>
+
+              <div className="cc-form-group">
+                <label>Select Payments Excel File (.xlsx, .xls) *</label>
+                <input
+                  type="file"
+                  accept=".xlsx, .xls"
+                  onChange={handlePaymentsFileChange}
+                />
+                {paymentsFileName && (
+                  <small style={{ color: "#059669", fontWeight: 600, marginTop: 4 }}>
+                    ✓ Selected: {paymentsFileName} ({parsedPaymentsRows.length} payment rows detected)
+                  </small>
+                )}
+              </div>
+
+              {parsedPaymentsRows.length > 0 && (
+                <div style={{ maxHeight: 180, overflowY: "auto", border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, background: "#fafafa" }}>
+                  <table className="cc-ledger-table" style={{ fontSize: 11 }}>
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Type</th>
+                        <th>Amount</th>
+                        <th>Mode</th>
+                        <th>Ref / UTR</th>
+                        <th>Lead ID</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {parsedPaymentsRows.slice(0, 5).map((row, idx) => (
+                        <tr key={idx}>
+                          <td>{row["Date"] || row.date || bulkPaymentDate}</td>
+                          <td>{row["Payment Type"] || row.paymentType || "LINKED_PAYMENT"}</td>
+                          <td>₹{numberFormatter.format(row["Amount"] || row.amount || 0)}</td>
+                          <td>{row["Payment Mode"] || row.paymentMode || "BANK_TRANSFER"}</td>
+                          <td>{row["Ref / UTR #"] || row.referenceNumber || "—"}</td>
+                          <td>{row["Lead ID"] || row.leadId || "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {parsedPaymentsRows.length > 5 && (
+                    <div style={{ fontSize: 11, color: "#64748b", textAlign: "center", marginTop: 6 }}>
+                      ... and {parsedPaymentsRows.length - 5} more payment rows
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="cc-pmodal-actions">
+                <button
+                  type="button"
+                  className="cc-payout-btn secondary"
+                  onClick={() => setUploadPaymentsModalOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="cc-payout-btn primary"
+                  onClick={handleConfirmUploadPayments}
+                  disabled={uploadingPayments || parsedPaymentsRows.length === 0}
+                >
+                  {uploadingPayments ? (
+                    <>
+                      <RefreshCw size={14} className="cc-spin" /> Importing...
+                    </>
+                  ) : (
+                    `Import ${parsedPaymentsRows.length} Payments`
                   )}
                 </button>
               </div>

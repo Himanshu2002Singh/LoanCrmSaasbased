@@ -40,6 +40,7 @@ import {
   BarChart3,
   UserPlus,
   HelpCircle,
+  Building2,
 } from "lucide-react";
 import API_URL from "../../config";
 
@@ -122,6 +123,15 @@ const SIDEBAR_MENU_OPTIONS = [
     primaryKey: "viewOperations",
     description: "Loan applications pipeline, file stage progress, and credit document checking.",
     relatedKeys: ["manageOperations", "createLoanApplication"],
+  },
+  {
+    id: "lenders",
+    title: "Bank & NBFC (Lenders)",
+    route: "/lenders",
+    icon: Building2,
+    primaryKey: "viewLenders",
+    description: "Manage partner banks, NBFCs, RM contact emails, and lending institutions.",
+    relatedKeys: ["createLender", "editLender"],
   },
   {
     id: "payouts",
@@ -275,6 +285,31 @@ const PERMISSION_GROUPS = [
         key: "createLoanApplication",
         label: "Create Loan Applications in Leads",
         description: "Permission to open and submit 'Create Loan Application' modal inside lead details.",
+        confidential: false,
+      },
+    ],
+  },
+  {
+    title: "Bank & NBFC Management",
+    subtitle: "Control permissions to view partner banks, add new banks/NBFCs, and edit RM contact details.",
+    icon: Building2,
+    permissions: [
+      {
+        key: "viewLenders",
+        label: "View Bank & NBFC (Lenders)",
+        description: "Access Bank & NBFC list (/lenders) to view partner banks, NBFCs, RM contact emails, and loan products.",
+        confidential: false,
+      },
+      {
+        key: "createLender",
+        label: "Add Bank & NBFC (Lenders)",
+        description: "Permission to register and onboard new Banks, NBFCs, and lending partners.",
+        confidential: false,
+      },
+      {
+        key: "editLender",
+        label: "Edit Bank & NBFC (Lenders)",
+        description: "Permission to modify partner bank details, RM phone/emails, and supported products.",
         confidential: false,
       },
     ],

@@ -114,7 +114,7 @@ const ROLE_DEFAULTS = {
     viewLenders: true,
   },
   EMPLOYEE: {
-    viewDashboard: false,
+    viewDashboard: true,
     viewLeads: true,
     createLead: true,
     manageLeads: true,
@@ -134,9 +134,11 @@ const ROLE_DEFAULTS = {
     manageLeadSources: false,
     viewAttendance: false,
     viewLenders: false,
+    createLender: false,
+    editLender: false,
   },
   FINANCE: {
-    viewDashboard: false,
+    viewDashboard: true,
     viewLeads: false,
     createLead: false,
     viewFollowupWork: false,
@@ -155,6 +157,8 @@ const ROLE_DEFAULTS = {
     manageLeadSources: false,
     viewAttendance: false,
     viewLenders: false,
+    createLender: false,
+    editLender: false,
   },
   BANKER: {
     viewDashboard: true,
@@ -562,7 +566,6 @@ function AdminRedesignLayout({ children }) {
       .map((item) => {
         // Single link item
         if (item.type === "link") {
-          if (isFinance && item.path === "/") return null;
           if (item.adminOnly && !isCompanyAdmin) return null;
 
           if (item.permission && !checkPermission(item.permission)) {
@@ -695,17 +698,8 @@ function AdminRedesignLayout({ children }) {
 
   const isActive = (path) => isPathActive(path);
 
-  const homePath =
-    isFinance
-      ? "/case-payouts"
-      : employeeRole === "banker"
-      ? "/banker"
-      : employeeRole === "operations"
-      ? "/operations"
-      : isEmployee
-      ? "/leads"
-      : "/";
-  const isDashboard = location.pathname === "/" || location.pathname === "/banker" || (isFinance && location.pathname === "/case-payouts");
+  const homePath = employeeRole === "banker" ? "/banker" : "/";
+  const isDashboard = location.pathname === "/" || location.pathname === "/banker";
 
   const initials = useMemo(() => {
     return (
