@@ -4,6 +4,10 @@ import axios from 'axios'
 import './index.css'
 import App from './App.jsx'
 import { StatusProvider } from './contexts/StatusContext.jsx'
+import { initTheme } from './utils/theme'
+
+// Initialize company dynamic theme colors
+initTheme();
 
 axios.interceptors.request.use((config) => {
   const token = localStorage.getItem("token");

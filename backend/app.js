@@ -78,6 +78,16 @@ const ensureSchemaMigrations = async (sequelize) => {
   }
 
   try {
+    // 4. Ensure companies has theme_config column
+    await sequelize.query(`
+      ALTER TABLE \`companies\` ADD COLUMN \`theme_config\` JSON NULL;
+    `);
+    console.log("[Migration] Added theme_config column to companies.");
+  } catch (err) {
+    // Column already exists
+  }
+
+  try {
     if (db.Application) {
       await db.Application.sync({ alter: { drop: false } });
       console.log("[Migration] Application schema synchronized successfully.");

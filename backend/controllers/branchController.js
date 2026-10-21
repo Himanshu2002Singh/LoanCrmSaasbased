@@ -244,6 +244,7 @@ exports.getSettings = async (req, res) => {
           account_number: company?.accountNumber || "",
           ifsc_code: company?.ifscCode || "",
           bank_branch: company?.bankBranch || "",
+          theme_config: company?.themeConfig || null,
         },
         office_location: {
           lat: branch.officeLat,
@@ -311,6 +312,9 @@ exports.updateSettings = async (req, res) => {
       }
       if (companyPayload.bank_branch !== undefined || companyPayload.bankBranch !== undefined) {
         compData.bankBranch = companyPayload.bank_branch || companyPayload.bankBranch;
+      }
+      if (companyPayload.theme_config !== undefined || companyPayload.themeConfig !== undefined) {
+        compData.themeConfig = companyPayload.theme_config !== undefined ? companyPayload.theme_config : companyPayload.themeConfig;
       }
 
       if (Object.keys(compData).length > 0) {

@@ -5,6 +5,7 @@ import {
   ChevronRight,
   Clock,
   Mail,
+  Palette,
   ShieldCheck,
   FileSpreadsheet,
   MapPin,
@@ -20,10 +21,12 @@ import axios from 'axios';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import API_URL from '../../config';
+import ThemeCustomizerModal from '../../components/ThemeCustomizerModal';
 
 const SettingsScreen = () => {
   // Navigation Tabs
   const [activeTab, setActiveTab] = useState('COMPANY_BILLING'); // 'COMPANY_BILLING' | 'ATTENDANCE'
+  const [themeModalOpen, setThemeModalOpen] = useState(false);
 
   // Company GST & Billing Details
   const [companyName, setCompanyName] = useState('');
@@ -222,7 +225,7 @@ const SettingsScreen = () => {
       </div>
 
       {/* Quick Navigation Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <Link
           to="/company"
           className="p-4 rounded-xl border border-emerald-200 bg-gradient-to-r from-emerald-50 to-teal-50 shadow-sm hover:shadow-md transition-all text-decoration-none group"
@@ -240,6 +243,25 @@ const SettingsScreen = () => {
             <ChevronRight size={16} className="text-emerald-700" />
           </div>
         </Link>
+
+        {/* Panel Theme & Colors Card */}
+        <div
+          onClick={() => setThemeModalOpen(true)}
+          className="p-4 rounded-xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 shadow-sm hover:shadow-md transition-all cursor-pointer group"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-amber-600 text-white flex items-center justify-center shadow">
+              <Palette size={20} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h3 className="text-sm font-bold text-gray-900 group-hover:text-amber-800 truncate">
+                Panel Theme &amp; Colors
+              </h3>
+              <p className="text-xs text-gray-600 truncate">Palettes, buttons &amp; hex codes</p>
+            </div>
+            <ChevronRight size={16} className="text-amber-700" />
+          </div>
+        </div>
 
         <Link
           to="/role-permissions"
@@ -283,16 +305,25 @@ const SettingsScreen = () => {
         <button
           type="button"
           onClick={() => setActiveTab('COMPANY_BILLING')}
+          style={activeTab === 'COMPANY_BILLING' ? {
+            backgroundColor: 'var(--cc-primary, #047857)',
+            borderColor: 'var(--cc-primary, #047857)',
+            color: '#ffffff',
+            boxShadow: '0 4px 12px var(--cc-primary-glow, rgba(4,120,87,0.25))',
+          } : {}}
           className={`flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition-all ${
             activeTab === 'COMPANY_BILLING'
-              ? 'bg-emerald-700 text-white shadow-sm'
+              ? 'text-white'
               : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
           }`}
         >
           <Building2 size={16} />
           Company GST &amp; Billing Details
           {gstNumber ? (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-900 text-emerald-100 font-semibold ml-1">
+            <span
+              style={{ background: 'rgba(255,255,255,0.25)', color: '#ffffff' }}
+              className="text-[10px] px-1.5 py-0.5 rounded font-semibold ml-1"
+            >
               Configured
             </span>
           ) : (
@@ -305,9 +336,15 @@ const SettingsScreen = () => {
         <button
           type="button"
           onClick={() => setActiveTab('ATTENDANCE')}
+          style={activeTab === 'ATTENDANCE' ? {
+            backgroundColor: 'var(--cc-primary, #047857)',
+            borderColor: 'var(--cc-primary, #047857)',
+            color: '#ffffff',
+            boxShadow: '0 4px 12px var(--cc-primary-glow, rgba(4,120,87,0.25))',
+          } : {}}
           className={`flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition-all ${
             activeTab === 'ATTENDANCE'
-              ? 'bg-emerald-700 text-white shadow-sm'
+              ? 'text-white'
               : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
           }`}
         >
@@ -322,7 +359,7 @@ const SettingsScreen = () => {
           <div className="border-b border-gray-100 pb-4 mb-6 flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                <FileSpreadsheet size={20} className="text-emerald-700" />
+                <FileSpreadsheet size={20} style={{ color: "var(--cc-primary, #047857)" }} />
                 Company GST, Address &amp; Invoice Billing Details
               </h2>
               <p className="text-xs text-gray-500 mt-0.5">
@@ -330,7 +367,20 @@ const SettingsScreen = () => {
               </p>
             </div>
             {gstNumber ? (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "4px 12px",
+                  borderRadius: "999px",
+                  fontSize: "12px",
+                  fontWeight: 650,
+                  background: "var(--cc-active-badge-bg, var(--cc-primary-light, #ecfdf5))",
+                  color: "var(--cc-active-badge-text, var(--cc-primary, #047857))",
+                  border: "1px solid var(--cc-primary-glow, #a7f3d0)",
+                }}
+              >
                 <CheckCircle2 size={13} /> GST Active ({gstNumber})
               </span>
             ) : (
@@ -571,7 +621,7 @@ const SettingsScreen = () => {
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
           <div className="border-b border-gray-100 pb-4 mb-6">
             <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-              <Clock size={20} className="text-emerald-700" />
+              <Clock size={20} style={{ color: "var(--cc-primary, #047857)" }} />
               Office Location, Geofencing &amp; Timings
             </h2>
             <p className="text-xs text-gray-500 mt-0.5">
@@ -589,7 +639,12 @@ const SettingsScreen = () => {
                   type="button"
                   onClick={handleDetectLocation}
                   disabled={isDetectingLocation}
-                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 transition"
+                  style={{
+                    background: "var(--cc-active-badge-bg, #ecfdf5)",
+                    color: "var(--cc-active-badge-text, var(--cc-primary, #047857))",
+                    borderColor: "var(--cc-primary-glow, #a7f3d0)",
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded text-xs font-semibold border transition"
                 >
                   <Navigation size={13} className={isDetectingLocation ? 'animate-spin' : ''} />
                   {isDetectingLocation ? 'Detecting GPS...' : 'Auto-Detect Current GPS'}
@@ -699,6 +754,12 @@ const SettingsScreen = () => {
           </form>
         </div>
       )}
+
+      {/* Panel Theme & Color Customizer Modal */}
+      <ThemeCustomizerModal
+        isOpen={themeModalOpen}
+        onClose={() => setThemeModalOpen(false)}
+      />
     </div>
   );
 };

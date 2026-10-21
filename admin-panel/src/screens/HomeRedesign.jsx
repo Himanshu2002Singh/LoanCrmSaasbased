@@ -308,7 +308,7 @@ function HomeRedesign({ dashboardFilters, dashboardFilterOptions }) {
         <div className="cc-ops-filter-bar">
           <div className="cc-ops-filter-header">
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <Layers size={17} color="#047857" />
+              <Layers size={17} color="var(--cc-primary, #047857)" />
               <strong>Operations Pipeline &amp; Stage Filter</strong>
             </div>
             <span style={{ fontSize: 11.5, color: "#64748b" }}>
@@ -554,7 +554,7 @@ function HomeRedesign({ dashboardFilters, dashboardFilterOptions }) {
           <div className="cc-payout-dash-header">
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                <Coins size={18} color="#047857" />
+                <Coins size={18} color="var(--cc-primary, #047857)" />
                 <h2 style={{ margin: 0, fontSize: 16.5, fontWeight: 800, color: "#0f172a" }}>
                   Month-Wise Payouts &amp; Disbursal Overview
                 </h2>
@@ -603,7 +603,7 @@ function HomeRedesign({ dashboardFilters, dashboardFilterOptions }) {
 
             <div className="cc-pm-card">
               <small>Bank Commission Received</small>
-              <strong style={{ color: "#047857" }}>
+              <strong style={{ color: "var(--cc-primary, #047857)" }}>
                 {currencyFormatter.format(
                   activeMonthlyPayout ? activeMonthlyPayout.bankCommissionReceived : payouts.totalBankCommission || 0
                 )}
@@ -658,7 +658,7 @@ function HomeRedesign({ dashboardFilters, dashboardFilterOptions }) {
                     </div>
                     <div className="cc-month-stat-row">
                       <span>Bank Comm:</span>
-                      <strong style={{ color: "#047857" }}>{currencyFormatter.format(m.bankCommissionReceived)}</strong>
+                      <strong style={{ color: "var(--cc-primary, #047857)" }}>{currencyFormatter.format(m.bankCommissionReceived)}</strong>
                     </div>
                     <div className="cc-month-stat-row">
                       <span>Party Paid:</span>
@@ -721,7 +721,7 @@ function HomeRedesign({ dashboardFilters, dashboardFilterOptions }) {
                           <strong>{currencyFormatter.format(row.loanAmount || 0)}</strong>
                         </td>
                         <td>
-                          <span style={{ color: "#047857", fontWeight: 600 }}>
+                          <span style={{ color: "var(--cc-primary, #047857)", fontWeight: 600 }}>
                             {currencyFormatter.format(row.bankReceivedAmount || 0)}
                           </span>
                         </td>
@@ -889,8 +889,8 @@ const dashboardCustomStyles = `
     border-color: #94a3b8;
   }
   .cc-ops-pill.active {
-    background: #047857;
-    border-color: #047857;
+    background: var(--cc-primary, #047857);
+    border-color: var(--cc-primary, #047857);
     color: #fff;
   }
   .cc-ops-pill strong {
@@ -957,7 +957,7 @@ const dashboardCustomStyles = `
     place-items: center;
   }
   .cc-dash-kpi-icon.blue { background: #eff6ff; color: #2563eb; }
-  .cc-dash-kpi-icon.emerald { background: #ecfdf5; color: #047857; }
+  .cc-dash-kpi-icon.emerald { background: var(--cc-active-badge-bg, #ecfdf5); color: var(--cc-active-badge-text, #047857); }
   .cc-dash-kpi-icon.purple { background: #faf5ff; color: #7c3aed; }
   .cc-dash-kpi-icon.amber { background: #fffbeb; color: #d97706; }
   .cc-dash-kpi-icon.orange { background: #fff7ed; color: #ea580c; }
@@ -971,7 +971,7 @@ const dashboardCustomStyles = `
     line-height: 1.15;
     margin-bottom: 4px;
   }
-  .cc-dash-kpi-val.emerald { color: #047857; }
+  .cc-dash-kpi-val.emerald { color: var(--cc-primary, #047857); }
   .cc-dash-kpi-val.amber { color: #d97706; }
   .cc-dash-kpi-val.orange { color: #ea580c; }
   .cc-dash-kpi-val.cyan { color: #0891b2; }
@@ -1003,13 +1003,13 @@ const dashboardCustomStyles = `
     border-bottom: 1px solid #f1f5f9;
   }
   .cc-payout-role-tag {
-    background: #ecfdf5;
-    color: #047857;
+    background: var(--cc-active-badge-bg, #ecfdf5);
+    color: var(--cc-active-badge-text, #047857);
     font-size: 10.5px;
     font-weight: 700;
     padding: 2px 7px;
     border-radius: 4px;
-    border: 1px solid #a7f3d0;
+    border: 1px solid var(--cc-primary-glow, #a7f3d0);
   }
   .cc-dash-select {
     border: 1px solid #cbd5e1;

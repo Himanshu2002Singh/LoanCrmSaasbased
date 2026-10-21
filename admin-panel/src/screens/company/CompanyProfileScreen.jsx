@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import moment from "moment";
-import { Link, Navigate } from "react-router-dom";
+import { Link, Navigate, useLocation } from "react-router-dom";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import {
@@ -22,6 +22,7 @@ import {
   Layers,
   Mail,
   MapPin,
+  Palette,
   Phone,
   Radio,
   RefreshCw,
@@ -37,8 +38,11 @@ import {
 
 import API_URL from "../../config";
 import { resolveLogoUrl } from "../../utils/logo";
+import ThemeCustomizerModal from "../../components/ThemeCustomizerModal";
+import { saveTheme } from "../../utils/theme";
 
 export default function CompanyProfileScreen() {
+  const location = useLocation();
   const userRole = localStorage.getItem("userRole") || "";
   const employeeRole = localStorage.getItem("employeeRole") || "";
   const isCompanyAdmin =
@@ -53,8 +57,15 @@ export default function CompanyProfileScreen() {
 
   const [loading, setLoading] = useState(true);
   const [editModalOpen, setEditModalOpen] = useState(false);
+  const [themeModalOpen, setThemeModalOpen] = useState(false);
   const [editForm, setEditForm] = useState({ name: "", email: "", phone: "" });
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (location.search && (location.search.includes("theme") || location.search.includes("branding"))) {
+      setThemeModalOpen(true);
+    }
+  }, [location.search]);
 
   const fetchProfile = useCallback(async () => {
     try {
@@ -81,6 +92,9 @@ export default function CompanyProfileScreen() {
         if (profile.logoUrl) {
           localStorage.setItem("companyLogo", profile.logoUrl);
           window.dispatchEvent(new Event("company_profile_updated"));
+        }
+        if (profile.themeConfig) {
+          saveTheme(profile.themeConfig);
         }
       }
     } catch (error) {
@@ -250,6 +264,18 @@ export default function CompanyProfileScreen() {
           <button
             type="button"
             className="cc-comp-btn primary"
+            onClick={() => setThemeModalOpen(true)}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px",
+            }}
+          >
+            <Palette size={15} /> Customize Panel Colors
+          </button>
+          <button
+            type="button"
+            className="cc-comp-btn ghost"
             onClick={() => setEditModalOpen(true)}
           >
             <Edit3 size={15} /> Edit Details
@@ -564,6 +590,154 @@ export default function CompanyProfileScreen() {
 
         {/* Right Column: Organization Details & Branches */}
         <div className="cc-comp-col">
+          {/* Panel Branding & Theme Colors Card */}
+          <div className="cc-section-card">
+            <div className="cc-card-header">
+              <div>
+                <span className="cc-card-subtitle">Personalization</span>
+                <h2>Panel Theme & Colors</h2>
+              </div>
+              <button
+                type="button"
+                className="cc-comp-btn primary small"
+                onClick={() => setThemeModalOpen(true)}
+                style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+              >
+                <Palette size={13} /> Customize Theme
+              </button>
+            </div>
+
+            <div style={{ padding: "4px 0 10px" }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  marginBottom: "14px",
+                  flexWrap: "wrap",
+                  gap: "8px",
+                }}
+              >
+                <div>
+                  <span style={{ fontSize: "14px", fontWeight: 700, color: "var(--cc-ink, #111827)" }}>
+                    {data?.themeConfig?.name || "Emerald Forest (Default CRM)"}
+                  </span>
+                  <p style={{ margin: "2px 0 0", fontSize: "12px", color: "var(--cc-muted, #64748b)" }}>
+                    Control button colors, hover effects, body background, text, and sidebar branding.
+                  </p>
+                </div>
+                <span
+                  style={{
+                    fontSize: "11px",
+                    fontWeight: 700,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.04em",
+                    padding: "3px 8px",
+                    borderRadius: "6px",
+                    background: "var(--cc-primary-light, #eef7f2)",
+                    color: "var(--cc-primary, #047857)",
+                  }}
+                >
+                  Active Theme
+                </span>
+              </div>
+
+              {/* Color Swatches Grid */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))",
+                  gap: "8px",
+                  background: "#f8fafc",
+                  padding: "12px",
+                  borderRadius: "10px",
+                  border: "1px solid #e2e8f0",
+                }}
+              >
+                <div style={{ textAlign: "center" }}>
+                  <div
+                    style={{
+                      height: "26px",
+                      borderRadius: "6px",
+                      background: data?.themeConfig?.primaryColor || "#047857",
+                      border: "1px solid rgba(0,0,0,0.1)",
+                      marginBottom: "4px",
+                    }}
+                  />
+                  <span style={{ fontSize: "10.5px", fontWeight: 700, color: "#334155", display: "block" }}>Brand / Buttons</span>
+                  <code style={{ fontSize: "10px", color: "#64748b" }}>{data?.themeConfig?.primaryColor || "#047857"}</code>
+                </div>
+
+                <div style={{ textAlign: "center" }}>
+                  <div
+                    style={{
+                      height: "26px",
+                      borderRadius: "6px",
+                      background: data?.themeConfig?.primaryHoverColor || "#065f46",
+                      border: "1px solid rgba(0,0,0,0.1)",
+                      marginBottom: "4px",
+                    }}
+                  />
+                  <span style={{ fontSize: "10.5px", fontWeight: 700, color: "#334155", display: "block" }}>Hover State</span>
+                  <code style={{ fontSize: "10px", color: "#64748b" }}>{data?.themeConfig?.primaryHoverColor || "#065f46"}</code>
+                </div>
+
+                <div style={{ textAlign: "center" }}>
+                  <div
+                    style={{
+                      height: "26px",
+                      borderRadius: "6px",
+                      background: data?.themeConfig?.backgroundColor || "#fafbf9",
+                      border: "1px solid rgba(0,0,0,0.15)",
+                      marginBottom: "4px",
+                    }}
+                  />
+                  <span style={{ fontSize: "10.5px", fontWeight: 700, color: "#334155", display: "block" }}>Background</span>
+                  <code style={{ fontSize: "10px", color: "#64748b" }}>{data?.themeConfig?.backgroundColor || "#fafbf9"}</code>
+                </div>
+
+                <div style={{ textAlign: "center" }}>
+                  <div
+                    style={{
+                      height: "26px",
+                      borderRadius: "6px",
+                      background: data?.themeConfig?.textColor || "#111827",
+                      border: "1px solid rgba(0,0,0,0.1)",
+                      marginBottom: "4px",
+                    }}
+                  />
+                  <span style={{ fontSize: "10.5px", fontWeight: 700, color: "#334155", display: "block" }}>Text Color</span>
+                  <code style={{ fontSize: "10px", color: "#64748b" }}>{data?.themeConfig?.textColor || "#111827"}</code>
+                </div>
+
+                <div style={{ textAlign: "center" }}>
+                  <div
+                    style={{
+                      height: "26px",
+                      borderRadius: "6px",
+                      background: data?.themeConfig?.sidebarBg || "#101922",
+                      border: "1px solid rgba(0,0,0,0.1)",
+                      marginBottom: "4px",
+                    }}
+                  />
+                  <span style={{ fontSize: "10.5px", fontWeight: 700, color: "#334155", display: "block" }}>Sidebar</span>
+                  <code style={{ fontSize: "10px", color: "#64748b" }}>{data?.themeConfig?.sidebarBg || "#101922"}</code>
+                </div>
+              </div>
+
+              <div style={{ marginTop: "12px", display: "flex", justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  className="cc-comp-btn ghost small"
+                  onClick={() => setThemeModalOpen(true)}
+                  style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+                >
+                  <Palette size={13} /> Change Palette &amp; Hex Codes <ChevronRight size={13} />
+                </button>
+              </div>
+            </div>
+          </div>
+
           {/* Company Info Card */}
           <div className="cc-section-card">
             <div className="cc-card-header">
@@ -866,6 +1040,16 @@ export default function CompanyProfileScreen() {
           </div>
         </div>
       )}
+
+      {/* Theme & Palette Customizer Modal */}
+      <ThemeCustomizerModal
+        isOpen={themeModalOpen}
+        onClose={() => setThemeModalOpen(false)}
+        initialTheme={data?.themeConfig}
+        onThemeSaved={(savedTheme) => {
+          setData((prev) => (prev ? { ...prev, themeConfig: savedTheme } : prev));
+        }}
+      />
     </div>
   );
 }
@@ -991,13 +1175,13 @@ const styles = `
   }
 
   .cc-comp-btn.primary {
-    background: #047857;
+    background: var(--cc-primary, #047857);
     color: #ffffff;
-    box-shadow: 0 2px 6px rgba(4, 120, 87, 0.2);
+    box-shadow: 0 2px 6px var(--cc-primary-glow, rgba(4, 120, 87, 0.2));
   }
 
   .cc-comp-btn.primary:hover:not(:disabled) {
-    background: #065f46;
+    background: var(--cc-primary-hover, #065f46);
   }
 
   .cc-comp-btn.ghost {

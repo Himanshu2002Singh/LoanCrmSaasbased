@@ -1,15 +1,15 @@
 .cc-admin {
   --cc-sidebar-width: 244px;
-  --cc-green: #047857;
-  --cc-green-dark: #065f46;
+  --cc-green: var(--cc-primary, #047857);
+  --cc-green-dark: var(--cc-primary-hover, #065f46);
   --cc-charcoal: #111820;
   --cc-ink: #111827;
   --cc-muted: #64748b;
   --cc-line: #dfe5e2;
   --cc-soft: #f6f8f7;
   min-height: 100vh;
-  background: #fafbf9;
-  color: var(--cc-ink);
+  background: var(--cc-bg, #fafbf9);
+  color: var(--cc-ink, #111827);
 }
 
 .cc-admin-collapsed {
@@ -23,8 +23,8 @@
   display: flex;
   width: var(--cc-sidebar-width);
   flex-direction: column;
-  background: #101922;
-  color: #f8fafc;
+  background: var(--cc-sidebar-bg, #101922);
+  color: var(--cc-sidebar-text, #f8fafc);
   transition: width 180ms ease, transform 180ms ease;
 }
 
@@ -110,7 +110,7 @@
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.08em;
-  color: #10B981;
+  color: var(--cc-primary, #10B981);
   text-transform: uppercase;
   margin-top: 2px;
 }
@@ -247,8 +247,8 @@
 }
 
 .cc-nav-item-active {
-  background: rgba(4, 120, 87, 0.22);
-  box-shadow: inset 3px 0 0 var(--cc-green);
+  background: var(--cc-sidebar-active-bg, rgba(4, 120, 87, 0.22));
+  box-shadow: inset 3px 0 0 var(--cc-primary, var(--cc-green));
   color: #fff;
 }
 
@@ -301,7 +301,7 @@
 
 .cc-nav-chevron-rotated {
   transform: rotate(180deg);
-  color: #34d399;
+  color: var(--cc-primary, #34d399);
 }
 
 .cc-nav-group-header-active {
@@ -310,7 +310,7 @@
 }
 
 .cc-nav-group-header-active .cc-nav-icon {
-  color: #34d399;
+  color: var(--cc-primary, #34d399);
 }
 
 .cc-nav-group-children {
@@ -358,10 +358,10 @@
 }
 
 .cc-nav-sub-item-active {
-  background: rgba(4, 120, 87, 0.22);
-  color: #34d399;
+  background: var(--cc-sidebar-active-bg, rgba(4, 120, 87, 0.22));
+  color: var(--cc-primary, #34d399);
   font-weight: 650;
-  box-shadow: inset 2.5px 0 0 #10b981;
+  box-shadow: inset 2.5px 0 0 var(--cc-primary, #10b981);
 }
 
 .cc-nav-sub-item .cc-sub-icon {
@@ -371,23 +371,23 @@
 
 .cc-nav-sub-item-active .cc-sub-icon {
   opacity: 1;
-  color: #34d399;
+  color: var(--cc-primary, #34d399);
 }
 
 /* Fast action items: + Add Lead, + Add Loan Product, + Add Lead Status */
 .cc-nav-action-item {
-  color: #10b981;
+  color: var(--cc-primary, #10b981);
   font-weight: 600;
 }
 
 .cc-nav-action-item .cc-sub-icon {
-  color: #10b981;
+  color: var(--cc-primary, #10b981);
   opacity: 1;
 }
 
 .cc-nav-action-item:hover {
-  background: rgba(16, 185, 129, 0.12);
-  color: #34d399;
+  background: var(--cc-primary-glow, rgba(16, 185, 129, 0.12));
+  color: #ffffff;
 }
 
 .cc-admin-collapsed .cc-nav-group-children {
@@ -460,7 +460,7 @@
   justify-content: center;
   gap: 14px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: #101922;
+  background: var(--cc-header-bg, #101922);
   padding: 10px 24px;
   backdrop-filter: blur(12px);
 }
@@ -521,7 +521,7 @@
   color: #fff;
   font-weight: 700;
   text-decoration: none;
-  box-shadow: 0 8px 18px rgba(4, 120, 87, 0.22);
+  box-shadow: 0 8px 18px var(--cc-primary-glow, rgba(4, 120, 87, 0.22));
   cursor: pointer;
 }
 
@@ -587,7 +587,7 @@
   font-size: 11px;
   text-transform: uppercase;
   font-weight: 700;
-  color: #047857;
+  color: var(--cc-primary, #047857);
   letter-spacing: 0.05em;
 }
 
@@ -649,8 +649,8 @@
 .cc-modal-field input:focus,
 .cc-modal-field select:focus,
 .cc-modal-field textarea:focus {
-  border-color: #047857;
-  box-shadow: 0 0 0 3px rgba(4, 120, 87, 0.12);
+  border-color: var(--cc-primary, #047857);
+  box-shadow: 0 0 0 3px var(--cc-primary-soft-glow, rgba(4, 120, 87, 0.12));
 }
 
 .cc-modal-field small {
@@ -692,12 +692,12 @@
 }
 
 .cc-modal-btn.primary {
-  background: #047857;
+  background: var(--cc-primary, #047857);
   color: #ffffff;
 }
 
 .cc-modal-btn.primary:hover {
-  background: #065f46;
+  background: var(--cc-primary-hover, #065f46);
 }
 
 .cc-modal-btn.primary.danger {

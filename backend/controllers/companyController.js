@@ -625,6 +625,7 @@ exports.updateMyCompanyProfile = async (req, res) => {
       "email",
       "phone",
       "logoUrl",
+      "themeConfig",
       "gstNumber",
       "panNumber",
       "address",

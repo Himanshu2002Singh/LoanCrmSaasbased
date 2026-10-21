@@ -26,8 +26,8 @@
 .cc-section-skin input:focus,
 .cc-section-skin select:focus,
 .cc-section-skin textarea:focus {
-  border-color: #047857 !important;
-  box-shadow: 0 0 0 3px rgba(4, 120, 87, 0.12) !important;
+  border-color: var(--cc-primary, #047857) !important;
+  box-shadow: 0 0 0 3px var(--cc-primary-soft-glow, rgba(4, 120, 87, 0.12)) !important;
 }
 
 .cc-section-skin table {
@@ -69,7 +69,7 @@
 }
 
 .cc-section-skin tr:hover td {
-  background: #f0fdf4 !important;
+  background: var(--cc-primary-light, #f0fdf4) !important;
 }
 
 .cc-section-skin button,
@@ -86,22 +86,22 @@
 
 .cc-section-skin [class*="bg-blue"],
 .cc-section-skin [class*="bg-indigo"] {
-  background: #047857 !important;
+  background: var(--cc-primary, #047857) !important;
   color: #fff !important;
-  box-shadow: 0 8px 18px rgba(4, 120, 87, 0.18) !important;
+  box-shadow: 0 8px 18px var(--cc-primary-glow, rgba(4, 120, 87, 0.18)) !important;
 }
 
 .cc-section-skin [class*="hover:bg-blue"]:hover,
 .cc-section-skin [class*="hover:bg-indigo"]:hover {
-  background: #065f46 !important;
+  background: var(--cc-primary-hover, #065f46) !important;
 }
 
 .cc-section-skin [class*="text-blue"] {
-  color: #047857 !important;
+  color: var(--cc-primary, #047857) !important;
 }
 
 .cc-section-skin [class*="border-blue"] {
-  border-color: #047857 !important;
+  border-color: var(--cc-primary, #047857) !important;
 }
 
 .cc-section-skin [class*="bg-gray-800"],
@@ -111,7 +111,7 @@
 }
 
 .cc-section-skin [class*="bg-green"] {
-  background: #047857 !important;
+  background: var(--cc-primary, #047857) !important;
   color: #fff !important;
 }
 

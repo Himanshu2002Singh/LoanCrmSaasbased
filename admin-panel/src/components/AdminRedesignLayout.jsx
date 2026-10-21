@@ -44,6 +44,7 @@ import API_URL from "../config";
 import CrmLogo from "./CrmLogo";
 import SubscriptionExpiredModal from "./SubscriptionExpiredModal";
 import { resolveLogoUrl } from "../utils/logo";
+import { saveTheme, applyTheme } from "../utils/theme";
 
 const ROLE_DEFAULTS = {
   COMPANY_ADMIN: {
@@ -768,6 +769,9 @@ function AdminRedesignLayout({ children }) {
           if (profile.name) {
             setCompanyName(profile.name);
             localStorage.setItem("companyName", profile.name);
+          }
+          if (profile.themeConfig) {
+            saveTheme(profile.themeConfig);
           }
           setLogoFailed(false);
         }

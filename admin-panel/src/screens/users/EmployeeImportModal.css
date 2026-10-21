@@ -39,13 +39,13 @@
   height: 44px;
   place-items: center;
   border-radius: 12px;
-  background: #e7f5ee;
-  color: #047857;
+  background: var(--cc-primary-light, #e7f5ee);
+  color: var(--cc-primary, #047857);
 }
 
 .cc-import-eyebrow {
   margin: 0 0 2px;
-  color: #047857;
+  color: var(--cc-primary, #047857);
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -127,8 +127,8 @@
 
 .cc-import-dropzone:hover,
 .cc-import-dropzone.is-dragging {
-  border-color: #047857;
-  background: #f0f8f4;
+  border-color: var(--cc-primary, #047857);
+  background: var(--cc-table-row-hover, #f0f8f4);
 }
 
 .cc-import-dropzone.is-dragging {
@@ -144,8 +144,8 @@
   border: 1px solid #cde5d9;
   border-radius: 14px;
   background: #ffffff;
-  color: #047857;
-  box-shadow: 0 7px 18px rgba(4, 120, 87, 0.1);
+  color: var(--cc-primary, #047857);
+  box-shadow: 0 7px 18px var(--cc-primary-soft-glow, rgba(4, 120, 87, 0.1));
 }
 
 .cc-import-dropzone strong {
@@ -160,7 +160,7 @@
 }
 
 .cc-import-dropzone b {
-  color: #047857;
+  color: var(--cc-primary, #047857);
   font-weight: 700;
 }
 
@@ -187,8 +187,8 @@
   height: 38px;
   place-items: center;
   border-radius: 10px;
-  background: #e4f3eb;
-  color: #047857;
+  background: var(--cc-primary-light, #e4f3eb);
+  color: var(--cc-primary, #047857);
 }
 
 .cc-import-file-copy {
@@ -277,9 +277,9 @@
 }
 
 .cc-import-button.primary {
-  background: #047857;
+  background: var(--cc-primary, #047857);
   color: #ffffff;
-  box-shadow: 0 8px 17px rgba(4, 120, 87, 0.17);
+  box-shadow: 0 8px 17px var(--cc-primary-glow, rgba(4, 120, 87, 0.17));
 }
 
 .cc-import-button:hover:not(:disabled) {

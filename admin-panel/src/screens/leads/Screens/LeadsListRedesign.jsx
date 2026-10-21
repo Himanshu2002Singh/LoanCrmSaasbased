@@ -153,9 +153,9 @@ export default function LeadsListRedesign() {
     if (s === "DISBURSED" || s === "LOAN DISBURSEMENT" || s === "CLOSED") {
       return {
         stage: "Stage 6/6 • Disbursed",
-        color: "#047857",
-        bg: "#ecfdf5",
-        border: "#a7f3d0",
+        color: "var(--cc-active-badge-text, var(--cc-primary, #047857))",
+        bg: "var(--cc-active-badge-bg, var(--cc-primary-light, #ecfdf5))",
+        border: "var(--cc-primary-glow, #a7f3d0)",
         icon: "🎉",
       };
     }
@@ -548,23 +548,23 @@ export default function LeadsListRedesign() {
         .cc-leads-toolbar { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; }
         .cc-leads-toolbar .cc-report-search { flex:1 1 240px; min-width:220px; }
         .cc-leads-toolbar .cc-report-search input { appearance:none; -webkit-appearance:none; height:38px; padding:8px 12px 8px 40px; border:1px solid #d5ded7; border-radius:10px; background:#fff; font-size:13px; color:#0f172a; outline:none; box-shadow:none; }
-        .cc-leads-toolbar .cc-report-search input:focus { border-color:#047857; box-shadow:0 0 0 3px rgba(4,120,87,0.15); }
+        .cc-leads-toolbar .cc-report-search input:focus { border-color:var(--cc-primary, #047857); box-shadow:0 0 0 3px var(--cc-primary-soft-glow, rgba(4,120,87,0.15)); }
         .cc-leads-toolbar .cc-report-search input::-webkit-search-cancel-button { -webkit-appearance:none; height:14px; width:14px; background:#cbd5e1; mask:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M18 6 6 18M6 6l12 12' stroke='black' stroke-width='2' fill='none' stroke-linecap='round'/></svg>") center/12px no-repeat; cursor:pointer; }
         .cc-leads-toolbar .cc-leads-date { display:flex; flex-direction:column; font-size:12px; color:#475569; gap:4px; }
         .cc-leads-toolbar input[type="date"] { padding:8px 10px; border:1px solid #d5ded7; border-radius:10px; font-size:13px; }
         .cc-leads-toolbar .cc-leads-actions { display:flex; gap:8px; margin-left:auto; }
         .cc-leads-btn { display:inline-flex; align-items:center; gap:6px; padding:8px 14px; border-radius:10px; font-size:13px; font-weight:600; border:1px solid transparent; cursor:pointer; }
-        .cc-leads-btn.primary { background:#047857; color:#fff; }
+        .cc-leads-btn.primary { background:var(--cc-primary, #047857); color:#fff; box-shadow:0 2px 8px var(--cc-primary-glow, rgba(4,120,87,0.25)); }
         .cc-leads-btn.ghost { background:#fff; color:#0f172a; border-color:#d5ded7; }
         .cc-leads-btn:hover { filter:brightness(0.96); }
         .cc-leads-count { font-size:13px; color:#475569; margin-left:2px; }
         .cc-leads-row-actions { display:inline-flex; gap:6px; }
         .cc-leads-icon-btn { width:34px; height:34px; border-radius:8px; border:1px solid #d5ded7; background:#fff; display:grid; place-items:center; cursor:pointer; color:#475569; }
-        .cc-leads-icon-btn:hover { color:#047857; border-color:#047857; }
+        .cc-leads-icon-btn:hover { color:var(--cc-primary, #047857); border-color:var(--cc-primary, #047857); }
         .cc-leads-icon-btn.edit:hover { color:#2563eb; border-color:#2563eb; background:#eff6ff; }
         .cc-leads-icon-btn.danger:hover { color:#dc2626; border-color:#dc2626; background:#fef2f2; }
         .cc-leads-assign-btn { display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px; border:1px dashed #cbd5e1; background:#fff; font-size:12px; color:#475569; cursor:pointer; max-width:180px; }
-        .cc-leads-assign-btn.assigned { background:#eef7f2; border-style:solid; border-color:#c7e0d4; color:#065f46; font-weight:600; }
+        .cc-leads-assign-btn.assigned { background:var(--cc-active-badge-bg, var(--cc-primary-light, #eef7f2)); border-style:solid; border-color:var(--cc-primary-glow, #c7e0d4); color:var(--cc-active-badge-text, var(--cc-primary, #065f46)); font-weight:600; }
         .cc-leads-assign-menu { position:fixed; z-index:60; width:260px; background:#fff; border:1px solid #d5ded7; border-radius:12px; box-shadow:0 12px 30px rgba(15,23,42,0.15); padding:8px; display:flex; flex-direction:column; gap:6px; }
         .cc-leads-assign-menu input { border:1px solid #e2e8f0; border-radius:8px; padding:6px 10px; font-size:12px; }
         .cc-leads-assign-menu ul { list-style:none; margin:0; padding:0; max-height:220px; overflow-y:auto; display:flex; flex-direction:column; gap:2px; }
@@ -591,7 +591,7 @@ export default function LeadsListRedesign() {
         .cc-leads-category-tabs { display:inline-flex; gap:4px; background:#f1f5f9; padding:3px; border-radius:10px; border:1px solid #e2e8f0; }
         .cc-leads-category-tabs button { border:0; background:transparent; padding:6px 14px; border-radius:7px; font-size:12.5px; font-weight:600; color:#475569; cursor:pointer; transition:all .15s ease; }
         .cc-leads-category-tabs button:hover { color:#0f172a; }
-        .cc-leads-category-tabs button.active { background:#fff; color:#047857; box-shadow:0 1px 3px rgba(0,0,0,0.08); font-weight:700; }
+        .cc-leads-category-tabs button.active { background:#fff; color:var(--cc-primary, #047857); box-shadow:0 1px 3px rgba(0,0,0,0.08); font-weight:700; }
 
         /* Leads Table Refinement: Crisp Borders & Sticky Header */
         .cc-leads-table-container {
@@ -652,7 +652,7 @@ export default function LeadsListRedesign() {
           background: #fafbfc;
         }
         .cc-leads-table-container tbody tr:hover td {
-          background: #f0fdf4 !important;
+          background: var(--cc-table-row-hover, var(--cc-primary-light, #f0fdf4)) !important;
         }
       `}</style>
 
@@ -684,8 +684,8 @@ export default function LeadsListRedesign() {
                 borderRadius: 10,
                 fontSize: 13,
                 background: "#fff",
-                fontWeight: 600,
-                color: selectedStatus !== "ALL" ? "#047857" : "#0f172a",
+                fontWeight: 650,
+                color: selectedStatus !== "ALL" ? "var(--cc-primary, #047857)" : "#0f172a",
                 outline: "none",
                 cursor: "pointer",
               }}
@@ -714,8 +714,8 @@ export default function LeadsListRedesign() {
                 borderRadius: 10,
                 fontSize: 13,
                 background: "#fff",
-                fontWeight: 600,
-                color: selectedEmployeeId !== "ALL" ? "#047857" : "#0f172a",
+                fontWeight: 650,
+                color: selectedEmployeeId !== "ALL" ? "var(--cc-primary, #047857)" : "#0f172a",
                 outline: "none",
                 cursor: "pointer",
                 minWidth: 150,
@@ -935,6 +935,7 @@ export default function LeadsListRedesign() {
                       <td>
                         {row.commission_percent !== null && row.commission_percent !== undefined ? (
                           <span
+                            className="cc-commission-badge"
                             style={{
                               display: "inline-flex",
                               alignItems: "center",
@@ -942,9 +943,9 @@ export default function LeadsListRedesign() {
                               borderRadius: "10px",
                               fontSize: "12px",
                               fontWeight: 700,
-                              background: "#ecfdf5",
-                              color: "#047857",
-                              border: "1px solid #a7f3d0",
+                              background: "var(--cc-active-badge-bg, var(--cc-primary-light, #ecfdf5))",
+                              color: "var(--cc-active-badge-text, var(--cc-primary, #047857))",
+                              border: "1px solid var(--cc-primary-glow, #a7f3d0)",
                             }}
                           >
                             {row.commission_percent}%
@@ -1084,7 +1085,7 @@ export default function LeadsListRedesign() {
                               {formatDateTime(row.latest_remark_date)}
                             </span>
                             {row.latest_remark_by && (
-                              <span style={{ color: "#047857", fontWeight: 600 }}>
+                              <span style={{ color: "var(--cc-primary, #047857)", fontWeight: 600 }}>
                                 by {row.latest_remark_by}
                               </span>
                             )}
@@ -1126,9 +1127,9 @@ export default function LeadsListRedesign() {
                               borderRadius: "6px",
                               border: "1px solid #cbd5e1",
                               background: "#fff",
-                              color: "#047857",
+                              color: "var(--cc-primary, #047857)",
                               fontSize: "11px",
-                              fontWeight: 600,
+                              fontWeight: 650,
                               cursor: "pointer",
                             }}
                             title="Add remark"
@@ -1391,7 +1392,7 @@ export default function LeadsListRedesign() {
           <div className="cc-leads-modal" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <h3 style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
-                <MessageSquare size={18} color="#047857" />
+                <MessageSquare size={18} color="var(--cc-primary, #047857)" />
                 Add Remark: {remarkModalLead.name || `#${remarkModalLead.lead_id}`}
               </h3>
               <button

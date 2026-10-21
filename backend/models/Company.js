@@ -69,6 +69,12 @@ const Company = sequelize.define(
       field: "role_permissions",
       comment: "Company customized role permissions overrides for MANAGER, OPS, BANKER, EMPLOYEE",
     },
+    themeConfig: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      field: "theme_config",
+      comment: "Company custom panel theme colors (primaryColor, hoverColor, backgroundColor, textColor, sidebarBg, etc.)",
+    },
     smtpConfig: {
       type: DataTypes.JSON,
       allowNull: true,
