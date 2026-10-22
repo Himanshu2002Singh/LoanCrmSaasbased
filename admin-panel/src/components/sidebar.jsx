@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import CrmLogo from "./CrmLogo";
 import { resolveLogoUrl } from "../utils/logo";
@@ -120,6 +120,7 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const [logoFailed, setLogoFailed] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const companyLogo = localStorage.getItem("companyLogo");
   const companyName = localStorage.getItem("companyName");
 
@@ -244,6 +245,29 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
     return true;
   });
 
+  const filteredNavItems = useMemo(() => {
+    if (!searchQuery.trim()) return navItems;
+    const q = searchQuery.toLowerCase().trim();
+    return navItems.filter(
+      (item) => item.label.toLowerCase().includes(q) || item.path.toLowerCase().includes(q)
+    );
+  }, [navItems, searchQuery]);
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter" && filteredNavItems.length > 0) {
+      const target = filteredNavItems[0];
+      if (target.path === "/logout") {
+        handleLogout();
+      } else {
+        navigate(target.path);
+        setIsOpen && setIsOpen(false);
+      }
+      setSearchQuery("");
+    } else if (e.key === "Escape") {
+      setSearchQuery("");
+    }
+  };
+
   const getIcon = (icon) => {
     switch (icon) {
       case "home":
@@ -334,7 +358,7 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
           ${isOpen ? "translate-x-0" : "-translate-x-full"} md:translate-x-0
         `}
       >
-        <div className="w-full flex items-center justify-center py-6 px-4 shrink-0">
+        <div className="w-full flex items-center justify-center py-5 px-4 shrink-0">
           <Link to={employeeRole === "operations" ? "/operations" : "/"} onClick={() => setIsOpen && setIsOpen(false)}>
             <div className="flex items-center justify-center p-2 rounded-lg">
               {companyLogo && !logoFailed ? (
@@ -351,34 +375,92 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
           </Link>
         </div>
 
+        {/* 🔍 Sidebar Menu Search Bar */}
+        <div className="px-3 mb-2 shrink-0">
+          <div className="relative flex items-center bg-[#0f172a]/70 border border-slate-700/80 rounded-lg px-3 py-2 text-slate-300 focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500 transition-all shadow-inner">
+            <svg
+              className="w-4 h-4 text-slate-400 mr-2 shrink-0"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input
+              type="text"
+              placeholder="Search menu... (Press Enter)"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={handleKeyDown}
+              className="w-full bg-transparent text-sm text-white placeholder-slate-400 outline-none"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery("")}
+                className="text-slate-400 hover:text-white ml-1 shrink-0 p-0.5 rounded transition-colors"
+                title="Clear search"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
+          </div>
+          {searchQuery && (
+            <div className="flex items-center justify-between mt-1 px-1 text-[11px] text-slate-400">
+              <span>{filteredNavItems.length} found</span>
+              {filteredNavItems.length > 0 && (
+                <span className="text-blue-400 font-medium">Press ↵ Enter</span>
+              )}
+            </div>
+          )}
+        </div>
+
         <div className="flex-1 overflow-y-auto px-4 pb-4">
-          <ul className="space-y-2">
-            {navItems.map(({ path, label, icon }) => (
-              <li key={path}>
-                {path === "/logout" ? (
-                  <button
-                    type="button"
-                    onClick={handleLogout}
-                    className="w-full flex items-center rounded-lg px-4 py-3 transition-all text-blue-100 hover:bg-blue-700 hover:text-white"
-                  >
-                    {getIcon(icon)}
-                    <span className="text-sm font-medium">{label}</span>
-                  </button>
-                ) : (
-                  <Link
-                    to={path}
-                    onClick={() => setIsOpen && setIsOpen(false)}
-                    className={`flex items-center rounded-lg px-4 py-3 transition-all ${isActive(path)
-                        ? "bg-blue-600 text-white shadow-md"
-                        : "text-blue-100 hover:bg-blue-700 hover:text-white"
-                      }`}
-                  >
-                    {getIcon(icon)}
-                    <span className="text-sm font-medium">{label}</span>
-                  </Link>
-                )}
+          <ul className="space-y-1.5">
+            {filteredNavItems.length === 0 ? (
+              <li className="py-8 px-2 text-center text-slate-400 text-xs">
+                <p className="font-medium text-slate-300">No matching option</p>
+                <p className="text-slate-400 mt-0.5">"{searchQuery}"</p>
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery("")}
+                  className="mt-3 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-blue-400 rounded-md text-xs font-medium transition-colors"
+                >
+                  Clear search
+                </button>
               </li>
-            ))}
+            ) : (
+              filteredNavItems.map(({ path, label, icon }) => (
+                <li key={path}>
+                  {path === "/logout" ? (
+                    <button
+                      type="button"
+                      onClick={handleLogout}
+                      className="w-full flex items-center rounded-lg px-4 py-2.5 transition-all text-blue-100 hover:bg-blue-700 hover:text-white"
+                    >
+                      {getIcon(icon)}
+                      <span className="text-sm font-medium">{label}</span>
+                    </button>
+                  ) : (
+                    <Link
+                      to={path}
+                      onClick={() => setIsOpen && setIsOpen(false)}
+                      className={`flex items-center rounded-lg px-4 py-2.5 transition-all ${
+                        isActive(path)
+                          ? "bg-blue-600 text-white shadow-md"
+                          : "text-blue-100 hover:bg-blue-700 hover:text-white"
+                      }`}
+                    >
+                      {getIcon(icon)}
+                      <span className="text-sm font-medium">{label}</span>
+                    </Link>
+                  )}
+                </li>
+              ))
+            )}
           </ul>
         </div>
 
