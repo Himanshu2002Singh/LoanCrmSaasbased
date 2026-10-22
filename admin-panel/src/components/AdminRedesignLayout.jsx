@@ -6,6 +6,7 @@ import {
   Building2,
   CalendarDays,
   CalendarClock,
+  CheckCircle2,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -206,6 +207,7 @@ const masterNavStructure = [
     permission: "viewLeads",
     children: [
       { path: "/leads", label: "All Leads", icon: FileText, exact: true, permission: "viewLeads" },
+      { path: "/disbursed-leads", label: "Disbursed Leads", icon: CheckCircle2, permission: "viewLeads" },
       {
         path: "/leads?action=add",
         label: "+ Add Lead",

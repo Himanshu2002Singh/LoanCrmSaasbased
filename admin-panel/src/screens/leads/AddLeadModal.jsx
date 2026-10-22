@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import API_URL from "../../config";
+import { formatLeadCode } from "../../utils/leadUtils";
 
 const MODES = [
   { key: "manual", label: "Manual", icon: User },
@@ -445,7 +446,7 @@ export default function AddLeadModal({ open, onClose, onCreated }) {
                         {duplicateAlert.lead && (
                           <>
                             <br />
-                            <strong>Existing Lead:</strong> Lead #{duplicateAlert.lead.id} &bull; Status:{" "}
+                            <strong>Existing Lead:</strong> Lead #{formatLeadCode(duplicateAlert.lead)} &bull; Status:{" "}
                             <strong>{duplicateAlert.lead.status}</strong> &bull; Product:{" "}
                             {duplicateAlert.lead.loanType} &bull; Assigned:{" "}
                             {duplicateAlert.lead.assignedTo || "Unassigned"}

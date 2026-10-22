@@ -38,6 +38,7 @@ import {
 } from "lucide-react";
 import API_URL from "../config";
 import LeadsPopup from "../components/leadsPopup";
+import ExecutiveFinanceOverview from "../components/ExecutiveFinanceOverview";
 
 const statusLabels = [
   "Fresh Lead",
@@ -547,6 +548,9 @@ function HomeRedesign({ dashboardFilters, dashboardFilterOptions }) {
           </span>
         </button>
       </section>
+
+      {/* EXECUTIVE FINANCIAL OVERVIEW (Disbursal by month & Cash in vs cash out) */}
+      <ExecutiveFinanceOverview payoutMetrics={payouts} />
 
       {/* MONTH-WISE PAYOUTS & DISBURSAL TRACKING SECTION (Role-based / Payouts Permission Protected) */}
       {payouts.canView && (

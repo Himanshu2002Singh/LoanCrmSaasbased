@@ -167,6 +167,7 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
   const managerNavItems = [
     { path: "/", label: "Dashboard", icon: "home" },
     { path: "/leads", label: "Leads", icon: "document", permission: "viewLeads" },
+    { path: "/disbursed-leads", label: "Disbursed Leads", icon: "performance", permission: "viewLeads" },
     { path: "/followup-work", label: "Today Followup / Work", icon: "calendar", permission: "viewFollowupWork" },
     { path: "/tasks", label: "Tasks", icon: "task", permission: "viewTasks" },
     { path: "/notes", label: "Quick Notes", icon: "document", permission: "viewNotes" },
@@ -193,6 +194,7 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
   const operationsNavItems = [
     { path: "/", label: "Dashboard", icon: "home", permission: "viewDashboard" },
     { path: "/leads", label: "Leads", icon: "document", permission: "viewLeads" },
+    { path: "/disbursed-leads", label: "Disbursed Leads", icon: "performance", permission: "viewLeads" },
     { path: "/followup-work", label: "Today Followup / Work", icon: "calendar", permission: "viewFollowupWork" },
     { path: "/notes", label: "Quick Notes", icon: "document", permission: "viewNotes" },
     { path: "/operations", label: "Operations", icon: "operations", permission: "viewOperations" },
@@ -209,6 +211,7 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
   const employeeNavItems = [
     { path: "/", label: "Dashboard", icon: "home", permission: "viewDashboard" },
     { path: "/leads", label: "Leads", icon: "document", permission: "viewLeads" },
+    { path: "/disbursed-leads", label: "Disbursed Leads", icon: "performance", permission: "viewLeads" },
     { path: "/followup-work", label: "Today Followup / Work", icon: "calendar", permission: "viewFollowupWork" },
     { path: "/notes", label: "Quick Notes", icon: "document", permission: "viewNotes" },
     { path: "/expenses", label: "Expense by Employees", icon: "expense", permission: "viewExpenses" },

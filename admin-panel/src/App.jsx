@@ -153,6 +153,14 @@ function App() {
           }
         />
         <Route
+          path="/disbursed-leads"
+          element={
+            <PageShell allowedRoles={["manager", "operations", "calling", "employee", "finance"]}>
+              <LeadsList disbursedOnly={true} />
+            </PageShell>
+          }
+        />
+        <Route
           path="/followup-work"
           element={
             <PageShell

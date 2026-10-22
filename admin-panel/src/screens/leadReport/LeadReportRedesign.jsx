@@ -16,6 +16,7 @@ import {
 import API_URL from "../../config";
 import CcPagination from "../../components/CcPagination";
 import { useStatuses } from "../../contexts/StatusContext";
+import { formatLeadCode } from "../../utils/leadUtils";
 
 // Loan products are configured per company, so the labels are read rather
 // than listed here.
@@ -152,7 +153,7 @@ function LeadReportRedesign() {
   const visibleLeads = leads.filter((lead) => {
     if (!debouncedSearchTerm.trim()) return true;
     const query = debouncedSearchTerm.toLowerCase();
-    return [lead.lead_id, lead.name, lead.number, lead.status, lead.loan_type]
+    return [formatLeadCode(lead), lead.lead_id, lead.name, lead.number, lead.status, lead.loan_type]
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(query));
   });
@@ -238,7 +239,7 @@ function LeadReportRedesign() {
           <table>
             <thead>
               <tr>
-                <th>Lead ID</th>
+                <th>LEAD</th>
                 <th>Client name</th>
                 <th>Number</th>
                 <th>Status</th>
@@ -250,7 +251,7 @@ function LeadReportRedesign() {
               {visibleLeads.length ? (
                 visibleLeads.map((lead) => (
                   <tr key={lead.lead_id}>
-                    <td>{lead.lead_id}</td>
+                    <td>#{formatLeadCode(lead)}</td>
                     <td>{lead.name || "--"}</td>
                     <td>{lead.number || "--"}</td>
                     <td>

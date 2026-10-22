@@ -23,6 +23,11 @@ import {
   CheckCircle2,
   ChevronDown,
   X,
+  Check,
+  Building2,
+  Coins,
+  ArrowUpDown,
+  Phone,
 } from "lucide-react";
 import API_URL from "../../../config";
 import AddLeadModal from "../AddLeadModal";
@@ -33,49 +38,107 @@ const PAGE_SIZE = 20;
 const EXPORT_PAGE_SIZE = 200;
 const numberFormatter = new Intl.NumberFormat("en-IN");
 
+const formatLocalDate = (d) => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
 const getDefaultRange = () => {
   const to = new Date();
+  to.setDate(to.getDate() + 1);
   const from = new Date();
-  from.setDate(from.getDate() - 30);
+  from.setDate(from.getDate() - 60);
   return {
-    from: from.toISOString().split("T")[0],
-    to: to.toISOString().split("T")[0],
+    from: formatLocalDate(from),
+    to: formatLocalDate(to),
   };
 };
 
-export default function LeadsListRedesign() {
+import { formatLeadCode, formatCurrencyCompact } from "../../../utils/leadUtils";
+export { formatLeadCode, formatCurrencyCompact };
+
+export default function LeadsListRedesign({ disbursedOnly = false }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const isDisbursedView = disbursedOnly || location.pathname === "/disbursed-leads";
   const defaults = useMemo(getDefaultRange, []);
+
+  // Data states
   const [rows, setRows] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
-  const [docReqLead, setDocReqLead] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  // Filters
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [dateRange, setDateRange] = useState(defaults);
-  const [statusCategory, setStatusCategory] = useState("ALL"); // "ALL" | "PENDING" | "COMPLETED" | "WORKED"
+  const [statusCategory, setStatusCategory] = useState(isDisbursedView ? "COMPLETED" : "ALL"); // "ALL" | "PENDING" | "COMPLETED" | "WORKED"
   const [workedCount, setWorkedCount] = useState(0);
-  const [selectedStatus, setSelectedStatus] = useState("ALL");
+  const [selectedStatus, setSelectedStatus] = useState(isDisbursedView ? "DISBURSED" : "ALL");
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("ALL");
+  const [selectedProduct, setSelectedProduct] = useState("ALL");
+  const [selectedSource, setSelectedSource] = useState("ALL");
+  const [sortOrder, setSortOrder] = useState("DESC"); // "DESC" | "ASC"
+
+  // Dropdown data
   const [statusesList, setStatusesList] = useState([]);
+  const [lendersList, setLendersList] = useState([]);
+  const [productsList, setProductsList] = useState([
+    "DOD",
+    "Personal Loan",
+    "Business Loan",
+    "Home Loan",
+    "Loan Against Property",
+    "Car Loan",
+    "Education Loan",
+    "Gold Loan",
+    "Overdraft",
+    "Working Capital",
+    "Credit Card",
+  ]);
+  const [sourcesList, setSourcesList] = useState([
+    "Self",
+    "Direct",
+    "Partner",
+    "Connector",
+    "Website",
+    "Meta Ads",
+    "Google Ads",
+    "Referral",
+    "Telecalling",
+  ]);
+
+  // Hand-to-hand inline editing
+  const [editingCell, setEditingCell] = useState(null); // { leadId, field }
+  const [inlineVal, setInlineVal] = useState("");
+  const [savingInline, setSavingInline] = useState(false);
+
+  // Modals & Popovers
+  const [docReqLead, setDocReqLead] = useState(null);
   const [remarkModalLead, setRemarkModalLead] = useState(null);
   const [remarkText, setRemarkText] = useState("");
   const [remarkNextDate, setRemarkNextDate] = useState("");
   const [submittingRemark, setSubmittingRemark] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
-  const [assignFor, setAssignFor] = useState(null); // { leadId, anchorRect }
+
+  // Hand-to-hand reassign dropdown
+  const [assignFor, setAssignFor] = useState(null); // { leadId, anchor }
   const [assignQuery, setAssignQuery] = useState("");
   const [debouncedAssignQuery, setDebouncedAssignQuery] = useState("");
   const menuRef = useRef(null);
+
+  // Hand-to-hand status dropdown
   const [statusMenuFor, setStatusMenuFor] = useState(null); // { leadId, currentStatus, anchor }
   const [updatingStatusLeadId, setUpdatingStatusLeadId] = useState(null);
   const statusMenuRef = useRef(null);
 
+  // Permissions & Roles
   const userRole = localStorage.getItem("userRole") || "";
   const employeeRole = localStorage.getItem("employeeRole") || "";
   const isEmployee =
@@ -153,9 +216,9 @@ export default function LeadsListRedesign() {
     if (s === "DISBURSED" || s === "LOAN DISBURSEMENT" || s === "CLOSED") {
       return {
         stage: "Stage 6/6 • Disbursed",
-        color: "var(--cc-active-badge-text, var(--cc-primary, #047857))",
-        bg: "var(--cc-active-badge-bg, var(--cc-primary-light, #ecfdf5))",
-        border: "var(--cc-primary-glow, #a7f3d0)",
+        color: "#047857",
+        bg: "#ecfdf5",
+        border: "#a7f3d0",
         icon: "🎉",
       };
     }
@@ -195,98 +258,269 @@ export default function LeadsListRedesign() {
         icon: "📞",
       };
     }
-    if (s === "REJECTED" || s === "CANCELLED") {
+    if (s === "REJECTED" || s === "NOT INTERESTED" || s === "LOST") {
       return {
-        stage: "Closed / Rejected",
-        color: "#b91c1c",
+        stage: "Closed • Rejected",
+        color: "#dc2626",
         bg: "#fef2f2",
         border: "#fecaca",
         icon: "❌",
       };
     }
     return {
-      stage: "Stage 1/6 • New Lead",
+      stage: "Stage 1/6 • Fresh Lead",
       color: "#475569",
       bg: "#f8fafc",
-      border: "#e2e8f0",
-      icon: "🌱",
+      border: "#cbd5e1",
+      icon: "🆕",
     };
   };
 
-  const fetchStatuses = () => {
+  // Debounced search
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearchTerm(searchTerm.trim()), 350);
+    return () => clearTimeout(t);
+  }, [searchTerm]);
+
+  // Debounced assign search
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedAssignQuery(assignQuery.trim()), 200);
+    return () => clearTimeout(t);
+  }, [assignQuery]);
+
+  // Fetch employees, statuses, and lenders
+  useEffect(() => {
     axios
-      .get(`${API_URL}/master-configs/LEAD_STATUS`, { params: { includeInactive: false } })
+      .get(`${API_URL}/users?limit=200`)
       .then((res) => {
-        const list = res.data?.data || [];
-        setStatusesList(list);
+        const list = res.data?.data || res.data?.users || res.data || [];
+        setEmployees(Array.isArray(list) ? list : []);
       })
-      .catch(() => setStatusesList([]));
-  };
+      .catch((err) => console.error("Failed to load users:", err));
 
-  const fetchEmployees = () => {
     axios
-      .get(`${API_URL}/users`, { params: { limit: 200 } })
-      .then((res) => setEmployees(res.data?.data || []))
-      .catch(() => setEmployees([]));
-  };
-
-  const fetchCounts = () => {
-    axios
-      .get(`${API_URL}/leads/counts`)
+      .get(`${API_URL}/lead-statuses`)
       .then((res) => {
-        setWorkedCount(res.data?.data?.workedCount || 0);
+        const list = res.data?.data || res.data || [];
+        setStatusesList(Array.isArray(list) ? list : []);
       })
-      .catch(() => {});
-  };
+      .catch((err) => console.error("Failed to load statuses:", err));
 
-  const fetchLeads = async (pageOverride, search = debouncedSearchTerm) => {
-    setLoading(true);
-    const page = pageOverride || currentPage;
-    const isWorked = statusCategory === "WORKED";
+    axios
+      .get(`${API_URL}/lenders`)
+      .then((res) => {
+        const list = res.data?.data || res.data || [];
+        setLendersList(Array.isArray(list) ? list : []);
+      })
+      .catch((err) => console.error("Failed to load lenders:", err));
+  }, []);
+
+  const fetchWorkedCount = async () => {
+    if (!isEmployee) return;
     try {
-      const res = await axios.get(`${API_URL}/leads`, {
-        params: {
-          page,
-          limit: PAGE_SIZE,
-          search: search || "",
-          fromDate: dateRange.from || "",
-          toDate: dateRange.to || "",
-          ...(isWorked
-            ? { scope: "worked" }
-            : {
-                statusCategory: statusCategory !== "ALL" ? statusCategory : undefined,
-              }),
-          status: selectedStatus !== "ALL" ? selectedStatus : undefined,
-          assignedEmployeeId: selectedEmployeeId !== "ALL" ? selectedEmployeeId : undefined,
-        },
+      const res = await axios.get(`${API_URL}/leads/worked`, {
+        params: { limit: 1 },
       });
-      const pagination = res.data?.pagination || {};
-      setRows(res.data?.data || []);
-      setTotalPages(pagination.totalPages || 1);
-      setTotalItems(pagination.totalItems ?? pagination.total ?? 0);
-    } catch (error) {
-      console.error("Error fetching leads", error);
+      setWorkedCount(res.data?.pagination?.totalItems ?? res.data?.totalItems ?? 0);
+    } catch (err) {
+      console.warn("Could not fetch worked count:", err.message);
+    }
+  };
+
+  useEffect(() => {
+    fetchWorkedCount();
+  }, [isEmployee]);
+
+  // Fetch main leads
+  const fetchLeads = async (page = 1) => {
+    setLoading(true);
+    try {
+      const isWorked = statusCategory === "WORKED";
+      const endpoint = isWorked ? `${API_URL}/leads/worked` : `${API_URL}/leads`;
+
+      const params = {
+        page,
+        limit: PAGE_SIZE,
+      };
+
+      if (!isWorked) {
+        if (isDisbursedView) {
+          params.status = "DISBURSED";
+        } else {
+          if (statusCategory !== "ALL") params.statusCategory = statusCategory;
+          if (selectedStatus !== "ALL") params.status = selectedStatus;
+        }
+        if (dateRange.from) {
+          params.fromDate = dateRange.from;
+          params.from = dateRange.from;
+        }
+        if (dateRange.to) {
+          params.toDate = dateRange.to;
+          params.to = dateRange.to;
+        }
+        if (selectedEmployeeId !== "ALL") params.assignedEmployeeId = selectedEmployeeId;
+        if (selectedProduct !== "ALL") params.loanType = selectedProduct;
+        if (selectedSource !== "ALL") params.source = selectedSource;
+      }
+
+      if (debouncedSearchTerm) {
+        params.search = debouncedSearchTerm;
+      }
+
+      const res = await axios.get(endpoint, { params });
+      const data = res.data || {};
+      const leadRows = Array.isArray(data.data)
+        ? data.data
+        : Array.isArray(data.rows)
+        ? data.rows
+        : Array.isArray(data.leads)
+        ? data.leads
+        : Array.isArray(data)
+        ? data
+        : [];
+      setRows(leadRows);
+      const pagination = data.pagination || {};
+      setTotalPages(
+        pagination.totalPages ||
+          Math.ceil((pagination.totalItems ?? pagination.total ?? leadRows.length) / PAGE_SIZE) ||
+          1
+      );
+      setTotalItems(pagination.totalItems ?? pagination.total ?? leadRows.length);
+    } catch (err) {
+      console.error("Failed to fetch leads:", err);
+      toast.error(err.response?.data?.message || "Failed to load leads");
       setRows([]);
-      setTotalPages(1);
-      setTotalItems(0);
-      toast.error("Could not load leads");
     } finally {
       setLoading(false);
     }
   };
 
+  useEffect(() => {
+    fetchLeads(currentPage);
+  }, [currentPage, debouncedSearchTerm, dateRange.from, dateRange.to, statusCategory, selectedStatus, selectedEmployeeId, selectedProduct, selectedSource]);
+
+  // Sorted and filtered displayed rows
+  const displayedRows = useMemo(() => {
+    let list = [...rows];
+    list.sort((a, b) => {
+      const dateA = new Date(a.createdAt || a.date || 0).getTime();
+      const dateB = new Date(b.createdAt || b.date || 0).getTime();
+      return sortOrder === "DESC" ? dateB - dateA : dateA - dateB;
+    });
+    return list;
+  }, [rows, sortOrder]);
+
+  // Hand-to-Hand Inline Editable Save Function
+  const handleInlineSave = async (leadId, field, value) => {
+    if (!canEditLead) {
+      toast.error("Permission denied to edit lead");
+      return;
+    }
+    setSavingInline(true);
+    try {
+      // Optimistic UI update
+      setRows((prev) =>
+        prev.map((r) => {
+          if (r.lead_id === leadId) {
+            const up = { ...r };
+            if (field === "name") up.name = value;
+            if (field === "loan_type") up.loan_type = value;
+            if (field === "est_budget") up.est_budget = value;
+            if (field === "source") up.source = value;
+            if (field === "bank_name") up.bank_name = value;
+            return up;
+          }
+          return r;
+        })
+      );
+
+      const payload = {};
+      if (field === "name") payload.name = value;
+      if (field === "loan_type") payload.loan_type = value;
+      if (field === "est_budget") payload.est_budget = value;
+      if (field === "source") payload.source = value;
+      if (field === "bank_name") payload.bank_name = value;
+
+      await axios.patch(`${API_URL}/leads/${leadId}`, payload);
+      toast.success("Updated successfully", { autoClose: 1200 });
+      setEditingCell(null);
+    } catch (err) {
+      console.error("Inline save error:", err);
+      toast.error(err.response?.data?.message || "Failed to update field");
+      fetchLeads(currentPage);
+    } finally {
+      setSavingInline(false);
+    }
+  };
+
+  // Hand-to-Hand Status update
+  const handleStatusChange = async (leadId, newStatusObj) => {
+    const statusVal = typeof newStatusObj === "string" ? newStatusObj : (newStatusObj.value || newStatusObj.label);
+    setUpdatingStatusLeadId(leadId);
+    try {
+      await axios.patch(`${API_URL}/leads/${leadId}/status`, {
+        status: statusVal,
+      });
+      setRows((prev) =>
+        prev.map((row) =>
+          row.lead_id === leadId
+            ? { ...row, status: statusVal, status_value: statusVal }
+            : row
+        )
+      );
+      toast.success(`Status updated to "${newStatusObj.label || statusVal}"`);
+      setStatusMenuFor(null);
+    } catch (error) {
+      console.error("Failed to update status:", error);
+      toast.error(error.response?.data?.message || "Failed to update status");
+    } finally {
+      setUpdatingStatusLeadId(null);
+    }
+  };
+
+  // Hand-to-Hand Reassign update
+  const openAssignMenu = (event, leadId) => {
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
+    setAssignFor({ leadId, anchor: rect });
+    setAssignQuery("");
+    setDebouncedAssignQuery("");
+  };
+
+  const handleAssign = async (leadId, emp) => {
+    try {
+      await axios.put(`${API_URL}/leads/${leadId}`, {
+        assignedEmployeeId: emp ? emp.id : null,
+      });
+      setRows((prev) =>
+        prev.map((row) =>
+          row.lead_id === leadId
+            ? { ...row, owner: emp ? emp.name : "Unassigned", assignedEmployeeId: emp ? emp.id : null }
+            : row
+        )
+      );
+      toast.success(emp ? `Assigned to ${emp.name}` : "Lead unassigned");
+      setAssignFor(null);
+    } catch (error) {
+      console.error("Failed to assign lead:", error);
+      toast.error(error.response?.data?.message || "Failed to assign lead");
+    }
+  };
+
+  const employeeMatches = employees.filter((emp) => {
+    if (!debouncedAssignQuery.trim()) return true;
+    const q = debouncedAssignQuery.toLowerCase();
+    return (
+      String(emp.id).toLowerCase().includes(q) ||
+      String(emp.name || "").toLowerCase().includes(q)
+    );
+  });
+
+  // Hand-to-Hand Quick Remark modal handlers
   const openRemarkModal = (lead) => {
     setRemarkModalLead(lead);
     setRemarkText("");
-    if (lead.next_meeting) {
-      const dt = new Date(lead.next_meeting);
-      const formatted = new Date(dt.getTime() - dt.getTimezoneOffset() * 60000)
-        .toISOString()
-        .slice(0, 16);
-      setRemarkNextDate(formatted);
-    } else {
-      setRemarkNextDate("");
-    }
+    setRemarkNextDate("");
   };
 
   const handleSaveRemark = async (e) => {
@@ -304,7 +538,7 @@ export default function LeadsListRedesign() {
       if (remarkNextDate) {
         payload.nextFollowupDate = new Date(remarkNextDate).toISOString();
       }
-      const res = await axios.post(`${API_URL}/leads/${remarkModalLead.lead_id}/remarks`, payload);
+      await axios.post(`${API_URL}/leads/${remarkModalLead.lead_id}/remarks`, payload);
       toast.success("Remark added successfully");
 
       const nowIso = new Date().toISOString();
@@ -326,278 +560,298 @@ export default function LeadsListRedesign() {
       );
 
       setRemarkModalLead(null);
-      setRemarkText("");
-      setRemarkNextDate("");
     } catch (err) {
-      console.error("Failed to add remark:", err);
-      toast.error(err.response?.data?.message || "Failed to add remark");
+      console.error("Failed to save remark:", err);
+      toast.error(err.response?.data?.message || "Failed to save remark");
     } finally {
       setSubmittingRemark(false);
     }
   };
 
-  useEffect(() => {
-    fetchEmployees();
-    fetchStatuses();
-    fetchCounts();
-  }, []);
+  // Delete lead handler
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    try {
+      await axios.delete(`${API_URL}/leads/${deleteTarget.lead_id}`);
+      toast.success("Lead deleted successfully");
+      setRows((prev) => prev.filter((r) => r.lead_id !== deleteTarget.lead_id));
+      setDeleteTarget(null);
+      setTotalItems((prev) => Math.max(0, prev - 1));
+    } catch (err) {
+      console.error("Failed to delete lead:", err);
+      toast.error(err.response?.data?.message || "Failed to delete lead");
+    }
+  };
 
-  useEffect(() => {
-    const debounce = setTimeout(() => setDebouncedAssignQuery(assignQuery), 400);
-    return () => clearTimeout(debounce);
-  }, [assignQuery]);
+  // Export to Excel
+  const handleExport = async () => {
+    try {
+      toast.info("Preparing Excel export...");
+      const exportRows = displayedRows.map((r) => ({
+        "Lead Code": formatLeadCode(r),
+        "DB Lead ID": r.lead_id,
+        "Date": r.createdAt ? moment(r.createdAt).format("YYYY-MM-DD") : "--",
+        "Customer Name": r.name || "--",
+        "Phone": r.number || "--",
+        "Loan Product": r.loan_type || "--",
+        "Loan Amount": r.est_budget || "--",
+        "Source": r.source || "Self",
+        "Bank": r.bank_name || "--",
+        "Status": r.status || "--",
+        "Assigned To": r.owner || "Unassigned",
+        "Latest Remark": r.latest_remark || "--",
+        "Remark Date": r.latest_remark_date ? moment(r.latest_remark_date).format("YYYY-MM-DD HH:mm") : "--",
+      }));
+      const ws = XLSX.utils.json_to_sheet(exportRows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Leads");
+      XLSX.writeFile(wb, `Leads_Export_${moment().format("YYYY-MM-DD")}.xlsx`);
+      toast.success("Excel downloaded successfully");
+    } catch (err) {
+      console.error("Export error:", err);
+      toast.error("Failed to export leads");
+    }
+  };
 
-  useEffect(() => {
-    const debounce = setTimeout(() => {
-      setDebouncedSearchTerm(searchTerm);
-      setCurrentPage(1);
-    }, 400);
-    return () => clearTimeout(debounce);
-  }, [searchTerm]);
+  // KPI Metrics Calculation for Top Cards
+  const kpiMetrics = useMemo(() => {
+    let totalEnquired = 0;
+    let sentToBank = 0;
+    let docsPending = 0;
+    let noStatusYet = 0;
 
-  useEffect(() => {
-    fetchLeads(currentPage, debouncedSearchTerm);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, debouncedSearchTerm, dateRange.from, dateRange.to, statusCategory, selectedStatus, selectedEmployeeId]);
+    rows.forEach((r) => {
+      const b = parseFloat(r.est_budget) || 0;
+      totalEnquired += b;
+      const s = String(r.status || "").toUpperCase();
+      if (s.includes("BANK") || s.includes("LOGIN") || s.includes("SUBMITTED")) {
+        sentToBank++;
+      } else if (s.includes("DOC") || s.includes("VERIFICATION") || s.includes("KYC")) {
+        docsPending++;
+      } else if (!s || s === "NEW" || s === "FRESH" || s === "NOT SET" || s === "UNASSIGNED") {
+        noStatusYet++;
+      }
+    });
 
+    const enquiredFormatted =
+      totalEnquired >= 10000000
+        ? `₹${(totalEnquired / 10000000).toFixed(2)} Cr enquired`
+        : totalEnquired >= 100000
+        ? `₹${(totalEnquired / 100000).toFixed(2)} L enquired`
+        : `₹${Math.round(totalEnquired).toLocaleString("en-IN")} enquired`;
+
+    return {
+      totalCount: totalItems || rows.length,
+      enquiredFormatted,
+      sentToBank,
+      docsPending,
+      noStatusYet,
+    };
+  }, [rows, totalItems]);
+
+  // Click outside menus
   useEffect(() => {
-    if (!assignFor) return;
-    const onDoc = (event) => {
-      if (menuRef.current && !menuRef.current.contains(event.target)) {
+    const onDoc = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
         setAssignFor(null);
       }
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [assignFor]);
-
-  useEffect(() => {
-    if (!statusMenuFor) return;
-    const onDoc = (event) => {
-      if (statusMenuRef.current && !statusMenuRef.current.contains(event.target)) {
+      if (statusMenuRef.current && !statusMenuRef.current.contains(e.target)) {
         setStatusMenuFor(null);
       }
     };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
-  }, [statusMenuFor]);
-
-  const handleStatusChange = async (leadId, newStatusObj) => {
-    const statusVal = typeof newStatusObj === "string" ? newStatusObj : (newStatusObj.value || newStatusObj.label);
-    setUpdatingStatusLeadId(leadId);
-    try {
-      await axios.patch(`${API_URL}/leads/${leadId}/status`, {
-        status: statusVal,
-      });
-      setRows((prev) =>
-        prev.map((row) =>
-          row.lead_id === leadId
-            ? { ...row, status: statusVal, status_value: statusVal }
-            : row
-        )
-      );
-      toast.success(`Status updated to "${newStatusObj.label || statusVal}"`);
-      setStatusMenuFor(null);
-      fetchCounts();
-    } catch (error) {
-      console.error("Failed to update status:", error);
-      toast.error(error.response?.data?.message || "Failed to update status");
-    } finally {
-      setUpdatingStatusLeadId(null);
-    }
-  };
-
-  const handleAssign = async (leadId, emp) => {
-    try {
-      await axios.put(`${API_URL}/leads/${leadId}`, {
-        person_id: emp.id,
-      });
-      setRows((prev) =>
-        prev.map((row) =>
-          row.lead_id === leadId ? { ...row, person_id: emp.id, owner: emp.name, current_owner: emp.name } : row
-        )
-      );
-      toast.success("Assigned successfully");
-      setAssignFor(null);
-      setAssignQuery("");
-      setDebouncedAssignQuery("");
-      fetchCounts();
-      if (statusCategory === "WORKED" || (!isCompanyAdmin && !userPermissions.viewAllLeads)) {
-        fetchLeads(currentPage, debouncedSearchTerm);
-      }
-    } catch (error) {
-      console.error(error);
-      toast.error("Failed to assign");
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!deleteTarget) return;
-    const leadId = deleteTarget.lead_id;
-    try {
-      await toast.promise(axios.delete(`${API_URL}/leads/${leadId}`), {
-        pending: "Deleting lead...",
-        success: `Lead ${leadId} deleted`,
-        error: "Failed to delete",
-      });
-      setRows((prev) => prev.filter((row) => row.lead_id !== leadId));
-      setDeleteTarget(null);
-    } catch (error) {
-      console.error(error);
-    }
-  };
-
-  const handleDownloadExcel = async () => {
-    if (rows.length === 0) {
-      toast.info("No leads to download");
-      return;
-    }
-    const loadingToast = toast.loading("Preparing Excel...");
-    try {
-      // The API caps a page at 200 rows, so the export walks the pages.
-      const all = [];
-      for (let page = 1; ; page += 1) {
-        const res = await axios.get(`${API_URL}/leads`, {
-          params: {
-            page,
-            limit: EXPORT_PAGE_SIZE,
-            search: debouncedSearchTerm || "",
-            fromDate: dateRange.from || "",
-            toDate: dateRange.to || "",
-          },
-        });
-        const batch = res.data?.data || [];
-        all.push(...batch);
-        if (batch.length < EXPORT_PAGE_SIZE || page >= (res.data?.pagination?.totalPages || 1)) break;
-      }
-      if (all.length === 0) {
-        toast.update(loadingToast, {
-          render: "No leads match current filters",
-          type: "info",
-          isLoading: false,
-          autoClose: 3000,
-        });
-        return;
-      }
-      const excel = all.map((row) => {
-        const item = {
-          "Lead ID": row.lead_id,
-          Name: row.name || "",
-          Phone: row.number || "",
-          Email: row.email || "",
-          Status: row.status || "",
-          "Assigned To": row.owner || "Unassigned",
-          "Loan Type": row.loan_type || "",
-          Source: row.source || "",
-        };
-        if (canViewCommission) {
-          item["Commission (%)"] =
-            row.commission_percent !== null && row.commission_percent !== undefined
-              ? `${row.commission_percent}%`
-              : "0%";
-        }
-        item["Next Meeting"] = row.next_meeting
-          ? moment(row.next_meeting).format("DD MMM YYYY, hh:mm A")
-          : "";
-        item["Created At"] = row.createdAt ? moment(row.createdAt).format("DD MMM YYYY") : "";
-        return item;
-      });
-      const sheet = XLSX.utils.json_to_sheet(excel);
-      const book = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(book, sheet, "Leads");
-      XLSX.writeFile(book, `Leads_${moment().format("YYYYMMDD_HHmm")}.xlsx`);
-      toast.update(loadingToast, {
-        render: `Downloaded ${all.length} leads`,
-        type: "success",
-        isLoading: false,
-        autoClose: 3000,
-      });
-    } catch (error) {
-      console.error(error);
-      toast.update(loadingToast, {
-        render: "Failed to build Excel",
-        type: "error",
-        isLoading: false,
-        autoClose: 3000,
-      });
-    }
-  };
-
-  const openAssignMenu = (event, leadId) => {
-    event.stopPropagation();
-    const rect = event.currentTarget.getBoundingClientRect();
-    setAssignFor({ leadId, anchor: rect });
-    setAssignQuery("");
-    setDebouncedAssignQuery("");
-  };
-
-  const employeeMatches = employees.filter((emp) => {
-    if (!debouncedAssignQuery.trim()) return true;
-    const q = debouncedAssignQuery.toLowerCase();
-    return (
-      String(emp.id).toLowerCase().includes(q) ||
-      String(emp.name || "").toLowerCase().includes(q)
-    );
-  });
+  }, []);
 
   return (
     <div className="cc-report-redesign">
       <ToastContainer position="bottom-right" />
 
       <style>{`
-        .cc-leads-toolbar { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; }
-        .cc-leads-toolbar .cc-report-search { flex:1 1 240px; min-width:220px; }
-        .cc-leads-toolbar .cc-report-search input { appearance:none; -webkit-appearance:none; height:38px; padding:8px 12px 8px 40px; border:1px solid #d5ded7; border-radius:10px; background:#fff; font-size:13px; color:#0f172a; outline:none; box-shadow:none; }
-        .cc-leads-toolbar .cc-report-search input:focus { border-color:var(--cc-primary, #047857); box-shadow:0 0 0 3px var(--cc-primary-soft-glow, rgba(4,120,87,0.15)); }
-        .cc-leads-toolbar .cc-report-search input::-webkit-search-cancel-button { -webkit-appearance:none; height:14px; width:14px; background:#cbd5e1; mask:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M18 6 6 18M6 6l12 12' stroke='black' stroke-width='2' fill='none' stroke-linecap='round'/></svg>") center/12px no-repeat; cursor:pointer; }
-        .cc-leads-toolbar .cc-leads-date { display:flex; flex-direction:column; font-size:12px; color:#475569; gap:4px; }
-        .cc-leads-toolbar input[type="date"] { padding:8px 10px; border:1px solid #d5ded7; border-radius:10px; font-size:13px; }
-        .cc-leads-toolbar .cc-leads-actions { display:flex; gap:8px; margin-left:auto; }
-        .cc-leads-btn { display:inline-flex; align-items:center; gap:6px; padding:8px 14px; border-radius:10px; font-size:13px; font-weight:600; border:1px solid transparent; cursor:pointer; }
-        .cc-leads-btn.primary { background:var(--cc-primary, #047857); color:#fff; box-shadow:0 2px 8px var(--cc-primary-glow, rgba(4,120,87,0.25)); }
-        .cc-leads-btn.ghost { background:#fff; color:#0f172a; border-color:#d5ded7; }
-        .cc-leads-btn:hover { filter:brightness(0.96); }
-        .cc-leads-count { font-size:13px; color:#475569; margin-left:2px; }
-        .cc-leads-row-actions { display:inline-flex; gap:6px; }
-        .cc-leads-icon-btn { width:34px; height:34px; border-radius:8px; border:1px solid #d5ded7; background:#fff; display:grid; place-items:center; cursor:pointer; color:#475569; }
-        .cc-leads-icon-btn:hover { color:var(--cc-primary, #047857); border-color:var(--cc-primary, #047857); }
-        .cc-leads-icon-btn.edit:hover { color:#2563eb; border-color:#2563eb; background:#eff6ff; }
-        .cc-leads-icon-btn.danger:hover { color:#dc2626; border-color:#dc2626; background:#fef2f2; }
-        .cc-leads-assign-btn { display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px; border:1px dashed #cbd5e1; background:#fff; font-size:12px; color:#475569; cursor:pointer; max-width:180px; }
-        .cc-leads-assign-btn.assigned { background:var(--cc-active-badge-bg, var(--cc-primary-light, #eef7f2)); border-style:solid; border-color:var(--cc-primary-glow, #c7e0d4); color:var(--cc-active-badge-text, var(--cc-primary, #065f46)); font-weight:600; }
-        .cc-leads-assign-menu { position:fixed; z-index:60; width:260px; background:#fff; border:1px solid #d5ded7; border-radius:12px; box-shadow:0 12px 30px rgba(15,23,42,0.15); padding:8px; display:flex; flex-direction:column; gap:6px; }
-        .cc-leads-assign-menu input { border:1px solid #e2e8f0; border-radius:8px; padding:6px 10px; font-size:12px; }
-        .cc-leads-assign-menu ul { list-style:none; margin:0; padding:0; max-height:220px; overflow-y:auto; display:flex; flex-direction:column; gap:2px; }
-        .cc-leads-assign-menu li button { width:100%; text-align:left; padding:6px 10px; border-radius:6px; font-size:12.5px; color:#0f172a; background:transparent; border:0; cursor:pointer; display:flex; justify-content:space-between; gap:8px; }
-        .cc-leads-assign-menu li button:hover { background:#f1f5f9; }
-        .cc-leads-assign-menu li button span:last-child { color:#94a3b8; font-family:ui-monospace,monospace; font-size:11px; }
-        .cc-leads-modal-overlay { position:fixed; inset:0; background:rgba(15,23,42,0.55); z-index:70; display:grid; place-items:center; padding:16px; }
-        .cc-leads-modal { background:#fff; border-radius:16px; padding:22px; width:100%; max-width:420px; display:flex; flex-direction:column; gap:14px; }
-        .cc-leads-modal h3 { margin:0; font-size:17px; font-weight:700; color:#0f172a; }
-        .cc-leads-modal p { margin:0; font-size:13.5px; color:#475569; }
-        .cc-leads-modal-actions { display:flex; justify-content:flex-end; gap:8px; }
-        .cc-leads-add-overlay { position:fixed; inset:0; background:rgba(15,23,42,0.55); z-index:70; display:grid; place-items:center; padding:16px; }
-        .cc-leads-add-modal { background:#fff; border-radius:16px; padding:20px; width:100%; max-width:640px; max-height:90vh; overflow-y:auto; }
+        /* Clean Original CRM White Theme Styles */
+        .cc-report-redesign {
+          background: #f8fafc;
+          min-height: 100vh;
+          padding: 20px;
+          color: #0f172a;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
 
-        /* Pagination polish */
-        .cc-report-pagination { padding:14px 4px 4px; border-top:1px solid #eef1ee; margin-top:10px; gap:12px; flex-wrap:wrap; }
-        .cc-report-pagination > span { font-size:13px; color:#475569; }
-        .cc-report-pagination > span b { color:#0f172a; font-weight:600; }
-        .cc-report-pagination div { gap:6px; }
-        .cc-report-pagination button { border-radius:10px !important; padding:8px 14px !important; font-size:13px !important; font-weight:600 !important; }
-        .cc-leads-pager-jump { display:inline-flex; align-items:center; gap:6px; margin:0 4px; }
-        .cc-leads-pager-jump input { width:56px; padding:6px 8px; border:1px solid #d5ded7; border-radius:8px; font-size:13px; text-align:center; }
+        /* Top 4 KPI Cards */
+        .cc-kpi-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+          gap: 14px;
+          margin-bottom: 18px;
+        }
+        .cc-kpi-card {
+          background: #ffffff;
+          border: 1px solid #e2e8f0;
+          border-radius: 12px;
+          padding: 14px 18px;
+          box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+        .cc-kpi-card:hover {
+          box-shadow: 0 4px 12px rgba(15, 23, 42, 0.07);
+          border-color: #cbd5e1;
+        }
+        .cc-kpi-label {
+          font-size: 11px;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+          color: #64748b;
+        }
+        .cc-kpi-num {
+          font-size: 26px;
+          font-weight: 800;
+          color: #0f172a;
+          line-height: 1.1;
+        }
+        .cc-kpi-sub {
+          font-size: 11.5px;
+          color: #047857;
+          font-weight: 600;
+        }
 
-        .cc-leads-category-tabs { display:inline-flex; gap:4px; background:#f1f5f9; padding:3px; border-radius:10px; border:1px solid #e2e8f0; }
-        .cc-leads-category-tabs button { border:0; background:transparent; padding:6px 14px; border-radius:7px; font-size:12.5px; font-weight:600; color:#475569; cursor:pointer; transition:all .15s ease; }
-        .cc-leads-category-tabs button:hover { color:#0f172a; }
-        .cc-leads-category-tabs button.active { background:#fff; color:var(--cc-primary, #047857); box-shadow:0 1px 3px rgba(0,0,0,0.08); font-weight:700; }
+        /* Main Report Panel */
+        .cc-report-panel {
+          background: #ffffff;
+          border: 1px solid #e2e8f0;
+          border-radius: 14px;
+          padding: 18px;
+          box-shadow: 0 1px 4px rgba(15, 23, 42, 0.04);
+          display: flex;
+          flex-direction: column;
+          gap: 14px;
+        }
 
-        /* Leads Table Refinement: Crisp Borders & Sticky Header */
+        /* Toolbar */
+        .cc-leads-toolbar {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 12px;
+          align-items: flex-end;
+        }
+        .cc-report-search {
+          position: relative;
+          display: flex;
+          align-items: center;
+        }
+        .cc-report-search svg {
+          position: absolute;
+          left: 12px;
+          color: #94a3b8;
+          pointer-events: none;
+        }
+        .cc-report-search input {
+          width: 100%;
+          height: 38px;
+          padding: 8px 12px 8px 38px;
+          border: 1px solid #d5ded7;
+          border-radius: 10px;
+          background: #ffffff;
+          font-size: 13px;
+          color: #0f172a;
+          outline: none;
+          transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+        .cc-report-search input:focus {
+          border-color: #047857;
+          box-shadow: 0 0 0 3px rgba(4, 120, 87, 0.12);
+        }
+
+        .cc-leads-filter-select {
+          display: flex;
+          flex-direction: column;
+          font-size: 11.5px;
+          font-weight: 600;
+          color: #475569;
+          gap: 4px;
+        }
+        .cc-leads-filter-select select {
+          height: 38px;
+          padding: 6px 10px;
+          border: 1px solid #d5ded7;
+          border-radius: 10px;
+          font-size: 12.5px;
+          background: #ffffff;
+          font-weight: 600;
+          color: #0f172a;
+          outline: none;
+          cursor: pointer;
+        }
+        .cc-leads-filter-select select:focus {
+          border-color: #047857;
+        }
+
+        .cc-leads-category-tabs {
+          display: inline-flex;
+          gap: 3px;
+          background: #f1f5f9;
+          padding: 3px;
+          border-radius: 10px;
+          border: 1px solid #e2e8f0;
+        }
+        .cc-leads-category-tabs button {
+          border: 0;
+          background: transparent;
+          padding: 6px 12px;
+          border-radius: 7px;
+          font-size: 12px;
+          font-weight: 600;
+          color: #475569;
+          cursor: pointer;
+          transition: all 0.15s ease;
+        }
+        .cc-leads-category-tabs button:hover {
+          color: #0f172a;
+        }
+        .cc-leads-category-tabs button.active {
+          background: #ffffff;
+          color: #047857;
+          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+          font-weight: 700;
+        }
+
+        .cc-leads-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 8px 14px;
+          border-radius: 10px;
+          font-size: 13px;
+          font-weight: 600;
+          border: 1px solid transparent;
+          cursor: pointer;
+          transition: all 0.15s ease;
+          height: 38px;
+        }
+        .cc-leads-btn.primary {
+          background: #047857;
+          color: #ffffff;
+        }
+        .cc-leads-btn.primary:hover {
+          background: #065f46;
+        }
+        .cc-leads-btn.ghost {
+          background: #ffffff;
+          color: #0f172a;
+          border-color: #d5ded7;
+        }
+        .cc-leads-btn.ghost:hover {
+          background: #f8fafc;
+        }
+
+        /* Table Container: Crisp Borders & Sticky Header */
         .cc-leads-table-container {
           overflow: auto;
-          max-height: calc(100vh - 270px);
-          min-height: 420px;
+          max-height: calc(100vh - 275px);
+          min-height: 440px;
           border: 1px solid #cbd5e1;
           border-radius: 12px;
           background: #ffffff;
@@ -606,7 +860,7 @@ export default function LeadsListRedesign() {
         }
         .cc-leads-table-container table {
           width: 100%;
-          min-width: 980px;
+          min-width: 1300px;
           border-collapse: separate;
           border-spacing: 0;
           border: none;
@@ -622,7 +876,7 @@ export default function LeadsListRedesign() {
           z-index: 20;
           background: #f1f5f9 !important;
           color: #334155;
-          font-size: 11.5px;
+          font-size: 11px;
           font-weight: 700;
           text-transform: uppercase;
           letter-spacing: 0.05em;
@@ -636,7 +890,7 @@ export default function LeadsListRedesign() {
           border-right: none;
         }
         .cc-leads-table-container tbody td {
-          padding: 12px 14px;
+          padding: 11px 13px;
           font-size: 13px;
           color: #1e293b;
           border-bottom: 1px solid #e2e8f0;
@@ -652,126 +906,389 @@ export default function LeadsListRedesign() {
           background: #fafbfc;
         }
         .cc-leads-table-container tbody tr:hover td {
-          background: var(--cc-table-row-hover, var(--cc-primary-light, #f0fdf4)) !important;
+          background: #f0fdf4 !important;
+        }
+
+        /* Cells & Badges */
+        .cc-lead-code-text {
+          font-weight: 800;
+          color: #047857;
+          letter-spacing: 0.02em;
+          text-decoration: underline;
+          cursor: pointer;
+        }
+        .cc-lead-code-text:hover {
+          color: #065f46;
+        }
+        .cc-badge-worked {
+          padding: 2px 6px;
+          border-radius: 4px;
+          background: #fef3c7;
+          color: #92400e;
+          border: 1px solid #fde68a;
+          font-size: 10px;
+          font-weight: 700;
+        }
+
+        .cc-product-pill {
+          display: inline-flex;
+          align-items: center;
+          padding: 3px 9px;
+          border-radius: 999px;
+          background: #f1f5f9;
+          color: #334155;
+          font-weight: 700;
+          font-size: 11px;
+          border: 1px solid #e2e8f0;
+          cursor: pointer;
+        }
+        .cc-product-pill:hover {
+          background: #e2e8f0;
+        }
+
+        .cc-source-pill {
+          display: inline-flex;
+          align-items: center;
+          padding: 2px 8px;
+          border-radius: 12px;
+          font-size: 11.5px;
+          font-weight: 600;
+          background: #eff6ff;
+          color: #1d4ed8;
+          border: 1px solid #bfdbfe;
+          cursor: pointer;
+        }
+
+        .cc-bank-pill {
+          display: inline-flex;
+          align-items: center;
+          padding: 3px 9px;
+          border-radius: 8px;
+          font-size: 11.5px;
+          font-weight: 700;
+          background: #f8fafc;
+          color: #475569;
+          border: 1px solid #cbd5e1;
+          cursor: pointer;
+        }
+        .cc-bank-pill:hover {
+          background: #eef2ff;
+          color: #4338ca;
+          border-color: #c7d2fe;
+        }
+
+        .cc-comm-pill {
+          display: inline-flex;
+          align-items: center;
+          padding: 2px 8px;
+          border-radius: 10px;
+          font-size: 12px;
+          font-weight: 700;
+          background: #ecfdf5;
+          color: #047857;
+          border: 1px solid #a7f3d0;
+        }
+
+        /* Hand-to-Hand Inline Edit UI */
+        .cc-editable-cell {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          cursor: pointer;
+          border-radius: 4px;
+          padding: 2px 4px;
+          margin: -2px -4px;
+          transition: background 0.15s ease;
+        }
+        .cc-editable-cell:hover {
+          background: #f1f5f9;
+        }
+        .cc-editable-cell.bold {
+          font-weight: 600;
+        }
+        .cc-cell-pencil {
+          color: #94a3b8;
+          opacity: 0.6;
+          transition: opacity 0.15s ease;
+        }
+        .cc-editable-cell:hover .cc-cell-pencil {
+          opacity: 1;
+          color: #047857;
+        }
+
+        .cc-inline-edit-box {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+        }
+        .cc-inline-input {
+          height: 28px;
+          padding: 2px 6px;
+          font-size: 12.5px;
+          border: 1px solid #047857;
+          border-radius: 6px;
+          outline: none;
+          background: #ffffff;
+          box-shadow: 0 0 0 2px rgba(4, 120, 87, 0.15);
+        }
+        .cc-inline-select {
+          height: 28px;
+          padding: 2px 6px;
+          font-size: 12px;
+          border: 1px solid #047857;
+          border-radius: 6px;
+          outline: none;
+          background: #ffffff;
+          cursor: pointer;
+        }
+        .cc-inline-btn {
+          width: 24px;
+          height: 24px;
+          border-radius: 6px;
+          display: grid;
+          place-items: center;
+          border: none;
+          cursor: pointer;
+        }
+        .cc-inline-btn.check {
+          background: #047857;
+          color: #ffffff;
+        }
+        .cc-inline-btn.cancel {
+          background: #f1f5f9;
+          color: #64748b;
+        }
+
+        /* Remark Card */
+        .cc-remark-card {
+          padding: 6px 10px;
+          background: #f8fafc;
+          border: 1px solid #e2e8f0;
+          border-radius: 10px;
+          max-width: 320px;
+        }
+        .cc-remark-text {
+          font-size: 12px;
+          color: #1e293b;
+          font-weight: 500;
+          line-height: 1.4;
+          word-break: break-word;
+        }
+        .cc-remark-meta {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          margin-top: 4px;
+          font-size: 10.5px;
+          color: #64748b;
+        }
+        .cc-remark-btn {
+          border: 0;
+          background: transparent;
+          cursor: pointer;
+          font-weight: 600;
+          padding: 0;
+        }
+        .cc-remark-btn.link {
+          color: #2563eb;
+          font-size: 11px;
+          text-decoration: underline;
+        }
+        .cc-remark-btn.add {
+          padding: 2px 8px;
+          border-radius: 6px;
+          border: 1px solid #cbd5e1;
+          background: #ffffff;
+          color: #047857;
+          font-size: 11px;
+        }
+
+        /* Hand-to-Hand Assignee Button */
+        .cc-leads-assign-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 5px 10px;
+          border-radius: 999px;
+          border: 1px dashed #cbd5e1;
+          background: #ffffff;
+          font-size: 12px;
+          color: #475569;
+          cursor: pointer;
+          max-width: 170px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .cc-leads-assign-btn.assigned {
+          background: #eef7f2;
+          border-style: solid;
+          border-color: #c7e0d4;
+          color: #065f46;
+          font-weight: 600;
+        }
+
+        /* Row Actions */
+        .cc-leads-row-actions {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+        }
+        .cc-leads-icon-btn {
+          width: 32px;
+          height: 32px;
+          border-radius: 8px;
+          border: 1px solid #d5ded7;
+          background: #ffffff;
+          display: grid;
+          place-items: center;
+          cursor: pointer;
+          color: #475569;
+          transition: all 0.15s ease;
+        }
+        .cc-leads-icon-btn:hover {
+          color: #047857;
+          border-color: #047857;
+          background: #f0fdf4;
+        }
+        .cc-leads-icon-btn.edit:hover {
+          color: #2563eb;
+          border-color: #2563eb;
+          background: #eff6ff;
+        }
+        .cc-leads-icon-btn.danger:hover {
+          color: #dc2626;
+          border-color: #dc2626;
+          background: #fef2f2;
+        }
+
+        /* Floating Menus (Assign & Status) */
+        .cc-leads-assign-menu {
+          position: fixed;
+          z-index: 70;
+          width: 260px;
+          background: #ffffff;
+          border: 1px solid #d5ded7;
+          border-radius: 12px;
+          box-shadow: 0 14px 35px rgba(15, 23, 42, 0.16);
+          padding: 8px;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+        .cc-leads-assign-menu input {
+          border: 1px solid #e2e8f0;
+          border-radius: 8px;
+          padding: 6px 10px;
+          font-size: 12px;
+          outline: none;
+        }
+        .cc-leads-assign-menu ul {
+          list-style: none;
+          margin: 0;
+          padding: 0;
+          max-height: 220px;
+          overflow-y: auto;
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+        .cc-leads-assign-menu li button {
+          width: 100%;
+          text-align: left;
+          padding: 6px 10px;
+          border-radius: 6px;
+          font-size: 12.5px;
+          color: #0f172a;
+          background: transparent;
+          border: 0;
+          cursor: pointer;
+          display: flex;
+          justify-content: space-between;
+          gap: 8px;
+        }
+        .cc-leads-assign-menu li button:hover {
+          background: #f1f5f9;
+        }
+
+        /* Modal Overlays */
+        .cc-leads-modal-overlay {
+          position: fixed;
+          inset: 0;
+          background: rgba(15, 23, 42, 0.5);
+          backdrop-filter: blur(2px);
+          z-index: 80;
+          display: grid;
+          place-items: center;
+          padding: 16px;
+        }
+        .cc-leads-modal {
+          background: #ffffff;
+          border-radius: 16px;
+          padding: 22px;
+          width: 100%;
+          max-width: 440px;
+          display: flex;
+          flex-direction: column;
+          gap: 14px;
+          box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+        }
+        .cc-leads-modal h3 {
+          margin: 0;
+          font-size: 16px;
+          font-weight: 700;
+          color: #0f172a;
+        }
+        .cc-leads-modal p {
+          margin: 0;
+          font-size: 13.5px;
+          color: #475569;
+        }
+        .cc-leads-modal-actions {
+          display: flex;
+          justify-content: flex-end;
+          gap: 8px;
+        }
+
+        .cc-report-empty {
+          text-align: center;
+          padding: 40px !important;
+          color: #94a3b8;
+          font-size: 14px;
         }
       `}</style>
 
-      <section className="cc-report-panel">
-        <div className="cc-leads-toolbar">
-          <label className="cc-report-search" style={{ flex: "1 1 240px" }}>
-            <Search size={18} />
-            <input
-              type="search"
-              placeholder="Search by name, phone, email or employee ID..."
-              value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
-            />
-          </label>
-
-          {/* Status Filter Dropdown */}
-          <label className="cc-leads-date" style={{ minWidth: 160 }}>
-            Status filter
-            <select
-              value={selectedStatus}
-              onChange={(e) => {
-                setSelectedStatus(e.target.value);
-                setCurrentPage(1);
-              }}
-              style={{
-                height: 38,
-                padding: "8px 12px",
-                border: "1px solid #d5ded7",
-                borderRadius: 10,
-                fontSize: 13,
-                background: "#fff",
-                fontWeight: 650,
-                color: selectedStatus !== "ALL" ? "var(--cc-primary, #047857)" : "#0f172a",
-                outline: "none",
-                cursor: "pointer",
-              }}
-            >
-              <option value="ALL">All Statuses</option>
-              {statusesList.map((st) => (
-                <option key={st.id || st.value} value={st.value}>
-                  {st.label || st.value}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="cc-leads-date">
-            Employee
-            <select
-              value={selectedEmployeeId}
-              onChange={(e) => {
-                setSelectedEmployeeId(e.target.value);
-                setCurrentPage(1);
-              }}
-              style={{
-                height: 38,
-                padding: "8px 12px",
-                border: "1px solid #d5ded7",
-                borderRadius: 10,
-                fontSize: 13,
-                background: "#fff",
-                fontWeight: 650,
-                color: selectedEmployeeId !== "ALL" ? "var(--cc-primary, #047857)" : "#0f172a",
-                outline: "none",
-                cursor: "pointer",
-                minWidth: 150,
-              }}
-            >
-              <option value="ALL">All Employees</option>
-              {employees.map((emp) => (
-                <option key={emp.id} value={emp.id}>
-                  {emp.name} {emp.role ? `(${emp.role})` : ""}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="cc-leads-date">
-            From date
-            <input
-              type="date"
-              value={dateRange.from}
-              max={dateRange.to}
-              onChange={(event) => {
-                setDateRange((prev) => ({ ...prev, from: event.target.value }));
-                setCurrentPage(1);
-              }}
-            />
-          </label>
-          <label className="cc-leads-date">
-            To date
-            <input
-              type="date"
-              value={dateRange.to}
-              min={dateRange.from}
-              onChange={(event) => {
-                setDateRange((prev) => ({ ...prev, to: event.target.value }));
-                setCurrentPage(1);
-              }}
-            />
-          </label>
-          <div className="cc-leads-actions">
-            {canExport && (
-              <button type="button" className="cc-leads-btn ghost" onClick={handleDownloadExcel}>
-                <Download size={16} /> Excel
-              </button>
-            )}
-            {canAddLead && (
-              <button type="button" className="cc-leads-btn primary" onClick={() => setShowAddModal(true)}>
-                <Plus size={16} /> Add lead
-              </button>
-            )}
-          </div>
+      {/* TOP 4 KPI CARDS (Executive Clean White Styling) */}
+      <div className="cc-kpi-grid">
+        <div className="cc-kpi-card">
+          <small className="cc-kpi-label">TOTAL LEADS</small>
+          <strong className="cc-kpi-num">{kpiMetrics.totalCount}</strong>
+          <span className="cc-kpi-sub">{kpiMetrics.enquiredFormatted}</span>
         </div>
-      </section>
 
+        <div className="cc-kpi-card">
+          <small className="cc-kpi-label">SENT TO BANK</small>
+          <strong className="cc-kpi-num">{kpiMetrics.sentToBank}</strong>
+          <span className="cc-kpi-sub">Files active with lenders</span>
+        </div>
+
+        <div className="cc-kpi-card">
+          <small className="cc-kpi-label">DOCUMENTS PENDING</small>
+          <strong className="cc-kpi-num">{kpiMetrics.docsPending}</strong>
+          <span className="cc-kpi-sub">Waiting on customer documents</span>
+        </div>
+
+        <div className="cc-kpi-card">
+          <small className="cc-kpi-label">NO STATUS YET</small>
+          <strong className="cc-kpi-num">{kpiMetrics.noStatusYet}</strong>
+          <span className="cc-kpi-sub">Fresh / First update pending</span>
+        </div>
+      </div>
+
+      {/* MAIN REPORT PANEL */}
       <section className="cc-report-panel">
-        <div className="cc-report-table-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
-          <h2>Leads <span className="cc-leads-count">({numberFormatter.format(totalItems)})</span></h2>
+        {/* Category Tabs */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
           <div className="cc-leads-category-tabs">
             <button
               type="button"
@@ -791,7 +1308,7 @@ export default function LeadsListRedesign() {
                 setCurrentPage(1);
               }}
             >
-              ⏳ Pending Leads
+              Pending
             </button>
             <button
               type="button"
@@ -801,469 +1318,800 @@ export default function LeadsListRedesign() {
                 setCurrentPage(1);
               }}
             >
-              ✅ Completed Leads
+              Completed
             </button>
-            <button
-              type="button"
-              className={statusCategory === "WORKED" ? "active" : ""}
-              onClick={() => {
-                setStatusCategory("WORKED");
-                setCurrentPage(1);
-              }}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                fontWeight: 600,
-                ...(statusCategory === "WORKED"
-                  ? { color: "#2563eb", borderColor: "#2563eb" }
-                  : {}),
-              }}
-            >
-              <span>📂 Worked Leads</span>
-              {workedCount > 0 && (
-                <span
-                  style={{
-                    fontSize: "11px",
-                    fontWeight: 700,
-                    padding: "1px 6px",
-                    borderRadius: "10px",
-                    background: statusCategory === "WORKED" ? "#2563eb" : "#e2e8f0",
-                    color: statusCategory === "WORKED" ? "#ffffff" : "#475569",
-                  }}
-                >
-                  {workedCount}
-                </span>
-              )}
-            </button>
+            {isEmployee && (
+              <button
+                type="button"
+                className={statusCategory === "WORKED" ? "active" : ""}
+                onClick={() => {
+                  setStatusCategory("WORKED");
+                  setCurrentPage(1);
+                }}
+                title="Leads you previously worked on (Read-only view)"
+              >
+                Worked Leads {workedCount > 0 && `(${workedCount})`}
+              </button>
+            )}
+          </div>
+
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {canExport && (
+              <button
+                type="button"
+                className="cc-leads-btn ghost"
+                onClick={handleExport}
+                title="Export filtered leads to Excel"
+              >
+                <Download size={15} />
+                <span>Export</span>
+              </button>
+            )}
+
+            {canAddLead && (
+              <button
+                type="button"
+                className="cc-leads-btn primary"
+                onClick={() => setShowAddModal(true)}
+              >
+                <Plus size={16} />
+                <span>Add Lead</span>
+              </button>
+            )}
           </div>
         </div>
 
+        {/* Toolbar & Filters */}
+        <div className="cc-leads-toolbar">
+          {/* Search box */}
+          <label className="cc-report-search" style={{ flex: "1 1 240px", minWidth: 200 }}>
+            <Search size={16} />
+            <input
+              type="search"
+              placeholder="Search by customer, phone, code..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </label>
+
+          {/* Owner filter */}
+          <label className="cc-leads-filter-select" style={{ minWidth: 140 }}>
+            Owner
+            <select
+              value={selectedEmployeeId}
+              onChange={(e) => {
+                setSelectedEmployeeId(e.target.value);
+                setCurrentPage(1);
+              }}
+            >
+              <option value="ALL">All Owners</option>
+              {employees.map((emp) => (
+                <option key={emp.id} value={emp.id}>
+                  {emp.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {/* Status filter */}
+          <label className="cc-leads-filter-select" style={{ minWidth: 140 }}>
+            Status
+            <select
+              value={selectedStatus}
+              onChange={(e) => {
+                setSelectedStatus(e.target.value);
+                setCurrentPage(1);
+              }}
+            >
+              <option value="ALL">All Statuses</option>
+              {statusesList.map((st) => (
+                <option key={st.id || st.value} value={st.value}>
+                  {st.label || st.value}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {/* Product filter */}
+          <label className="cc-leads-filter-select" style={{ minWidth: 120 }}>
+            Product
+            <select
+              value={selectedProduct}
+              onChange={(e) => {
+                setSelectedProduct(e.target.value);
+                setCurrentPage(1);
+              }}
+            >
+              <option value="ALL">All Products</option>
+              {productsList.map((prod) => (
+                <option key={prod} value={prod}>
+                  {prod}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {/* Source filter */}
+          <label className="cc-leads-filter-select" style={{ minWidth: 110 }}>
+            Source
+            <select
+              value={selectedSource}
+              onChange={(e) => {
+                setSelectedSource(e.target.value);
+                setCurrentPage(1);
+              }}
+            >
+              <option value="ALL">All Sources</option>
+              {sourcesList.map((src) => (
+                <option key={src} value={src}>
+                  {src}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {/* Date Range: From */}
+          <label className="cc-leads-filter-select" style={{ minWidth: 125 }}>
+            From
+            <input
+              type="date"
+              value={dateRange.from}
+              onChange={(e) => setDateRange((prev) => ({ ...prev, from: e.target.value }))}
+              style={{
+                height: 38,
+                padding: "6px 8px",
+                border: "1px solid #d5ded7",
+                borderRadius: 10,
+                fontSize: 12,
+                outline: "none",
+              }}
+            />
+          </label>
+
+          {/* Date Range: To */}
+          <label className="cc-leads-filter-select" style={{ minWidth: 125 }}>
+            To
+            <input
+              type="date"
+              value={dateRange.to}
+              onChange={(e) => setDateRange((prev) => ({ ...prev, to: e.target.value }))}
+              style={{
+                height: 38,
+                padding: "6px 8px",
+                border: "1px solid #d5ded7",
+                borderRadius: 10,
+                fontSize: 12,
+                outline: "none",
+              }}
+            />
+          </label>
+        </div>
+
+        {/* Read-only notification if in WORKED tab */}
         {statusCategory === "WORKED" && (
           <div
             style={{
               display: "flex",
               alignItems: "center",
-              gap: 12,
-              padding: "12px 18px",
-              margin: "0 16px 14px 16px",
+              gap: 10,
+              padding: "10px 14px",
               background: "#eff6ff",
               border: "1px solid #bfdbfe",
               borderRadius: "8px",
               color: "#1e40af",
               fontSize: "13px",
-              lineHeight: 1.4,
             }}
           >
-            <span style={{ fontSize: "20px" }}>ℹ️</span>
+            <span style={{ fontSize: "18px" }}>ℹ️</span>
             <div>
-              <strong>Worked Leads (Past Handled):</strong> These are leads you previously worked on that have been transferred to another employee. You have <strong>Read-Only access</strong> to monitor their live stage progress and remarks until the lead is reassigned back to you.
+              <strong>Worked Leads:</strong> These are leads you previously handled that have been transferred. You have <strong>Read-Only access</strong> to view updates and progress.
             </div>
           </div>
         )}
 
-        <div className="cc-report-table-scroll cc-leads-table-container">
+        {/* LEADS DATA TABLE */}
+        <div className="cc-leads-table-container">
           <table>
             <thead>
               <tr>
-                <th>Lead ID</th>
-                <th>Name</th>
-                <th>Phone</th>
-                <th>Source / Party</th>
-                {canViewCommission && <th>Party Commission</th>}
-                <th style={{ minWidth: 165 }}>Status &amp; Stage</th>
-                <th style={{ minWidth: 260 }}>Latest Remark</th>
-                <th>Assigned to</th>
-                <th>Actions</th>
+                {/* Column 1: LEAD (Displays month-wise company-wise code e.g. OCT26-001) */}
+                <th style={{ minWidth: 125 }}>LEAD</th>
+                {/* Column 2: DATE ↓ */}
+                <th
+                  style={{ minWidth: 110, cursor: "pointer", userSelect: "none" }}
+                  onClick={() => setSortOrder(sortOrder === "DESC" ? "ASC" : "DESC")}
+                  title="Click to toggle sorting"
+                >
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                    DATE {sortOrder === "DESC" ? "↓" : "↑"}
+                  </span>
+                </th>
+                {/* Column 3: CUSTOMER */}
+                <th style={{ minWidth: 175 }}>CUSTOMER</th>
+                {/* Column 4: PHONE */}
+                <th style={{ minWidth: 120 }}>PHONE</th>
+                {/* Column 5: PRODUCT */}
+                <th style={{ minWidth: 110 }}>PRODUCT</th>
+                {/* Column 6: AMOUNT */}
+                <th style={{ minWidth: 125 }}>AMOUNT</th>
+                {/* Column 7: SOURCE */}
+                <th style={{ minWidth: 110 }}>SOURCE</th>
+                {/* Column 8: PARTY COMMISSION (if authorized) */}
+                {canViewCommission && <th style={{ minWidth: 130 }}>PARTY COMMISSION</th>}
+                {/* Column 9: BANK */}
+                <th style={{ minWidth: 110 }}>BANK</th>
+                {/* Column 10: STATUS & STAGE */}
+                <th style={{ minWidth: 175 }}>STATUS &amp; STAGE</th>
+                {/* Column 11: LATEST REMARK */}
+                <th style={{ minWidth: 280 }}>LATEST REMARK</th>
+                {/* Column 12: ASSIGNED TO */}
+                <th style={{ minWidth: 160 }}>ASSIGNED TO</th>
+                {/* Column 13: ACTIONS */}
+                <th style={{ minWidth: 130, textAlign: "right" }}>ACTIONS</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={canViewCommission ? 9 : 8} className="cc-report-empty">Loading leads...</td>
+                  <td colSpan={canViewCommission ? 13 : 12} className="cc-report-empty">
+                    Loading leads...
+                  </td>
                 </tr>
-              ) : rows.length === 0 ? (
+              ) : displayedRows.length === 0 ? (
                 <tr>
-                  <td colSpan={canViewCommission ? 9 : 8} className="cc-report-empty">No leads match the filters</td>
+                  <td colSpan={canViewCommission ? 13 : 12} className="cc-report-empty">
+                    No leads match the filters.
+                  </td>
                 </tr>
               ) : (
-                rows.map((row) => (
-                  <tr key={row.lead_id}>
-                    <td onClick={() => navigate(`/lead-details/${row.lead_id}`)} style={{ cursor: "pointer", fontWeight: 600 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <span>{row.lead_id}</span>
-                        {row.is_read_only && (
-                          <span
-                            style={{
-                              padding: "1px 5px",
-                              borderRadius: 4,
-                              background: "#fef3c7",
-                              color: "#92400e",
-                              border: "1px solid #fde68a",
-                              fontSize: 10,
-                              fontWeight: 700,
-                            }}
-                            title="Worked Lead (Read-Only Mode)"
-                          >
-                            Worked
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td onClick={() => navigate(`/lead-details/${row.lead_id}`)} style={{ cursor: "pointer" }}>
-                      {row.name || "--"}
-                    </td>
-                    <td>{row.number || "--"}</td>
-                    <td>
-                      <span
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          padding: "2px 8px",
-                          borderRadius: "12px",
-                          fontSize: "12px",
-                          fontWeight: 600,
-                          background: row.source && row.source.toLowerCase() !== "self" ? "#eff6ff" : "#f1f5f9",
-                          color: row.source && row.source.toLowerCase() !== "self" ? "#1d4ed8" : "#475569",
-                          border: `1px solid ${row.source && row.source.toLowerCase() !== "self" ? "#bfdbfe" : "#e2e8f0"}`,
-                        }}
+                displayedRows.map((row) => {
+                  const leadCode = formatLeadCode(row);
+                  const isEditingName = editingCell?.leadId === row.lead_id && editingCell?.field === "name";
+                  const isEditingAmount = editingCell?.leadId === row.lead_id && editingCell?.field === "est_budget";
+                  const isEditingSource = editingCell?.leadId === row.lead_id && editingCell?.field === "source";
+                  const isEditingBank = editingCell?.leadId === row.lead_id && editingCell?.field === "bank_name";
+                  const isEditingProduct = editingCell?.leadId === row.lead_id && editingCell?.field === "loan_type";
+                  const stageInfo = getStatusStageInfo(row.status || row.status_value);
+                  const isReadonly = Boolean(row.is_read_only) || !canEditLead;
+
+                  return (
+                    <tr key={row.lead_id}>
+                      {/* 1. LEAD Column */}
+                      <td
+                        onClick={() => navigate(`/lead-details/${row.lead_id}`)}
+                        style={{ cursor: "pointer", fontWeight: 700 }}
                       >
-                        {row.source || "Self"}
-                      </span>
-                    </td>
-                    {canViewCommission && (
-                      <td>
-                        {row.commission_percent !== null && row.commission_percent !== undefined ? (
-                          <span
-                            className="cc-commission-badge"
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              padding: "2px 8px",
-                              borderRadius: "10px",
-                              fontSize: "12px",
-                              fontWeight: 700,
-                              background: "var(--cc-active-badge-bg, var(--cc-primary-light, #ecfdf5))",
-                              color: "var(--cc-active-badge-text, var(--cc-primary, #047857))",
-                              border: "1px solid var(--cc-primary-glow, #a7f3d0)",
-                            }}
-                          >
-                            {row.commission_percent}%
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <span className="cc-lead-code-text" title="Click to view lead details">
+                            {leadCode}
                           </span>
-                        ) : (
-                          <span style={{ fontSize: "12px", color: "#94a3b8" }}>--</span>
-                        )}
-                      </td>
-                    )}
-                    <td>
-                      {(() => {
-                        const stageInfo = getStatusStageInfo(row.status || row.status_value);
-                        const isReadonly = Boolean(row.is_read_only) || !canEditLead;
-                        return (
-                          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                            {isReadonly ? (
-                              <span
-                                style={{
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  gap: 5,
-                                  padding: "3px 9px",
-                                  borderRadius: "12px",
-                                  fontSize: "12px",
-                                  fontWeight: 700,
-                                  background: stageInfo.bg,
-                                  color: stageInfo.color,
-                                  border: `1px solid ${stageInfo.border}`,
-                                  width: "fit-content",
-                                }}
-                              >
-                                <span>{stageInfo.icon}</span>
-                                <span>{row.status || "Unassigned"}</span>
-                              </span>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  const rect = event.currentTarget.getBoundingClientRect();
-                                  setStatusMenuFor({ leadId: row.lead_id, currentStatus: row.status, anchor: rect });
-                                }}
-                                disabled={updatingStatusLeadId === row.lead_id}
-                                style={{
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  gap: 6,
-                                  padding: "4px 10px",
-                                  borderRadius: "12px",
-                                  fontSize: "12px",
-                                  fontWeight: 700,
-                                  background: stageInfo.bg,
-                                  color: stageInfo.color,
-                                  border: `1px solid ${stageInfo.border}`,
-                                  width: "fit-content",
-                                  cursor: "pointer",
-                                  boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-                                  transition: "all 0.15s ease",
-                                }}
-                                title="Click to update lead status"
-                              >
-                                <span>{stageInfo.icon}</span>
-                                <span>{updatingStatusLeadId === row.lead_id ? "Updating..." : (row.status || "Select Status")}</span>
-                                <ChevronDown size={12} style={{ opacity: 0.7 }} />
-                              </button>
-                            )}
-                            <span
-                              style={{
-                                fontSize: "10.5px",
-                                fontWeight: 600,
-                                color: "#64748b",
-                                letterSpacing: "0.2px",
-                              }}
-                            >
-                              {stageInfo.stage}
+                          {row.is_read_only && (
+                            <span className="cc-badge-worked" title="Worked Lead (Read-Only Mode)">
+                              Worked
                             </span>
-                          </div>
-                        );
-                      })()}
-                    </td>
-                    <td>
-                      {row.is_read_only ? (
-                        <div
-                          style={{
-                            padding: "6px 10px",
-                            background: "#f8fafc",
-                            border: "1px solid #e2e8f0",
-                            borderRadius: "10px",
-                            maxWidth: "320px",
-                          }}
-                        >
-                          <div style={{ fontSize: "12px", color: "#1e293b", fontWeight: 500, lineHeight: 1.35, wordBreak: "break-word" }}>
-                            {row.latest_remark ? `"${row.latest_remark}"` : <span style={{ color: "#94a3b8", fontStyle: "italic" }}>No remark logged</span>}
-                          </div>
-                          {row.latest_remark_date && (
-                            <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: "10.5px", color: "#64748b", marginTop: 4 }}>
-                              <Clock size={11} color="#94a3b8" />
-                              <span>{formatDateTime(row.latest_remark_date)}</span>
-                              {row.latest_remark_by && <span style={{ fontWeight: 600 }}>• {row.latest_remark_by}</span>}
-                            </div>
                           )}
                         </div>
-                      ) : row.latest_remark ? (
-                        <div
-                          style={{
-                            padding: "6px 10px",
-                            background: "#f8fafc",
-                            border: "1px solid #e2e8f0",
-                            borderRadius: "10px",
-                            maxWidth: "320px",
-                          }}
-                        >
-                          <div
-                            style={{
-                              fontSize: "12.5px",
-                              color: "#1e293b",
-                              fontWeight: 500,
-                              lineHeight: 1.4,
-                              wordBreak: "break-word",
-                            }}
-                          >
-                            "{row.latest_remark}"
+                      </td>
+
+                      {/* 2. DATE */}
+                      <td>
+                        <span style={{ fontSize: "12.5px", color: "#475569", fontWeight: 500, whiteSpace: "nowrap" }}>
+                          {moment(row.createdAt || row.date).format("DD MMM YYYY")}
+                        </span>
+                      </td>
+
+                      {/* 3. CUSTOMER (Hand-to-Hand Inline Editable) */}
+                      <td>
+                        {isEditingName ? (
+                          <div className="cc-inline-edit-box">
+                            <input
+                              type="text"
+                              autoFocus
+                              value={inlineVal}
+                              onChange={(e) => setInlineVal(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") handleInlineSave(row.lead_id, "name", inlineVal);
+                                if (e.key === "Escape") setEditingCell(null);
+                              }}
+                              className="cc-inline-input"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleInlineSave(row.lead_id, "name", inlineVal)}
+                              className="cc-inline-btn check"
+                            >
+                              <Check size={12} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingCell(null)}
+                              className="cc-inline-btn cancel"
+                            >
+                              <X size={12} />
+                            </button>
                           </div>
+                        ) : (
                           <div
+                            className="cc-editable-cell bold"
+                            onClick={() => {
+                              if (row.is_read_only || !canEditLead) {
+                                navigate(`/lead-details/${row.lead_id}`);
+                                return;
+                              }
+                              setEditingCell({ leadId: row.lead_id, field: "name" });
+                              setInlineVal(row.name || "");
+                            }}
+                            title={!row.is_read_only && canEditLead ? "Click to edit customer name" : "View customer"}
+                          >
+                            <span>{row.name || "--"}</span>
+                            {!row.is_read_only && canEditLead && <Pencil size={11} className="cc-cell-pencil" />}
+                          </div>
+                        )}
+                      </td>
+
+                      {/* 4. PHONE */}
+                      <td>
+                        {row.number ? (
+                          <a
+                            href={`tel:${row.number}`}
                             style={{
-                              display: "flex",
+                              color: "#0f172a",
+                              textDecoration: "none",
+                              fontSize: "12.5px",
+                              fontWeight: 500,
+                              display: "inline-flex",
                               alignItems: "center",
-                              justifyContent: "space-between",
-                              gap: 6,
-                              marginTop: "4px",
+                              gap: 5,
+                            }}
+                            title="Call customer"
+                          >
+                            <span>{row.number}</span>
+                          </a>
+                        ) : (
+                          <span style={{ fontSize: "12.5px", color: "#94a3b8" }}>--</span>
+                        )}
+                      </td>
+
+                      {/* 5. PRODUCT (Hand-to-Hand Inline Dropdown Editable) */}
+                      <td>
+                        {isEditingProduct ? (
+                          <select
+                            autoFocus
+                            value={row.loan_type || ""}
+                            onChange={(e) => handleInlineSave(row.lead_id, "loan_type", e.target.value)}
+                            onBlur={() => setEditingCell(null)}
+                            className="cc-inline-select"
+                          >
+                            <option value="">Select</option>
+                            {productsList.map((p) => (
+                              <option key={p} value={p}>
+                                {p}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span
+                            className="cc-product-pill"
+                            onClick={() => {
+                              if (!row.is_read_only && canEditLead) {
+                                setEditingCell({ leadId: row.lead_id, field: "loan_type" });
+                              }
+                            }}
+                            title={!row.is_read_only && canEditLead ? "Click to change product" : ""}
+                            style={{ cursor: !row.is_read_only && canEditLead ? "pointer" : "default" }}
+                          >
+                            {row.loan_type || "DOD"}
+                          </span>
+                        )}
+                      </td>
+
+                      {/* 6. AMOUNT (Hand-to-Hand Inline Editable) */}
+                      <td>
+                        {isEditingAmount ? (
+                          <div className="cc-inline-edit-box">
+                            <input
+                              type="number"
+                              autoFocus
+                              value={inlineVal}
+                              onChange={(e) => setInlineVal(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") handleInlineSave(row.lead_id, "est_budget", inlineVal);
+                                if (e.key === "Escape") setEditingCell(null);
+                              }}
+                              className="cc-inline-input"
+                              placeholder="₹"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleInlineSave(row.lead_id, "est_budget", inlineVal)}
+                              className="cc-inline-btn check"
+                            >
+                              <Check size={12} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingCell(null)}
+                              className="cc-inline-btn cancel"
+                            >
+                              <X size={12} />
+                            </button>
+                          </div>
+                        ) : (
+                          <div
+                            className="cc-editable-cell"
+                            onClick={() => {
+                              if (!row.is_read_only && canEditLead) {
+                                setEditingCell({ leadId: row.lead_id, field: "est_budget" });
+                                setInlineVal(row.est_budget || "");
+                              }
+                            }}
+                            title={!row.is_read_only && canEditLead ? "Click to edit loan amount" : ""}
+                            style={{ cursor: !row.is_read_only && canEditLead ? "pointer" : "default", fontWeight: 600 }}
+                          >
+                            <span>{formatCurrencyCompact(row.est_budget)}</span>
+                            {!row.is_read_only && canEditLead && <Pencil size={11} className="cc-cell-pencil" />}
+                          </div>
+                        )}
+                      </td>
+
+                      {/* 7. SOURCE (Hand-to-Hand Inline Dropdown Editable) */}
+                      <td>
+                        {isEditingSource ? (
+                          <select
+                            autoFocus
+                            value={row.source || "Self"}
+                            onChange={(e) => handleInlineSave(row.lead_id, "source", e.target.value)}
+                            onBlur={() => setEditingCell(null)}
+                            className="cc-inline-select"
+                          >
+                            {sourcesList.map((s) => (
+                              <option key={s} value={s}>
+                                {s}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span
+                            className="cc-source-pill"
+                            onClick={() => {
+                              if (!row.is_read_only && canEditLead) {
+                                setEditingCell({ leadId: row.lead_id, field: "source" });
+                              }
+                            }}
+                            title={!row.is_read_only && canEditLead ? "Click to change source" : ""}
+                            style={{ cursor: !row.is_read_only && canEditLead ? "pointer" : "default" }}
+                          >
+                            {row.source || "Self"}
+                          </span>
+                        )}
+                      </td>
+
+                      {/* 8. PARTY COMMISSION (if authorized) */}
+                      {canViewCommission && (
+                        <td>
+                          {row.commission_percent !== null && row.commission_percent !== undefined ? (
+                            <div style={{ display: "inline-flex", flexDirection: "column", gap: 2 }}>
+                              <span className="cc-comm-pill">
+                                {row.commission_percent}%
+                              </span>
+                              {row.commission_amount ? (
+                                <span style={{ fontSize: "11px", color: "#047857", fontWeight: 600 }}>
+                                  ₹{Number(row.commission_amount).toLocaleString("en-IN")}
+                                </span>
+                              ) : null}
+                            </div>
+                          ) : (
+                            <span style={{ fontSize: "12px", color: "#94a3b8" }}>--</span>
+                          )}
+                        </td>
+                      )}
+
+                      {/* 9. BANK (Hand-to-Hand Inline Dropdown Editable) */}
+                      <td>
+                        {isEditingBank ? (
+                          <select
+                            autoFocus
+                            value={row.bank_name || ""}
+                            onChange={(e) => handleInlineSave(row.lead_id, "bank_name", e.target.value)}
+                            onBlur={() => setEditingCell(null)}
+                            className="cc-inline-select"
+                          >
+                            <option value="">— Direct / None —</option>
+                            {lendersList.length > 0 ? (
+                              lendersList.map((l) => (
+                                <option key={l.id} value={l.name}>
+                                  {l.name}
+                                </option>
+                              ))
+                            ) : (
+                              <>
+                                <option value="HDFC">HDFC</option>
+                                <option value="ICICI">ICICI</option>
+                                <option value="SBI">SBI</option>
+                                <option value="Axis">Axis</option>
+                                <option value="CSB">CSB</option>
+                              </>
+                            )}
+                          </select>
+                        ) : (
+                          <span
+                            className="cc-bank-pill"
+                            onClick={() => {
+                              if (!row.is_read_only && canEditLead) {
+                                setEditingCell({ leadId: row.lead_id, field: "bank_name" });
+                              }
+                            }}
+                            title={!row.is_read_only && canEditLead ? "Click to assign bank" : ""}
+                            style={{ cursor: !row.is_read_only && canEditLead ? "pointer" : "default" }}
+                          >
+                            {row.bank_name || "—"}
+                          </span>
+                        )}
+                      </td>
+
+                      {/* 10. STATUS & STAGE (Hand-to-Hand Inline Status Popover) */}
+                      <td>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                          {isReadonly ? (
+                            <span
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 5,
+                                padding: "3px 9px",
+                                borderRadius: "12px",
+                                fontSize: "12px",
+                                fontWeight: 700,
+                                background: stageInfo.bg,
+                                color: stageInfo.color,
+                                border: `1px solid ${stageInfo.border}`,
+                                width: "fit-content",
+                              }}
+                            >
+                              <span>{stageInfo.icon}</span>
+                              <span>{row.status || "Unassigned"}</span>
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                const rect = event.currentTarget.getBoundingClientRect();
+                                setStatusMenuFor({ leadId: row.lead_id, currentStatus: row.status, anchor: rect });
+                              }}
+                              disabled={updatingStatusLeadId === row.lead_id}
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 6,
+                                padding: "4px 10px",
+                                borderRadius: "12px",
+                                fontSize: "12px",
+                                fontWeight: 700,
+                                background: stageInfo.bg,
+                                color: stageInfo.color,
+                                border: `1px solid ${stageInfo.border}`,
+                                width: "fit-content",
+                                cursor: "pointer",
+                                boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                                transition: "all 0.15s ease",
+                              }}
+                              title="Click to update lead status"
+                            >
+                              <span>{stageInfo.icon}</span>
+                              <span>{updatingStatusLeadId === row.lead_id ? "Updating..." : (row.status || "Select Status")}</span>
+                              <ChevronDown size={12} style={{ opacity: 0.7 }} />
+                            </button>
+                          )}
+                          <span
+                            style={{
                               fontSize: "10.5px",
+                              fontWeight: 600,
                               color: "#64748b",
+                              letterSpacing: "0.2px",
                             }}
                           >
-                            <span style={{ display: "flex", alignItems: "center", gap: 3, fontWeight: 600 }}>
-                              <Clock size={11} color="#64748b" />
-                              {formatDateTime(row.latest_remark_date)}
-                            </span>
-                            {row.latest_remark_by && (
-                              <span style={{ color: "var(--cc-primary, #047857)", fontWeight: 600 }}>
-                                by {row.latest_remark_by}
-                              </span>
+                            {stageInfo.stage}
+                          </span>
+                        </div>
+                      </td>
+
+                      {/* 11. LATEST REMARK (Hand-to-Hand Remark Popup right here) */}
+                      <td>
+                        {row.is_read_only ? (
+                          <div className="cc-remark-card">
+                            <div className="cc-remark-text">
+                              {row.latest_remark ? `"${row.latest_remark}"` : <span style={{ color: "#94a3b8", fontStyle: "italic" }}>No remark logged</span>}
+                            </div>
+                            {row.latest_remark_date && (
+                              <div className="cc-remark-meta">
+                                <Clock size={11} color="#94a3b8" />
+                                <span>{formatDateTime(row.latest_remark_date)}</span>
+                                {row.latest_remark_by && <span style={{ fontWeight: 600 }}>• {row.latest_remark_by}</span>}
+                              </div>
                             )}
+                          </div>
+                        ) : row.latest_remark ? (
+                          <div className="cc-remark-card">
+                            <div className="cc-remark-text">
+                              "{row.latest_remark}"
+                            </div>
+                            <div className="cc-remark-meta" style={{ justifyContent: "space-between" }}>
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontWeight: 600 }}>
+                                <Clock size={11} color="#64748b" />
+                                {formatDateTime(row.latest_remark_date)}
+                              </span>
+                              {row.latest_remark_by && (
+                                <span style={{ color: "#047857", fontWeight: 600 }}>
+                                  by {row.latest_remark_by}
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openRemarkModal(row);
+                                }}
+                                className="cc-remark-btn link"
+                                title="Update or add new remark"
+                              >
+                                + Update
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <span style={{ fontSize: "12px", color: "#94a3b8", fontStyle: "italic" }}>
+                              No remark logged
+                            </span>
                             <button
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 openRemarkModal(row);
                               }}
-                              style={{
-                                border: 0,
-                                background: "transparent",
-                                color: "#2563eb",
-                                cursor: "pointer",
-                                fontSize: "11px",
-                                fontWeight: 600,
-                                textDecoration: "underline",
-                                padding: 0,
-                              }}
-                              title="Update or add new remark"
+                              className="cc-remark-btn add"
+                              title="Add remark"
                             >
-                              + Update
+                              + Add
                             </button>
                           </div>
-                        </div>
-                      ) : (
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <span style={{ fontSize: "12px", color: "#94a3b8", fontStyle: "italic" }}>
-                            No remark logged
-                          </span>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openRemarkModal(row);
-                            }}
-                            style={{
-                              padding: "2px 8px",
-                              borderRadius: "6px",
-                              border: "1px solid #cbd5e1",
-                              background: "#fff",
-                              color: "var(--cc-primary, #047857)",
-                              fontSize: "11px",
-                              fontWeight: 650,
-                              cursor: "pointer",
-                            }}
-                            title="Add remark"
-                          >
-                            + Add
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                    <td>
-                      {row.is_read_only ? (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                          <span style={{ fontSize: "10px", color: "#64748b", fontWeight: 600 }}>Currently with:</span>
+                        )}
+                      </td>
+
+                      {/* 12. ASSIGNED TO (Hand-to-Hand Reassign Menu right here) */}
+                      <td>
+                        {row.is_read_only ? (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                            <span style={{ fontSize: "10px", color: "#64748b", fontWeight: 600 }}>Currently with:</span>
+                            <span
+                              className="cc-leads-assign-btn assigned"
+                              style={{ cursor: "default", background: "#f8fafc", color: "#1e293b", borderColor: "#cbd5e1" }}
+                              title={`Currently handled by ${row.current_owner || row.owner || "Unassigned"}`}
+                            >
+                              <UserCog size={13} color="#2563eb" />
+                              {row.current_owner || row.owner || "Unassigned"}
+                            </span>
+                          </div>
+                        ) : !canAssignLead ? (
                           <span
-                            className="cc-leads-assign-btn assigned"
-                            style={{ cursor: "default", background: "#f8fafc", color: "#1e293b", borderColor: "#cbd5e1" }}
-                            title={`Currently handled by ${row.current_owner || row.owner || "Unassigned"}`}
+                            className={`cc-leads-assign-btn ${row.owner ? "assigned" : ""}`}
+                            style={{ cursor: "default" }}
                           >
-                            <UserCog size={13} color="#2563eb" />
-                            {row.current_owner || row.owner || "Unassigned"}
+                            <UserCog size={14} />
+                            {row.owner || "Unassigned"}
                           </span>
-                        </div>
-                      ) : !canAssignLead ? (
-                        <span
-                          className={`cc-leads-assign-btn ${row.owner ? "assigned" : ""}`}
-                          style={{ cursor: "default" }}
-                        >
-                          <UserCog size={14} />
-                          {row.owner || "Unassigned"}
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          className={`cc-leads-assign-btn ${row.owner ? "assigned" : ""}`}
-                          onClick={(event) => openAssignMenu(event, row.lead_id)}
-                          title="Assign lead to employee"
-                        >
-                          <UserCog size={14} />
-                          {row.owner || "Unassigned"}
-                        </button>
-                      )}
-                    </td>
-                    <td>
-                      {row.is_read_only ? (
-                        <div className="cc-leads-row-actions">
+                        ) : (
                           <button
                             type="button"
-                            className="cc-leads-icon-btn"
-                            title="View lead details & history (Read-only)"
-                            onClick={() => navigate(`/lead-details/${row.lead_id}`)}
-                            style={{ color: "#2563eb", background: "#eff6ff", borderRadius: 6 }}
+                            className={`cc-leads-assign-btn ${row.owner ? "assigned" : ""}`}
+                            onClick={(event) => openAssignMenu(event, row.lead_id)}
+                            title="Assign lead to employee"
                           >
-                            <Eye size={16} />
+                            <UserCog size={14} />
+                            {row.owner || "Unassigned"}
                           </button>
-                          <span
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              padding: "3px 6px",
-                              borderRadius: 4,
-                              background: "#fef3c7",
-                              color: "#92400e",
-                              fontSize: 10,
-                              fontWeight: 700,
-                              border: "1px solid #fde68a",
-                            }}
-                            title="Read-Only: Lead is handled by another employee"
-                          >
-                            🔒 Read Only
-                          </span>
-                        </div>
-                      ) : (
-                        <div className="cc-leads-row-actions">
-                          <button
-                            type="button"
-                            className="cc-leads-icon-btn"
-                            title="Generate/Share Customer Document Upload Link"
-                            onClick={() => setDocReqLead({
-                              id: row.lead_id,
-                              customer: { name: row.name, mobile: row.number },
-                              loanType: row.loan_type,
-                              requiredAmount: row.est_budget,
-                            })}
-                            style={{ color: "#2563eb" }}
-                          >
-                            <Link size={16} />
-                          </button>
-                          <button
-                            type="button"
-                            className="cc-leads-icon-btn"
-                            title="View lead details"
-                            onClick={() => navigate(`/lead-details/${row.lead_id}`)}
-                          >
-                            <Eye size={16} />
-                          </button>
-                          {canEditLead && (
+                        )}
+                      </td>
+
+                      {/* 13. ACTIONS */}
+                      <td style={{ textAlign: "right" }}>
+                        {row.is_read_only ? (
+                          <div className="cc-leads-row-actions">
                             <button
                               type="button"
-                              className="cc-leads-icon-btn edit"
-                              title="Edit lead"
-                              onClick={() => navigate(`/lead-edit/${row.lead_id}`)}
+                              className="cc-leads-icon-btn"
+                              title="View lead details & history (Read-only)"
+                              onClick={() => navigate(`/lead-details/${row.lead_id}`)}
+                              style={{ color: "#2563eb", background: "#eff6ff", borderRadius: 6 }}
                             >
-                              <Pencil size={15} />
+                              <Eye size={15} />
                             </button>
-                          )}
-                          {canDelete && (
+                            <span
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                padding: "3px 6px",
+                                borderRadius: 4,
+                                background: "#fef3c7",
+                                color: "#92400e",
+                                fontSize: 10,
+                                fontWeight: 700,
+                                border: "1px solid #fde68a",
+                              }}
+                              title="Read-Only: Lead is handled by another employee"
+                            >
+                              🔒 Read Only
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="cc-leads-row-actions">
                             <button
                               type="button"
-                              className="cc-leads-icon-btn danger"
-                              title="Delete lead"
-                              onClick={() => setDeleteTarget(row)}
+                              className="cc-leads-icon-btn"
+                              title="Generate/Share Customer Document Upload Link"
+                              onClick={() =>
+                                setDocReqLead({
+                                  id: row.lead_id,
+                                  customer: { name: row.name, mobile: row.number },
+                                  loanType: row.loan_type,
+                                  requiredAmount: row.est_budget,
+                                })
+                              }
+                              style={{ color: "#2563eb" }}
                             >
-                              <Trash2 size={16} />
+                              <Link size={15} />
                             </button>
-                          )}
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))
+                            <button
+                              type="button"
+                              className="cc-leads-icon-btn"
+                              title="View lead details"
+                              onClick={() => navigate(`/lead-details/${row.lead_id}`)}
+                            >
+                              <Eye size={15} />
+                            </button>
+                            {canEditLead && (
+                              <button
+                                type="button"
+                                className="cc-leads-icon-btn edit"
+                                title="Edit lead"
+                                onClick={() => navigate(`/lead-edit/${row.lead_id}`)}
+                              >
+                                <Pencil size={14} />
+                              </button>
+                            )}
+                            {canDelete && (
+                              <button
+                                type="button"
+                                className="cc-leads-icon-btn danger"
+                                title="Delete lead"
+                                onClick={() => setDeleteTarget(row)}
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
 
+        {/* PAGINATION */}
         <CcPagination
           currentPage={currentPage}
           totalPages={totalPages}
           totalItems={totalItems}
-          onPageChange={setCurrentPage}
-          itemLabel="leads"
+          pageSize={PAGE_SIZE}
+          onPageChange={(p) => setCurrentPage(p)}
         />
       </section>
 
+      {/* HAND-TO-HAND REASSIGN DROPDOWN POPUP */}
       {assignFor ? (
         <div
           ref={menuRef}
@@ -1272,6 +2120,7 @@ export default function LeadsListRedesign() {
             top: Math.min(assignFor.anchor.bottom + 6, window.innerHeight - 260),
             left: Math.min(assignFor.anchor.left, window.innerWidth - 280),
           }}
+          onClick={(e) => e.stopPropagation()}
         >
           <input
             type="search"
@@ -1297,25 +2146,30 @@ export default function LeadsListRedesign() {
         </div>
       ) : null}
 
+      {/* HAND-TO-HAND STATUS SELECT DROPDOWN POPUP */}
       {statusMenuFor ? (
         <div
           ref={statusMenuRef}
           className="cc-leads-assign-menu"
           style={{
             position: "fixed",
-            zIndex: 65,
+            zIndex: 75,
             top: Math.min(statusMenuFor.anchor.bottom + 6, window.innerHeight - 280),
             left: Math.min(statusMenuFor.anchor.left, window.innerWidth - 260),
             minWidth: 220,
-            background: "#ffffff",
-            borderRadius: "12px",
-            border: "1px solid #d5ded7",
-            boxShadow: "0 14px 35px rgba(15,23,42,0.18)",
-            padding: "8px",
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", padding: "4px 8px 6px", borderBottom: "1px solid #f1f5f9" }}>
+          <div
+            style={{
+              fontSize: "11px",
+              fontWeight: 700,
+              color: "#64748b",
+              textTransform: "uppercase",
+              padding: "4px 8px 6px",
+              borderBottom: "1px solid #f1f5f9",
+            }}
+          >
             Change Lead Status
           </div>
           <ul style={{ maxHeight: 240, overflowY: "auto", margin: "4px 0 0", padding: 0, listStyle: "none" }}>
@@ -1341,8 +2195,12 @@ export default function LeadsListRedesign() {
                       fontWeight: isCurrent ? 700 : 500,
                       cursor: "pointer",
                     }}
-                    onMouseEnter={(e) => { if (!isCurrent) e.currentTarget.style.background = "#f8fafc"; }}
-                    onMouseLeave={(e) => { if (!isCurrent) e.currentTarget.style.background = "transparent"; }}
+                    onMouseEnter={(e) => {
+                      if (!isCurrent) e.currentTarget.style.background = "#f8fafc";
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isCurrent) e.currentTarget.style.background = "transparent";
+                    }}
                   >
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
                       <span
@@ -1356,7 +2214,7 @@ export default function LeadsListRedesign() {
                       {st.label || st.value}
                     </span>
                     <span style={{ fontSize: "10px", color: "#94a3b8", fontWeight: 600 }}>
-                      {info.stage}
+                      {info.stage.split("•")[0]}
                     </span>
                   </button>
                 </li>
@@ -1366,34 +2224,14 @@ export default function LeadsListRedesign() {
         </div>
       ) : null}
 
-      {deleteTarget ? (
-        <div className="cc-leads-modal-overlay" onClick={() => setDeleteTarget(null)}>
-          <div className="cc-leads-modal" onClick={(event) => event.stopPropagation()}>
-            <h3>Delete lead {deleteTarget.lead_id}?</h3>
-            <p>
-              This permanently removes lead <strong>{deleteTarget.name || deleteTarget.lead_id}</strong>{" "}
-              and its history. This cannot be undone.
-            </p>
-            <div className="cc-leads-modal-actions">
-              <button type="button" className="cc-leads-btn ghost" onClick={() => setDeleteTarget(null)}>
-                Cancel
-              </button>
-              <button type="button" className="cc-leads-btn primary" style={{ background: "#dc2626" }} onClick={handleDelete}>
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {/* Quick Remark Modal */}
+      {/* QUICK REMARK MODAL (Hand-to-Hand update) */}
       {remarkModalLead ? (
         <div className="cc-leads-modal-overlay" onClick={() => setRemarkModalLead(null)}>
           <div className="cc-leads-modal" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <h3 style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
-                <MessageSquare size={18} color="var(--cc-primary, #047857)" />
-                Add Remark: {remarkModalLead.name || `#${remarkModalLead.lead_id}`}
+                <MessageSquare size={18} color="#047857" />
+                Add Remark: {remarkModalLead.name || `#${formatLeadCode(remarkModalLead)}`}
               </h3>
               <button
                 type="button"
@@ -1405,7 +2243,15 @@ export default function LeadsListRedesign() {
             </div>
 
             {remarkModalLead.latest_remark && (
-              <div style={{ padding: "8px 12px", background: "#f8fafc", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12 }}>
+              <div
+                style={{
+                  padding: "8px 12px",
+                  background: "#f8fafc",
+                  borderRadius: 8,
+                  border: "1px solid #e2e8f0",
+                  fontSize: 12,
+                }}
+              >
                 <span style={{ color: "#64748b", fontWeight: 600 }}>Previous Remark:</span>
                 <p style={{ margin: "2px 0 0 0", color: "#1e293b" }}>"{remarkModalLead.latest_remark}"</p>
                 <small style={{ color: "#94a3b8" }}>{formatDateTime(remarkModalLead.latest_remark_date)}</small>
@@ -1420,7 +2266,7 @@ export default function LeadsListRedesign() {
                 <textarea
                   rows={4}
                   required
-                  placeholder="Enter call notes, customer response, next steps..."
+                  placeholder="Enter call notes, customer conversation, next steps..."
                   value={remarkText}
                   onChange={(e) => setRemarkText(e.target.value)}
                   style={{
@@ -1479,12 +2325,39 @@ export default function LeadsListRedesign() {
         </div>
       ) : null}
 
+      {/* DELETE CONFIRMATION MODAL */}
+      {deleteTarget ? (
+        <div className="cc-leads-modal-overlay" onClick={() => setDeleteTarget(null)}>
+          <div className="cc-leads-modal" onClick={(event) => event.stopPropagation()}>
+            <h3>Delete lead {formatLeadCode(deleteTarget)}?</h3>
+            <p>
+              This permanently removes lead <strong>{deleteTarget.name || formatLeadCode(deleteTarget)}</strong> and its history. This action cannot be undone.
+            </p>
+            <div className="cc-leads-modal-actions">
+              <button type="button" className="cc-leads-btn ghost" onClick={() => setDeleteTarget(null)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="cc-leads-btn primary"
+                style={{ background: "#dc2626" }}
+                onClick={handleDelete}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* ADD LEAD MODAL */}
       <AddLeadModal
         open={showAddModal}
         onClose={handleCloseAddModal}
         onCreated={() => fetchLeads(currentPage)}
       />
 
+      {/* DOCUMENT REQUEST MODAL */}
       <LeadDocumentRequestModal
         isOpen={Boolean(docReqLead)}
         onClose={() => setDocReqLead(null)}

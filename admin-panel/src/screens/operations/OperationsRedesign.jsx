@@ -49,6 +49,7 @@ import {
 import API_URL from "../../config";
 import LeadDocumentRequestModal from "../leads/LeadDocumentRequestModal";
 import CcPagination from "../../components/CcPagination";
+import { formatLeadCode, formatCurrencyCompact } from "../../utils/leadUtils";
 
 const PAGE_SIZE = 20;
 const numberFormatter = new Intl.NumberFormat("en-IN");
@@ -133,6 +134,14 @@ const PIPELINE_STAGES = [
   { key: "PDD", label: "14. PDD", color: "#d97706", bg: "#fffbeb", border: "#fde68a" },
   { key: "ALL_PROCESS_COMPLETED", label: "15. All Process Completed", color: "#059669", bg: "#ecfdf5", border: "#6ee7b7" },
   { key: "REJECTED", label: "Rejected", color: "#b91c1c", bg: "#fef2f2", border: "#fecaca" },
+];
+
+const BANK_STAGE_CARDS = [
+  { key: "LOGGED_IN", label: "LOGGED IN" },
+  { key: "UNDER_PROCESS", label: "UNDER PROCESS" },
+  { key: "QUERY_RAISED", label: "QUERY RAISED" },
+  { key: "SANCTIONED", label: "SANCTIONED" },
+  { key: "STATUS_NOT_SET", label: "STATUS NOT SET" },
 ];
 
 const renderOpsStatusCell = ({
@@ -714,6 +723,7 @@ export default function OperationsRedesign() {
   const [appSearch, setAppSearch] = useState("");
   const [debouncedAppSearch, setDebouncedAppSearch] = useState("");
   const [selectedStageFilter, setSelectedStageFilter] = useState("ALL");
+  const [activeStageCard, setActiveStageCard] = useState(null);
   const [appCurrentPage, setAppCurrentPage] = useState(1);
   const [appTotalPages, setAppTotalPages] = useState(1);
   const [appTotalItems, setAppTotalItems] = useState(0);
@@ -730,6 +740,84 @@ export default function OperationsRedesign() {
     rejectedCount: 0,
     stageCounts: {},
   });
+
+  // Calculate the 5 Bank Stage KPI metrics dynamically
+  const stageKpiMetrics = useMemo(() => {
+    if (opsSummary?.bankStages) {
+      return opsSummary.bankStages;
+    }
+    const metrics = {
+      LOGGED_IN: { count: 0, amount: 0 },
+      UNDER_PROCESS: { count: 0, amount: 0 },
+      QUERY_RAISED: { count: 0, amount: 0 },
+      SANCTIONED: { count: 0, amount: 0 },
+      STATUS_NOT_SET: { count: 0, amount: 0 },
+    };
+    (applications || []).forEach((app) => {
+      const s = String(app.status || "").toUpperCase();
+      const qStatus = String(app.opsQueryStatus || "").toUpperCase();
+      const amt = parseFloat(app.sanctionedAmount || 0) || parseFloat(app.appliedAmount || 0);
+
+      if (s === "QUERY" || s === "QUERY_RAISED" || qStatus === "PENDING" || (app.queries && app.queries.some(q => q.status === "OPEN"))) {
+        metrics.QUERY_RAISED.count++;
+        metrics.QUERY_RAISED.amount += amt;
+      } else if (s === "SANCTIONED" || s === "APPROVED") {
+        metrics.SANCTIONED.count++;
+        metrics.SANCTIONED.amount += (parseFloat(app.sanctionedAmount || 0) || amt);
+      } else if (
+        s === "PD" || s === "LEGAL" || s === "TECHNICAL" ||
+        s.includes("PROCESS") || s.includes("VERIF") || s.includes("REVIEW") || s.includes("UNDERWRITING") ||
+        (app.pdStatus && app.pdStatus !== "PENDING" && app.pdStatus !== "NONE") ||
+        (app.legalStatus && app.legalStatus !== "PENDING" && app.legalStatus !== "NONE") ||
+        (app.technicalStatus && app.technicalStatus !== "PENDING" && app.technicalStatus !== "NONE")
+      ) {
+        metrics.UNDER_PROCESS.count++;
+        metrics.UNDER_PROCESS.amount += amt;
+      } else if (s === "LOGGED_IN" || s === "LOGIN" || s === "SUBMITTED_TO_BANK" || (app.loginStatus && app.loginStatus === "COMPLETED")) {
+        metrics.LOGGED_IN.count++;
+        metrics.LOGGED_IN.amount += amt;
+      } else {
+        metrics.STATUS_NOT_SET.count++;
+        metrics.STATUS_NOT_SET.amount += amt;
+      }
+    });
+    return metrics;
+  }, [applications, opsSummary]);
+
+  // Filter applications when an interactive stage KPI card is selected
+  const displayedApplications = useMemo(() => {
+    if (!activeStageCard) return applications;
+    return (applications || []).filter((app) => {
+      const s = String(app.status || "").toUpperCase();
+      const qStatus = String(app.opsQueryStatus || "").toUpperCase();
+      if (activeStageCard === "QUERY_RAISED") {
+        return s === "QUERY" || s === "QUERY_RAISED" || qStatus === "PENDING" || (app.queries && app.queries.some(q => q.status === "OPEN"));
+      }
+      if (activeStageCard === "SANCTIONED") {
+        return s === "SANCTIONED" || s === "APPROVED";
+      }
+      if (activeStageCard === "UNDER_PROCESS") {
+        return (
+          s === "PD" || s === "LEGAL" || s === "TECHNICAL" ||
+          s.includes("PROCESS") || s.includes("VERIF") || s.includes("REVIEW") || s.includes("UNDERWRITING") ||
+          (app.pdStatus && app.pdStatus !== "PENDING" && app.pdStatus !== "NONE") ||
+          (app.legalStatus && app.legalStatus !== "PENDING" && app.legalStatus !== "NONE") ||
+          (app.technicalStatus && app.technicalStatus !== "PENDING" && app.technicalStatus !== "NONE")
+        );
+      }
+      if (activeStageCard === "LOGGED_IN") {
+        return s === "LOGGED_IN" || s === "LOGIN" || s === "SUBMITTED_TO_BANK" || (app.loginStatus && app.loginStatus === "COMPLETED");
+      }
+      if (activeStageCard === "STATUS_NOT_SET") {
+        return (
+          !s || s === "DOCS_PENDING" || s === "READY_TO_SEND" || s === "NEW" || s === "NOT_SET" ||
+          (!["LOGGED_IN", "LOGIN", "SUBMITTED_TO_BANK", "PD", "LEGAL", "TECHNICAL", "QUERY", "QUERY_RAISED", "SANCTIONED", "APPROVED", "DISBURSED"].includes(s) &&
+           !qStatus && !app.loginStatus)
+        );
+      }
+      return true;
+    });
+  }, [applications, activeStageCard]);
 
   // Full Remark View Modal State
   const [remarkViewModal, setRemarkViewModal] = useState(null); // { title, stage, remark, updatedAt, app }
@@ -2998,72 +3086,103 @@ export default function OperationsRedesign() {
         </div>
       </section>
 
-      {/* Real-time Banker Open Queries Alert Widget */}
-      {openQueries.length > 0 && (
-        <section className="cc-ops-query-alert-panel">
-          <div className="cc-ops-query-alert-head">
-            <div className="cc-query-alert-title">
-              <AlertCircle size={18} />
-              <strong>Banker Clarification Queries Requiring Attention ({openQueries.length})</strong>
-            </div>
+      {/* Banker Stage KPI Cards (Files at the bank by stage, then sanctioned files waiting to disburse) */}
+      <section style={{ marginBottom: "24px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px", flexWrap: "wrap", gap: "10px" }}>
+          <p style={{ color: "#64748b", fontSize: "14px", margin: 0, fontWeight: 500, letterSpacing: "-0.01em" }}>
+            Files at the bank by stage, then sanctioned files waiting to disburse.
+          </p>
+          {activeStageCard && (
             <button
               type="button"
-              className="cc-query-view-all-btn"
-              onClick={() => navigate("/banker/queries")}
+              onClick={() => setActiveStageCard(null)}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                background: "#f1f5f9",
+                border: "1px solid #cbd5e1",
+                borderRadius: "6px",
+                padding: "4px 10px",
+                fontSize: "12px",
+                fontWeight: 600,
+                color: "#475569",
+                cursor: "pointer",
+              }}
             >
-              All Queries <ArrowRight size={13} />
+              <RotateCcw size={12} /> Clear Stage Filter ({BANK_STAGE_CARDS.find((c) => c.key === activeStageCard)?.label})
             </button>
-          </div>
-          <div className="cc-ops-query-chips-scroll">
-            {openQueries.slice(0, 4).map((q) => (
-              <div key={q.id} className="cc-query-alert-chip">
-                <div className="cc-chip-meta">
-                  <span className="cc-chip-app">{q.application?.applicationNumber || `App #${q.applicationId}`}</span>
-                  <span className="cc-chip-cust">{q.application?.customer?.name || "Customer"}</span>
+          )}
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+            gap: "16px",
+          }}
+          className="cc-bank-stage-cards-grid"
+        >
+          {BANK_STAGE_CARDS.map((card) => {
+            const metric = stageKpiMetrics[card.key] || { count: 0, amount: 0 };
+            const isActive = activeStageCard === card.key;
+            return (
+              <div
+                key={card.key}
+                onClick={() => setActiveStageCard((prev) => (prev === card.key ? null : card.key))}
+                style={{
+                  backgroundColor: "#0b1328",
+                  backgroundImage: "linear-gradient(180deg, #0e172e 0%, #080e1d 100%)",
+                  borderRadius: "14px",
+                  padding: "20px 24px",
+                  border: isActive ? "2px solid #38bdf8" : "1px solid rgba(255, 255, 255, 0.08)",
+                  boxShadow: isActive ? "0 0 20px rgba(56, 189, 248, 0.25)" : "0 4px 12px rgba(0, 0, 0, 0.15)",
+                  cursor: "pointer",
+                  transition: "all 0.2s ease-in-out",
+                  userSelect: "none",
+                  position: "relative",
+                }}
+                className="cc-bank-stage-card"
+                title={`Click to filter by ${card.label}`}
+              >
+                <div
+                  style={{
+                    fontSize: "12px",
+                    fontWeight: 700,
+                    letterSpacing: "0.06em",
+                    color: isActive ? "#38bdf8" : "#94a3b8",
+                    textTransform: "uppercase",
+                    marginBottom: "10px",
+                  }}
+                >
+                  {card.label}
                 </div>
-                <p className="cc-chip-text">"{q.queryText}"</p>
-                <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 4 }}>
-                  <button
-                    type="button"
-                    className="cc-chip-answer-btn"
-                    onClick={() => {
-                      setReplyTargetQuery(q);
-                      setReplyResponseText("");
-                    }}
-                  >
-                    Reply &amp; Resolve
-                  </button>
-                  {q.application?.customer?.mobile && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const msg = `Dear ${q.application?.customer?.name || "Customer"}, regarding your loan application #${q.application?.applicationNumber || q.applicationId}: Clarification required by Banker - "${q.queryText}". Please provide the required information/documents.`;
-                        shareOnWhatsApp(q.application?.customer?.mobile, msg);
-                      }}
-                      style={{
-                        padding: "4px 8px",
-                        borderRadius: 6,
-                        border: "1px solid #86efac",
-                        background: "#f0fdf4",
-                        color: "#166534",
-                        fontSize: 11,
-                        fontWeight: 600,
-                        cursor: "pointer",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 4,
-                      }}
-                      title="Share query with customer on WhatsApp"
-                    >
-                      <WhatsAppIcon size={12} /> WhatsApp
-                    </button>
-                  )}
+                <div
+                  style={{
+                    fontSize: "32px",
+                    fontWeight: 800,
+                    color: "#ffffff",
+                    lineHeight: 1.1,
+                    marginBottom: "8px",
+                  }}
+                >
+                  {metric.count}
+                </div>
+                <div
+                  style={{
+                    fontSize: "15px",
+                    fontWeight: 500,
+                    color: "#cbd5e1",
+                    letterSpacing: "-0.01em",
+                  }}
+                >
+                  {formatCurrencyCompact(metric.amount)}
                 </div>
               </div>
-            ))}
-          </div>
-        </section>
-      )}
+            );
+          })}
+        </div>
+      </section>
 
       {/* VIEW MODE: PIPELINE (KANBAN / TABLE) */}
       {viewMode === "pipeline" && (
@@ -3075,7 +3194,7 @@ export default function OperationsRedesign() {
           {displayType === "kanban" ? (
             <div className="cc-ops-kanban-board">
               {PIPELINE_STAGES.map((stage) => {
-                const stageApps = applications.filter((a) => {
+                const stageApps = displayedApplications.filter((a) => {
                   const s = (a.status || "DOCS_PENDING").toUpperCase();
                   if (stage.key === "SUBMITTED_TO_BANK") {
                     return s === "SUBMITTED_TO_BANK" || s === "UNDER_REVIEW";
@@ -3214,14 +3333,14 @@ export default function OperationsRedesign() {
                           Loading loan applications...
                         </td>
                       </tr>
-                    ) : applications.length === 0 ? (
+                    ) : displayedApplications.length === 0 ? (
                       <tr>
                         <td colSpan={15} className="cc-report-empty">
                           No loan applications match the selected filters.
                         </td>
                       </tr>
                     ) : (
-                      applications.map((app) => (
+                      displayedApplications.map((app) => (
                         <tr
                           key={app.id}
                           className="cc-ops-table-row"
@@ -3845,7 +3964,7 @@ export default function OperationsRedesign() {
               <table>
                 <thead>
                   <tr>
-                    <th>Lead ID</th>
+                    <th>LEAD</th>
                     <th>Customer Name</th>
                     <th>Contact Phone</th>
                     <th>Assigned Person / Owner</th>
@@ -3881,7 +4000,7 @@ export default function OperationsRedesign() {
                         className="cc-ops-table-row"
                         onClick={() => navigate(`/lead-details/${lead.lead_id}`)}
                       >
-                        <td style={{ fontWeight: 600 }}>#{lead.lead_id}</td>
+                        <td style={{ fontWeight: 600 }}>#{formatLeadCode(lead)}</td>
                         <td>
                           <strong>{lead.name || "--"}</strong>
                         </td>
@@ -3922,7 +4041,7 @@ export default function OperationsRedesign() {
                                     e.stopPropagation();
                                     openEditBankModal({
                                       id: lead.application_id,
-                                      applicationNumber: lead.application_number || `Lead #${lead.lead_id}`,
+                                      applicationNumber: lead.application_number || `Lead #${formatLeadCode(lead)}`,
                                       customer: { name: lead.name, mobile: lead.number },
                                       lender: { name: lead.bank_name },
                                       leadId: lead.lead_id,
@@ -3944,7 +4063,7 @@ export default function OperationsRedesign() {
                                 e.stopPropagation();
                                 openEditBankModal({
                                   id: lead.application_id,
-                                  applicationNumber: lead.application_number || `Lead #${lead.lead_id}`,
+                                  applicationNumber: lead.application_number || `Lead #${formatLeadCode(lead)}`,
                                   customer: { name: lead.name, mobile: lead.number },
                                   lender: null,
                                   leadId: lead.lead_id,
@@ -5315,7 +5434,7 @@ export default function OperationsRedesign() {
                 </div>
                 {reassignModalData.lead_id && (
                   <div>
-                    <strong>Lead ID:</strong> #{reassignModalData.lead_id}
+                    <strong>Lead:</strong> #{formatLeadCode(reassignModalData)}
                   </div>
                 )}
                 {reassignModalData.applicationNumber && (

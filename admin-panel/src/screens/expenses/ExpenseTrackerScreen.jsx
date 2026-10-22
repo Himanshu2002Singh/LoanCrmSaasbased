@@ -174,6 +174,85 @@ export default function ExpenseTrackerScreen() {
     }
   };
 
+  // Salary Tab States (Tab 3: STAFF)
+  const [selectedStaffIds, setSelectedStaffIds] = useState([]);
+  const [salaryFilterStatus, setSalaryFilterStatus] = useState("ALL"); // "ALL", "PAID", "PENDING"
+  const [salarySearch, setSalarySearch] = useState("");
+  const [salaryBulkPaymentMode, setSalaryBulkPaymentMode] = useState("Net Banking");
+  const [updatingSalaryId, setUpdatingSalaryId] = useState(null); // specific employee ID or 'bulk'
+
+  // Update Salary Status handler (single or bulk)
+  const handleUpdateSalaryStatus = async (employeeIds, targetStatus, paymentMode = "Net Banking") => {
+    if (!employeeIds || employeeIds.length === 0) return;
+    try {
+      setUpdatingSalaryId(employeeIds.length === 1 ? employeeIds[0] : "bulk");
+      const res = await axios.post(`${API_URL}/expenses/salary-status`, {
+        employeeIds,
+        status: targetStatus,
+        month: selectedMonth,
+        paymentMode: paymentMode || salaryBulkPaymentMode || "Net Banking",
+      });
+
+      if (res.data?.success) {
+        toast.success(res.data.message || `Salary status updated to ${targetStatus}`);
+        if (employeeIds.length > 1) {
+          setSelectedStaffIds([]);
+        } else {
+          setSelectedStaffIds((prev) => prev.filter((id) => id !== employeeIds[0]));
+        }
+        await fetchSummary(selectedMonth);
+      } else {
+        toast.error(res.data?.message || "Failed to update salary status");
+      }
+    } catch (err) {
+      console.error("Error updating salary status:", err);
+      toast.error(err.response?.data?.message || "Failed to update salary status");
+    } finally {
+      setUpdatingSalaryId(null);
+    }
+  };
+
+  const filteredStaffList = useMemo(() => {
+    const list = summaryData?.staffBreakdown || [];
+    return list.filter((emp) => {
+      // Status filter
+      if (salaryFilterStatus === "PAID" && emp.salaryStatus !== "PAID") return false;
+      if (salaryFilterStatus === "PENDING" && emp.salaryStatus === "PAID") return false;
+
+      // Search filter
+      if (salarySearch.trim()) {
+        const q = salarySearch.toLowerCase();
+        const nameMatch = (emp.name || "").toLowerCase().includes(q);
+        const roleMatch = (emp.role || "").toLowerCase().includes(q);
+        const emailMatch = (emp.email || "").toLowerCase().includes(q);
+        const phoneMatch = (emp.phone || "").toLowerCase().includes(q);
+        if (!nameMatch && !roleMatch && !emailMatch && !phoneMatch) return false;
+      }
+      return true;
+    });
+  }, [summaryData?.staffBreakdown, salaryFilterStatus, salarySearch]);
+
+  const isAllStaffSelected = useMemo(() => {
+    if (!filteredStaffList.length) return false;
+    return filteredStaffList.every((emp) => selectedStaffIds.includes(emp.id));
+  }, [filteredStaffList, selectedStaffIds]);
+
+  const handleToggleSelectAllStaff = () => {
+    if (isAllStaffSelected) {
+      const visibleIds = new Set(filteredStaffList.map((e) => e.id));
+      setSelectedStaffIds((prev) => prev.filter((id) => !visibleIds.has(id)));
+    } else {
+      const newIds = new Set([...selectedStaffIds, ...filteredStaffList.map((e) => e.id)]);
+      setSelectedStaffIds(Array.from(newIds));
+    }
+  };
+
+  const handleToggleSelectStaff = (empId) => {
+    setSelectedStaffIds((prev) =>
+      prev.includes(empId) ? prev.filter((id) => id !== empId) : [...prev, empId]
+    );
+  };
+
   // Fetch expenses list
   const fetchExpenses = async () => {
     try {
@@ -1359,92 +1438,299 @@ export default function ExpenseTrackerScreen() {
       {/* TAB 3: STAFF SALARIES & INCENTIVES (FOR ADMIN) */}
       {canViewFullExpenses && activeTab === "STAFF" && (
         <div className="cc-exp-table-section">
+          {/* Top Banner with Key Payroll Metrics */}
           <div className="cc-exp-tab-head-banner">
             <div>
-              <h3>Employee Monthly Payroll & Performance Incentives</h3>
+              <h3>Employee Monthly Payroll & Salary Status</h3>
               <p>
-                Calculates Base Monthly Salary + Case Incentives (Manpower Charges credited on closed deals) for{" "}
-                <strong>{formatMonthDisplay(selectedMonth)}</strong>.
+                Calculates Base Monthly Salary + Case Incentives for{" "}
+                <strong>{formatMonthDisplay(selectedMonth)}</strong>. Mark salaries as PAID or PENDING individually or in bulk.
               </p>
             </div>
             <div className="cc-exp-tab-head-pills">
-              <span className="pill green">
-                Total Salary: {currencyFormatter.format(summary.staffSalaries || 0)}
-              </span>
-              <span className="pill amber">
-                Total Incentives: {currencyFormatter.format(summary.staffIncentives || 0)}
-              </span>
               <span className="pill total">
                 Combined Staff Cost: {currencyFormatter.format(summary.staffTotalCost || 0)}
+              </span>
+              <span className="pill green">
+                <CheckCircle2 size={13} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} />
+                Paid: {currencyFormatter.format(summary.staffSalariesPaid || 0)} ({summary.staffPaidCount || 0} Staff)
+              </span>
+              <span className="pill amber">
+                <Clock size={13} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} />
+                Pending: {currencyFormatter.format(summary.staffSalariesPending || 0)} ({summary.staffPendingCount || 0} Staff)
+              </span>
+              <span className="pill blue">
+                Base Salaries: {currencyFormatter.format(summary.staffSalaries || 0)}
+              </span>
+              <span className="pill purple">
+                Total Incentives: {currencyFormatter.format(summary.staffIncentives || 0)}
               </span>
             </div>
           </div>
 
+          {/* Filter Bar & Search for Staff Salaries */}
+          <div className="cc-exp-staff-subbar">
+            <div className="cc-exp-staff-filter-tabs">
+              <button
+                type="button"
+                className={`cc-exp-staff-tab-btn ${salaryFilterStatus === "ALL" ? "active" : ""}`}
+                onClick={() => setSalaryFilterStatus("ALL")}
+              >
+                All Staff <span className="badge">{summaryData?.staffBreakdown?.length || 0}</span>
+              </button>
+              <button
+                type="button"
+                className={`cc-exp-staff-tab-btn ${salaryFilterStatus === "PAID" ? "active" : ""}`}
+                onClick={() => setSalaryFilterStatus("PAID")}
+              >
+                <CheckCircle2 size={13} style={{ color: "#16a34a" }} />
+                Paid <span className="badge">{summary.staffPaidCount || 0}</span>
+              </button>
+              <button
+                type="button"
+                className={`cc-exp-staff-tab-btn ${salaryFilterStatus === "PENDING" ? "active" : ""}`}
+                onClick={() => setSalaryFilterStatus("PENDING")}
+              >
+                <Clock size={13} style={{ color: "#d97706" }} />
+                Pending <span className="badge">{summary.staffPendingCount || 0}</span>
+              </button>
+            </div>
+
+            <div className="cc-exp-search-box" style={{ maxWidth: 360 }}>
+              <Search size={15} color="#94a3b8" />
+              <input
+                type="text"
+                placeholder="Search staff by name, role, phone..."
+                value={salarySearch}
+                onChange={(e) => setSalarySearch(e.target.value)}
+              />
+              {salarySearch && (
+                <button
+                  type="button"
+                  style={{ border: "none", background: "none", cursor: "pointer", padding: 0 }}
+                  onClick={() => setSalarySearch("")}
+                >
+                  <X size={14} color="#94a3b8" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Bulk Selection Action Bar */}
+          {selectedStaffIds.length > 0 && (
+            <div className="cc-exp-bulk-bar">
+              <div className="cc-exp-bulk-info">
+                <span className="cc-exp-bulk-check-badge">✓</span>
+                <span>
+                  <strong>{selectedStaffIds.length}</strong> staff selected (Bulk Action)
+                </span>
+              </div>
+
+              <div className="cc-exp-bulk-actions">
+                <div className="cc-exp-bulk-mode">
+                  <label>Mode:</label>
+                  <select
+                    value={salaryBulkPaymentMode}
+                    onChange={(e) => setSalaryBulkPaymentMode(e.target.value)}
+                  >
+                    {PAYMENT_MODES.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <button
+                  type="button"
+                  className="cc-exp-bulk-btn paid"
+                  disabled={updatingSalaryId !== null}
+                  onClick={() => handleUpdateSalaryStatus(selectedStaffIds, "PAID", salaryBulkPaymentMode)}
+                >
+                  {updatingSalaryId === "bulk" ? (
+                    <RefreshCw size={14} className="cc-spin" />
+                  ) : (
+                    <CheckCircle2 size={15} />
+                  )}
+                  <span>Mark Selected as PAID ({selectedStaffIds.length})</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="cc-exp-bulk-btn pending"
+                  disabled={updatingSalaryId !== null}
+                  onClick={() => handleUpdateSalaryStatus(selectedStaffIds, "PENDING")}
+                >
+                  {updatingSalaryId === "bulk" ? (
+                    <RefreshCw size={14} className="cc-spin" />
+                  ) : (
+                    <Clock size={15} />
+                  )}
+                  <span>Mark Selected as PENDING ({selectedStaffIds.length})</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="cc-exp-bulk-btn clear"
+                  onClick={() => setSelectedStaffIds([])}
+                  title="Clear Selection"
+                >
+                  <X size={14} /> Clear
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Salaries Table */}
           <div className="cc-exp-table-scroll">
             <table className="cc-exp-sheet-table">
               <thead>
                 <tr>
-                  <th style={{ width: 80 }}>Emp ID</th>
+                  <th style={{ width: 44, textAlign: "center" }}>
+                    <input
+                      type="checkbox"
+                      className="cc-exp-checkbox"
+                      checked={isAllStaffSelected}
+                      onChange={handleToggleSelectAllStaff}
+                      title="Select / Deselect all visible staff"
+                    />
+                  </th>
+                  <th style={{ width: 70 }}>Emp ID</th>
                   <th>Employee Name</th>
                   <th>Role / Designation</th>
                   <th>Contact Info</th>
-                  <th style={{ width: 140, textAlign: "right" }}>Monthly Base Salary (₹)</th>
-                  <th style={{ width: 120, textAlign: "center" }}>Cases Closed</th>
-                  <th style={{ width: 160, textAlign: "right" }}>Case Incentives (₹)</th>
-                  <th style={{ width: 170, textAlign: "right" }}>Total Month Earning (₹)</th>
+                  <th style={{ width: 135, textAlign: "right" }}>Monthly Base Salary (₹)</th>
+                  <th style={{ width: 100, textAlign: "center" }}>Cases Closed</th>
+                  <th style={{ width: 145, textAlign: "right" }}>Case Incentives (₹)</th>
+                  <th style={{ width: 155, textAlign: "right" }}>Total Month Earning (₹)</th>
+                  <th style={{ width: 130, textAlign: "center" }}>Salary Status</th>
+                  <th style={{ width: 135, textAlign: "center" }}>Change Status</th>
                 </tr>
               </thead>
               <tbody>
-                {!summaryData?.staffBreakdown?.length ? (
+                {!filteredStaffList.length ? (
                   <tr>
-                    <td colSpan={8} className="cc-exp-empty-cell">
-                      No active staff found.
+                    <td colSpan={11} className="cc-exp-empty-cell">
+                      {summaryLoading ? "Loading staff salary data..." : "No staff found matching filters."}
                     </td>
                   </tr>
                 ) : (
-                  summaryData.staffBreakdown.map((emp) => (
-                    <tr key={emp.id} className="cc-exp-row">
-                      <td style={{ fontWeight: 600 }}>{emp.id}</td>
-                      <td>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          <span className="cc-exp-user-avatar">
-                            {(emp.name || "?").slice(0, 2).toUpperCase()}
-                          </span>
-                          <div>
-                            <strong style={{ color: "#0f172a", fontSize: 13.5 }}>{emp.name}</strong>
+                  filteredStaffList.map((emp) => {
+                    const isSelected = selectedStaffIds.includes(emp.id);
+                    const isPaid = emp.salaryStatus === "PAID";
+                    const isUpdatingThis = updatingSalaryId === emp.id;
+
+                    return (
+                      <tr key={emp.id} className={`cc-exp-row ${isSelected ? "selected" : ""}`}>
+                        {/* Checkbox column for bulk selection */}
+                        <td style={{ textAlign: "center" }}>
+                          <input
+                            type="checkbox"
+                            className="cc-exp-checkbox"
+                            checked={isSelected}
+                            onChange={() => handleToggleSelectStaff(emp.id)}
+                            title={`Select ${emp.name}`}
+                          />
+                        </td>
+
+                        <td style={{ fontWeight: 600 }}>#{emp.id}</td>
+
+                        <td>
+                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <span className="cc-exp-user-avatar">
+                              {(emp.name || "?").slice(0, 2).toUpperCase()}
+                            </span>
+                            <div>
+                              <strong style={{ color: "#0f172a", fontSize: 13.5 }}>{emp.name}</strong>
+                            </div>
                           </div>
-                        </div>
-                      </td>
-                      <td>
-                        <span className="cc-exp-role-badge">{emp.role}</span>
-                      </td>
-                      <td>
-                        <div style={{ fontSize: 12, color: "#64748b" }}>
-                          <div>{emp.email || "--"}</div>
-                          <div>{emp.phone || "--"}</div>
-                        </div>
-                      </td>
-                      <td style={{ textAlign: "right", fontWeight: 600 }}>
-                        {currencyFormatter.format(emp.monthlySalary || 0)}
-                      </td>
-                      <td style={{ textAlign: "center" }}>
-                        <span className={`cc-exp-count-badge ${emp.incentiveCount > 0 ? "active" : ""}`}>
-                          {emp.incentiveCount}
-                        </span>
-                      </td>
-                      <td style={{ textAlign: "right", fontWeight: 600, color: emp.totalIncentive > 0 ? "#d97706" : "#64748b" }}>
-                        {currencyFormatter.format(emp.totalIncentive || 0)}
-                      </td>
-                      <td style={{ textAlign: "right", fontWeight: 800, color: "#047857", fontSize: 14 }}>
-                        {currencyFormatter.format(emp.totalPayable || 0)}
-                      </td>
-                    </tr>
-                  ))
+                        </td>
+
+                        <td>
+                          <span className="cc-exp-role-badge">{emp.role}</span>
+                        </td>
+
+                        <td>
+                          <div style={{ fontSize: 12, color: "#64748b" }}>
+                            <div>{emp.email || "--"}</div>
+                            <div>{emp.phone || "--"}</div>
+                          </div>
+                        </td>
+
+                        <td style={{ textAlign: "right", fontWeight: 600 }}>
+                          {currencyFormatter.format(emp.monthlySalary || 0)}
+                        </td>
+
+                        <td style={{ textAlign: "center" }}>
+                          <span className={`cc-exp-count-badge ${emp.incentiveCount > 0 ? "active" : ""}`}>
+                            {emp.incentiveCount}
+                          </span>
+                        </td>
+
+                        <td
+                          style={{
+                            textAlign: "right",
+                            fontWeight: 600,
+                            color: emp.totalIncentive > 0 ? "#d97706" : "#64748b",
+                          }}
+                        >
+                          {currencyFormatter.format(emp.totalIncentive || 0)}
+                        </td>
+
+                        <td style={{ textAlign: "right", fontWeight: 800, color: "#047857", fontSize: 14 }}>
+                          {currencyFormatter.format(emp.totalPayable || 0)}
+                        </td>
+
+                        {/* Salary Status Pill */}
+                        <td style={{ textAlign: "center" }}>
+                          <div style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+                            <span className={`cc-exp-status-pill ${isPaid ? "paid" : "pending"}`}>
+                              {isPaid ? (
+                                <>
+                                  <CheckCircle2 size={12} /> PAID
+                                </>
+                              ) : (
+                                <>
+                                  <Clock size={12} /> PENDING
+                                </>
+                              )}
+                            </span>
+                            {isPaid && (
+                              <span style={{ fontSize: 10.5, color: "#64748b" }}>
+                                {emp.paymentMode || "Net Banking"}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* Individual Status Actions */}
+                        <td style={{ textAlign: "center" }}>
+                          <div className="cc-exp-row-status-actions">
+                            <select
+                              className={`cc-exp-status-dropdown ${isPaid ? "paid" : "pending"}`}
+                              value={isPaid ? "PAID" : "PENDING"}
+                              disabled={isUpdatingThis}
+                              onChange={(e) =>
+                                handleUpdateSalaryStatus([emp.id], e.target.value, emp.paymentMode || "Net Banking")
+                              }
+                              title="Select salary status"
+                            >
+                              <option value="PAID">✓ PAID</option>
+                              <option value="PENDING">⏳ PENDING</option>
+                            </select>
+                            {isUpdatingThis && (
+                              <RefreshCw size={12} className="cc-spin" style={{ color: "#64748b" }} />
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
               <tfoot>
                 <tr className="cc-exp-sheet-total-row">
-                  <td colSpan={4} style={{ textAlign: "right", fontWeight: 700, paddingRight: 16 }}>
+                  <td colSpan={5} style={{ textAlign: "right", fontWeight: 700, paddingRight: 16 }}>
                     GRAND TOTAL STAFF COST:
                   </td>
                   <td style={{ textAlign: "right", fontWeight: 700 }}>
@@ -1456,6 +1742,14 @@ export default function ExpenseTrackerScreen() {
                   </td>
                   <td style={{ textAlign: "right", fontWeight: 800, color: "#047857", fontSize: 14 }}>
                     {currencyFormatter.format(summary.staffTotalCost || 0)}
+                  </td>
+                  <td colSpan={2} style={{ textAlign: "center", fontSize: 12, color: "#475569", fontWeight: 600 }}>
+                    <span style={{ color: "#16a34a", marginRight: 8 }}>
+                      ✓ {summary.staffPaidCount || 0} Paid
+                    </span>
+                    <span style={{ color: "#d97706" }}>
+                      ⏳ {summary.staffPendingCount || 0} Pending
+                    </span>
                   </td>
                 </tr>
               </tfoot>
@@ -2790,11 +3084,238 @@ const styles = `
   to { transform: rotate(360deg); }
 }
 
+/* Bulk Action Bar for Salaries */
+.cc-exp-bulk-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  background: #ffffff;
+  padding: 12px 18px;
+  border-radius: 12px;
+  border: 1.5px solid #10b981;
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.12);
+}
+.cc-exp-bulk-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13.5px;
+  color: #0f172a;
+}
+.cc-exp-bulk-check-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #10b981;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+}
+.cc-exp-bulk-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.cc-exp-bulk-mode {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #475569;
+}
+.cc-exp-bulk-mode select {
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  font-size: 12.5px;
+  color: #0f172a;
+  outline: none;
+  cursor: pointer;
+}
+.cc-exp-bulk-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.cc-exp-bulk-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.cc-exp-bulk-btn.paid {
+  background: #059669;
+  color: #ffffff;
+}
+.cc-exp-bulk-btn.paid:hover:not(:disabled) {
+  background: #047857;
+  transform: translateY(-1px);
+}
+.cc-exp-bulk-btn.pending {
+  background: #d97706;
+  color: #ffffff;
+}
+.cc-exp-bulk-btn.pending:hover:not(:disabled) {
+  background: #b45309;
+  transform: translateY(-1px);
+}
+.cc-exp-bulk-btn.clear {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+}
+.cc-exp-bulk-btn.clear:hover {
+  background: #e2e8f0;
+}
+
+/* Staff subbar (Filters & Search) */
+.cc-exp-staff-subbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  background: #ffffff;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+}
+.cc-exp-staff-filter-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #f1f5f9;
+  padding: 3px;
+  border-radius: 9px;
+}
+.cc-exp-staff-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 7px;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.cc-exp-staff-tab-btn.active {
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+.cc-exp-staff-tab-btn .badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: #e2e8f0;
+  color: #475569;
+}
+.cc-exp-staff-tab-btn.active .badge {
+  background: #0f172a;
+  color: #ffffff;
+}
+
+/* Table row actions & status */
+.cc-exp-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: #059669;
+  cursor: pointer;
+}
+.cc-exp-row.selected {
+  background: #f0fdf4 !important;
+}
+.cc-exp-row-status-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.cc-exp-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border-radius: 7px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
+}
+.cc-exp-action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.cc-exp-action-btn.mark-paid {
+  background: #dcfce7;
+  color: #15803d;
+  border-color: #86efac;
+}
+.cc-exp-action-btn.mark-paid:hover:not(:disabled) {
+  background: #15803d;
+  color: #ffffff;
+}
+.cc-exp-action-btn.mark-pending {
+  background: #fef3c7;
+  color: #b45309;
+  border-color: #fde68a;
+}
+.cc-exp-action-btn.mark-pending:hover:not(:disabled) {
+  background: #b45309;
+  color: #ffffff;
+}
+
+.cc-exp-status-dropdown {
+  padding: 5px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  outline: none;
+  border: 1.5px solid transparent;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+.cc-exp-status-dropdown:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.cc-exp-status-dropdown.paid {
+  background: #dcfce7;
+  color: #15803d;
+  border-color: #86efac;
+}
+.cc-exp-status-dropdown.pending {
+  background: #fef3c7;
+  color: #b45309;
+  border-color: #fde68a;
+}
+
 @media (max-width: 768px) {
   .cc-exp-container { padding: 14px 14px 40px; }
   .cc-exp-header-bar { padding: 14px; }
   .cc-exp-cards-grid { grid-template-columns: 1fr; }
   .cc-exp-form-grid { grid-template-columns: 1fr; }
   .cc-exp-field.span-2 { grid-column: span 1; }
+  .cc-exp-bulk-bar { flex-direction: column; align-items: flex-start; }
 }
 `;

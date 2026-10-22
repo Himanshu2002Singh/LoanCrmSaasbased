@@ -17,6 +17,7 @@ import API_URL from "../../../config";
 import CcPagination from "../../../components/CcPagination";
 import ResetPasswordModal from "../ResetPasswordModal";
 import ManagePermissionsModal from "../ManagePermissionsModal";
+import { formatLeadCode } from "../../../utils/leadUtils";
 
 const ROLE_LABELS = {
   EMPLOYEE: "Sales Manager",
@@ -234,7 +235,7 @@ export default function UserDetailRedesign() {
         onToggle={() => setShowLeads((v) => !v)}
       >
         <MiniTable
-          columns={["Lead ID", "Name", "Email", "Phone", "Status"]}
+          columns={["LEAD", "Name", "Email", "Phone", "Status"]}
           rows={leads.rows}
           emptyText="No leads for this employee"
           renderRow={(lead) => (
@@ -243,7 +244,7 @@ export default function UserDetailRedesign() {
               className="cc-udt-row"
               onClick={() => navigate(`/lead-details/${lead.lead_id}`)}
             >
-              <td>{lead.lead_id}</td>
+              <td>#{formatLeadCode(lead)}</td>
               <td>{lead.name || "--"}</td>
               <td>{lead.email || "--"}</td>
               <td>{lead.number || "--"}</td>
@@ -303,7 +304,7 @@ export default function UserDetailRedesign() {
               <tr key={task.task_id}>
                 <td>{task.task_id}</td>
                 <td>{task.title || "--"}</td>
-                <td>{task.customer_name || task.lead_id || "--"}</td>
+                <td>{task.customer_name || (task.lead_id ? `#${formatLeadCode(task.lead_id)}` : "--")}</td>
                 <td>{task.due_date ? new Date(task.due_date).toLocaleString() : "--"}</td>
                 <td>{task.priority || "--"}</td>
                 <td><span className={`cc-udt-task-status ${statusClass}`}>{status || "--"}</span></td>

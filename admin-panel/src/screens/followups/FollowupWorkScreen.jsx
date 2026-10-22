@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import API_URL from "../../config";
 import RedesignPageFrame from "../../components/RedesignPageFrame";
+import { formatLeadCode } from "../../utils/leadUtils";
 
 const getTodayString = () => {
   const d = new Date();
@@ -615,7 +616,7 @@ export default function FollowupWorkScreen() {
                               to={`/lead-details/${item.lead_id}`}
                               className="font-bold text-indigo-600 hover:text-indigo-800 hover:underline flex items-center gap-1"
                             >
-                              <span>{item.lead_number || `LD-${item.lead_id}`}</span>
+                              <span>{formatLeadCode(item)}</span>
                               <ExternalLink className="w-3 h-3" />
                             </Link>
                             <div className="text-[11px] font-medium text-slate-700">

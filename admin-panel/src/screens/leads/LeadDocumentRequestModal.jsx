@@ -22,6 +22,7 @@ import {
   EyeOff,
 } from "lucide-react";
 import API_URL, { CLIENT_PORTAL_URL } from "../../config";
+import { formatLeadCode } from "../../utils/leadUtils";
 
 export default function LeadDocumentRequestModal({
   isOpen,
@@ -311,7 +312,7 @@ export default function LeadDocumentRequestModal({
                 {generatedResult ? "Share Document Upload Link" : "Create Customer Document Upload Link"}
               </h3>
               <p className="text-xs text-slate-500 font-medium">
-                Lead #{lead?.id} &bull; {lead?.customer?.name || "Customer"} ({lead?.loanType || "Loan"})
+                Lead #{formatLeadCode(lead)} &bull; {lead?.customer?.name || "Customer"} ({lead?.loanType || "Loan"})
               </p>
             </div>
           </div>

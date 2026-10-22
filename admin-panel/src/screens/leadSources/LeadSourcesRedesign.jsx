@@ -28,6 +28,7 @@ import {
   X,
 } from "lucide-react";
 import API_URL from "../../config";
+import { formatLeadCode } from "../../utils/leadUtils";
 
 const COLOR_PRESETS = [
   "#10b981", // Emerald (Default for Self)
@@ -155,7 +156,7 @@ export default function LeadSourcesRedesign() {
           : 0;
       return {
         "S.No": idx + 1,
-        "Lead ID": l.lead_id || l.id,
+        "Lead ID": formatLeadCode(l),
         "Customer Name": l.name || "--",
         "Phone": l.number || "--",
         "Email": l.email || "--",
@@ -585,7 +586,7 @@ export default function LeadSourcesRedesign() {
               <table className="cc-party-table">
                 <thead>
                   <tr>
-                    <th>Lead ID</th>
+                    <th>LEAD</th>
                     <th>Customer Name</th>
                     <th>Lead Date</th>
                     <th>Bank / Lender</th>
@@ -628,7 +629,7 @@ export default function LeadSourcesRedesign() {
                             onClick={() => navigate(`/lead-details/${lead.lead_id || lead.id}`)}
                             title="Click to view full lead details"
                           >
-                            #LEAD-{lead.lead_id || lead.id}
+                            #{formatLeadCode(lead)}
                           </td>
                           <td>
                             <div className="cc-party-lead-customer">

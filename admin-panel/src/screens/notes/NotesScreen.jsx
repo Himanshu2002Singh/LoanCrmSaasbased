@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import API_URL from "../../config";
 import RedesignPageFrame from "../../components/RedesignPageFrame";
+import { formatLeadCode } from "../../utils/leadUtils";
 
 const COLOR_THEMES = [
   { id: "amber", name: "Amber", bg: "bg-amber-50/90", border: "border-amber-200", badge: "bg-amber-100 text-amber-800", dot: "bg-amber-400" },
@@ -165,7 +166,7 @@ export default function NotesScreen() {
       setSelectedLead({
         id: note.lead.id,
         lead_id: note.lead.id,
-        lead_number: note.lead.leadNumber || `LD-${note.lead.id}`,
+        lead_number: formatLeadCode(note.lead),
         customer_name: note.lead.customer?.name || "Customer",
         customer_mobile: note.lead.customer?.mobile || "",
         loan_type: note.lead.loanType || "",
@@ -186,7 +187,7 @@ export default function NotesScreen() {
     setSelectedLead({
       id: lead.lead_id || lead.id,
       lead_id: lead.lead_id || lead.id,
-      lead_number: lead.lead_number || `LD-${lead.lead_id || lead.id}`,
+      lead_number: formatLeadCode(lead),
       customer_name: lead.customer_name || lead.customer?.name || lead.name || "Customer",
       customer_mobile: lead.customer_mobile || lead.customer?.mobile || lead.mobile || "",
       loan_type: lead.loan_type || lead.loanType || "",
@@ -527,7 +528,7 @@ export default function NotesScreen() {
                         <div className="flex items-center justify-between">
                           <span className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-700">
                             <Link2 className="w-3 h-3" />
-                            Connected Lead: {note.lead.leadNumber || `LD-${note.lead.id}`}
+                            Connected Lead: #{formatLeadCode(note.lead)}
                           </span>
                           <Link
                             to={`/lead-details/${note.lead.id}`}

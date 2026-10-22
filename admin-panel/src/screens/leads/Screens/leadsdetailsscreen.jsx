@@ -45,6 +45,7 @@ import {
 } from "lucide-react";
 import API_URL, { CLIENT_PORTAL_URL } from "../../../config";
 import LeadDocumentRequestModal from "../LeadDocumentRequestModal";
+import { formatLeadCode } from "../../../utils/leadUtils";
 
 const statusColorMap = {
   NEW: { bg: "#eff6ff", text: "#1d4ed8", border: "#bfdbfe" },
@@ -608,7 +609,7 @@ export default function LeadDetailScreen() {
 
     // Sheet 1: Lead Details
     const leadProfileRow = {
-      "Lead ID": lead?.lead_id || lead?.id || "N/A",
+      "Lead ID": formatLeadCode(lead),
       Name: lead?.name || "N/A",
       Phone: lead?.number || "N/A",
       Email: lead?.email || "N/A",
@@ -752,7 +753,7 @@ export default function LeadDetailScreen() {
           <div className="cc-lead-title-box">
             <div className="cc-lead-title-row">
               <h2>{lead.name}</h2>
-              <span className="cc-lead-id-tag">#LEAD-{lead.lead_id || lead.id}</span>
+              <span className="cc-lead-id-tag">#{formatLeadCode(lead)}</span>
               <div ref={statusDropdownRef} style={{ position: "relative", display: "inline-block" }}>
                 {isReadOnly || !canEditLead ? (
                   <span
@@ -2421,7 +2422,7 @@ export default function LeadDetailScreen() {
             <div className="cc-modal-head">
               <h3>
                 <MessageSquare size={18} style={{ color: "#047857" }} />
-                Add Remark for Lead #{lead.lead_id || lead.id}
+                Add Remark for Lead #{formatLeadCode(lead)}
               </h3>
               <button
                 type="button"
@@ -2726,7 +2727,7 @@ export default function LeadDetailScreen() {
               <div>
                 <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: "#0f172a" }}>Reassign Lead Ownership</h3>
                 <p style={{ margin: "4px 0 0", fontSize: 12.5, color: "#64748b" }}>
-                  Transfer lead #{lead?.lead_id || lead?.id} ({lead?.name || "Customer"}) to another company employee
+                  Transfer lead #{formatLeadCode(lead)} ({lead?.name || "Customer"}) to another company employee
                 </p>
               </div>
               <button
