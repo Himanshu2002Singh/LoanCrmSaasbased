@@ -149,10 +149,10 @@ const requireSuperAdmin = (req, res, next) => {
  */
 const companyScope = (req) => {
   if (req.user?.role === ROLES.SUPERADMIN) {
-    const requested = parseInt(req.query.companyId, 10);
+    const requested = parseInt(req.query?.companyId ?? req.body?.companyId, 10);
     return Number.isNaN(requested) ? {} : { companyId: requested };
   }
-  return { companyId: req.user.companyId };
+  return { companyId: req.user?.companyId };
 };
 
 /**

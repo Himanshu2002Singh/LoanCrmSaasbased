@@ -186,12 +186,57 @@ const getLatestRemarksForLeads = async (leadIds, companyId) => {
   return latestMap;
 };
 
+/**
+ * Calculates monthly sequential lead code (e.g. OCT26-001, OCT26-027)
+ * Company-wise, starting at 1 every single month for each company separately.
+ */
+const getMonthlySequenceCodesForLeads = async (leads, companyId) => {
+  if (!leads || !leads.length) return new Map();
+  const resultMap = new Map();
+  const monthNames = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+
+  try {
+    await Promise.all(
+      leads.map(async (lead) => {
+        const rawDate = lead.createdAt || lead.created_at || new Date();
+        const d = new Date(rawDate);
+        const y = d.getFullYear();
+        const m = d.getMonth();
+        const startOfMonth = new Date(y, m, 1, 0, 0, 0, 0);
+        const endOfMonth = new Date(y, m + 1, 0, 23, 59, 59, 999);
+        const mStr = monthNames[m] || "OCT";
+        const yStr = String(y).slice(-2);
+
+        const targetCompanyId = companyId || lead.companyId;
+
+        // Count leads in this company for this month with id <= lead.id
+        const seqCount = await Lead.count({
+          where: {
+            companyId: targetCompanyId,
+            createdAt: { [Op.between]: [startOfMonth, endOfMonth] },
+            id: { [Op.lte]: lead.id },
+          },
+        });
+
+        const formattedCode = `${mStr}${yStr}-${String(seqCount || 1).padStart(3, "0")}`;
+        resultMap.set(lead.id, {
+          monthSequence: seqCount || 1,
+          leadCode: formattedCode,
+        });
+      })
+    );
+  } catch (err) {
+    console.warn("[getMonthlySequenceCodesForLeads] Calculation warning:", err.message);
+  }
+
+  return resultMap;
+};
 
 /**
  * The panel and the mobile app read a flat lead row with the customer's
  * details inlined. Keep that shape and hang the nested records off it.
  */
-const serializeLead = (lead, statusMap = {}, requestingUser = null, latestRemarkInfo = null) => {
+const serializeLead = (lead, statusMap = {}, requestingUser = null, latestRemarkInfo = null, seqInfo = {}) => {
   const customer = lead.customer || {};
   const status = statusMap[lead.status];
   const apps = lead.applications || [];
@@ -223,6 +268,8 @@ const serializeLead = (lead, statusMap = {}, requestingUser = null, latestRemark
   return {
     lead_id: lead.id,
     id: lead.id,
+    lead_code: seqInfo.leadCode || null,
+    month_sequence: seqInfo.monthSequence || null,
     customer_id: lead.customerId,
     name: customer.name || null,
     number: customer.mobile || null,
@@ -397,8 +444,8 @@ exports.getLeads = async (req, res) => {
       defaultSort: ["createdAt", "DESC"],
     });
 
-    let fromDate = req.query.fromDate;
-    let toDate = req.query.toDate;
+    let fromDate = req.query.fromDate || req.query.from;
+    let toDate = req.query.toDate || req.query.to;
     if (req.query.financialYear && !fromDate && !toDate) {
       const match = String(req.query.financialYear).match(/^(\d{4})/);
       if (match) {
@@ -564,11 +611,14 @@ exports.getLeads = async (req, res) => {
     });
 
     const leadIds = rows.map((r) => r.id);
-    const remarksMap = await getLatestRemarksForLeads(leadIds, companyId);
+    const [remarksMap, seqMap] = await Promise.all([
+      getLatestRemarksForLeads(leadIds, companyId),
+      getMonthlySequenceCodesForLeads(rows, companyId),
+    ]);
 
     const payload = paginated({
       count,
-      rows: rows.map((r) => serializeLead(r, statuses.byValue, req.user, remarksMap.get(r.id))),
+      rows: rows.map((r) => serializeLead(r, statuses.byValue, req.user, remarksMap.get(r.id), seqMap.get(r.id) || {})),
       page,
       limit,
     });
@@ -666,8 +716,12 @@ exports.getLeadById = async (req, res) => {
       attributes: ["remarks"],
     });
 
-    const remarksMap = await getLatestRemarksForLeads([lead.id], lead.companyId);
+    const [remarksMap, seqMap] = await Promise.all([
+      getLatestRemarksForLeads([lead.id], lead.companyId),
+      getMonthlySequenceCodesForLeads([lead], lead.companyId),
+    ]);
     const remarkInfo = remarksMap.get(lead.id);
+    const seqInfo = seqMap.get(lead.id) || {};
 
     const isReadOnly = req.user.role === ROLES.EMPLOYEE &&
       !req.permissions?.editAllLeads &&
@@ -677,7 +731,7 @@ exports.getLeadById = async (req, res) => {
     return res.status(200).json({
       message: "success",
       data: {
-        ...serializeLead(lead, statuses.byValue, req.user, remarkInfo),
+        ...serializeLead(lead, statuses.byValue, req.user, remarkInfo, seqInfo),
         is_read_only: isReadOnly,
         isReadOnly: isReadOnly,
         is_worked_lead: hasWorkedOnLead || lead.assignedEmployeeId !== req.user.id,
@@ -1083,6 +1137,46 @@ exports.updateLead = async (req, res) => {
         : null;
     }
 
+    const rawBank = body.bank_name ?? body.bank ?? body.bankName;
+    if (rawBank !== undefined) {
+      try {
+        const bankTrimmed = String(rawBank).trim();
+        if (bankTrimmed && bankTrimmed !== "—" && bankTrimmed !== "--") {
+          let lender = await Lender.findOne({
+            where: {
+              companyId: lead.companyId,
+              name: { [Op.like]: `%${bankTrimmed}%` },
+            },
+          });
+          if (!lender) {
+            lender = await Lender.create({
+              companyId: lead.companyId,
+              name: bankTrimmed,
+              shortCode: bankTrimmed.slice(0, 10).toUpperCase(),
+              lenderType: "BANK",
+            });
+          }
+          let app = await Application.findOne({
+            where: { leadId: lead.id, companyId: lead.companyId },
+            order: [["id", "ASC"]],
+          });
+          if (app) {
+            await app.update({ lenderId: lender.id });
+          } else {
+            await Application.create({
+              companyId: lead.companyId,
+              leadId: lead.id,
+              customerId: lead.customerId,
+              loanProduct: data.loanType || lead.loanType || "General",
+              lenderId: lender.id,
+            });
+          }
+        }
+      } catch (err) {
+        console.warn("[updateLead] Bank sync warning:", err.message);
+      }
+    }
+
     const remark = remarkOf(body);
 
     let statusChange = null;
@@ -1244,7 +1338,8 @@ exports.updateLead = async (req, res) => {
       );
     } catch (e) {}
 
-    return res.status(200).json({ message: "Lead updated", data: serializeLead(lead, statuses.byValue, req.user) });
+    const seqMap = await getMonthlySequenceCodesForLeads([lead], lead.companyId);
+    return res.status(200).json({ message: "Lead updated", data: serializeLead(lead, statuses.byValue, req.user, null, seqMap.get(lead.id) || {}) });
   } catch (error) {
     console.error("[leads] updateLead error:", error);
     return res.status(500).json({ message: "Internal Server Error", error: error.message });
@@ -1329,7 +1424,8 @@ exports.updateLeadStatus = async (req, res) => {
       );
     } catch (e) {}
 
-    const serialized = serializeLead(lead, statuses.byValue, req.user);
+    const seqMap = await getMonthlySequenceCodesForLeads([lead], lead.companyId);
+    const serialized = serializeLead(lead, statuses.byValue, req.user, null, seqMap.get(lead.id) || {});
     return res.status(200).json({ message: "Status updated", data: serialized, lead: serialized });
   } catch (error) {
     console.error("[leads] updateLeadStatus error:", error);

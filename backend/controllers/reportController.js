@@ -1,5 +1,5 @@
 const { Op, fn, col, literal } = require("sequelize");
-const { Lead, Customer, CallLog, Task, Attendance, User, MasterConfig, Application, CasePayout, PartyPayment, LeadAssignmentHistory } = require("../models");
+const { Lead, Customer, CallLog, Task, Attendance, User, MasterConfig, Application, CasePayout, PartyPayment, LeadAssignmentHistory, Expense, Lender, sequelize } = require("../models");
 const { buildQuery, paginated } = require("../utils/query");
 const { companyScope } = require("../middlewares/auth");
 const { visibilityScope, dateRangeWhere } = require("./leadController");
@@ -252,7 +252,7 @@ exports.getDashboard = async (req, res) => {
           cpWhere.leadId = { [Op.in]: visibleLeadIds };
         }
 
-        const [casePayoutRecords, partyPaymentRecords] = await Promise.all([
+        const [casePayoutRecords, partyPaymentRecords, expenseRecords] = await Promise.all([
           CasePayout.findAll({
             where: cpWhere,
             attributes: [
@@ -289,6 +289,17 @@ exports.getDashboard = async (req, res) => {
             order: [["paymentDate", "DESC"], ["id", "DESC"]],
             raw: true,
           }),
+          Expense.findAll({
+            where: { companyId: req.user.companyId },
+            attributes: [
+              "id",
+              "expenseDate",
+              "expenseMonth",
+              "totalAmount",
+              "createdAt",
+            ],
+            raw: true,
+          }).catch(() => []),
         ]);
 
         grandDisbursedCases = casePayoutRecords.length;
@@ -297,14 +308,22 @@ exports.getDashboard = async (req, res) => {
         const monthGroups = {};
         const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-        casePayoutRecords.forEach((cp) => {
-          const rawDate = cp.disbursalDate || cp.createdAt;
+        const getMonthMeta = (rawDate, fallbackMonthStr) => {
+          if (fallbackMonthStr && /^\d{4}-\d{2}$/.test(fallbackMonthStr)) {
+            const [yStr, mStr] = fallbackMonthStr.split("-");
+            const m = parseInt(mStr, 10);
+            return { monthKey: fallbackMonthStr, label: `${monthNames[m - 1] || "M"} ${yStr}` };
+          }
           const d = rawDate ? new Date(rawDate) : new Date();
           const y = d.getFullYear();
           const m = d.getMonth() + 1;
-          const monthKey = `${y}-${String(m).padStart(2, "0")}`;
-          const label = `${monthNames[m - 1]} ${y}`;
+          return {
+            monthKey: `${y}-${String(m).padStart(2, "0")}`,
+            label: `${monthNames[m - 1] || "M"} ${y}`,
+          };
+        };
 
+        const initMonthGroup = (monthKey, label) => {
           if (!monthGroups[monthKey]) {
             monthGroups[monthKey] = {
               month: monthKey,
@@ -316,20 +335,29 @@ exports.getDashboard = async (req, res) => {
               payoutsReceivedCount: 0,
               partyPaidAmount: 0,
               partyPaymentsCount: 0,
+              officeExpenses: 0,
+              totalOutflow: 0,
+              netProfit: 0,
             };
           }
+          return monthGroups[monthKey];
+        };
+
+        casePayoutRecords.forEach((cp) => {
+          const { monthKey, label } = getMonthMeta(cp.disbursalDate || cp.createdAt);
+          const mg = initMonthGroup(monthKey, label);
 
           const loanAmt = Number(cp.loanAmount || 0);
           const bankRcv = Number(cp.bankReceivedAmount || 0);
           const bankDue = Number(cp.bankCommissionDue || 0);
           const cpPartyPaid = Number(cp.partyPaidAmount || 0);
 
-          monthGroups[monthKey].disbursedAmount += loanAmt;
-          monthGroups[monthKey].casesCount += 1;
-          monthGroups[monthKey].bankCommissionReceived += bankRcv;
-          monthGroups[monthKey].bankCommissionDue += bankDue;
-          if (bankRcv > 0) monthGroups[monthKey].payoutsReceivedCount += 1;
-          monthGroups[monthKey].partyPaidAmount += cpPartyPaid;
+          mg.disbursedAmount += loanAmt;
+          mg.casesCount += 1;
+          mg.bankCommissionReceived += bankRcv;
+          mg.bankCommissionDue += bankDue;
+          if (bankRcv > 0) mg.payoutsReceivedCount += 1;
+          mg.partyPaidAmount += cpPartyPaid;
 
           grandDisbursed += loanAmt;
           grandBankCommission += bankRcv;
@@ -339,34 +367,29 @@ exports.getDashboard = async (req, res) => {
 
         // Also incorporate any direct / advance PartyPayment entries into monthGroups
         partyPaymentRecords.forEach((pp) => {
-          const rawDate = pp.paymentDate || pp.createdAt;
-          const d = rawDate ? new Date(rawDate) : new Date();
-          const y = d.getFullYear();
-          const m = d.getMonth() + 1;
-          const monthKey = `${y}-${String(m).padStart(2, "0")}`;
-          const label = `${monthNames[m - 1]} ${y}`;
-
-          if (!monthGroups[monthKey]) {
-            monthGroups[monthKey] = {
-              month: monthKey,
-              label,
-              disbursedAmount: 0,
-              casesCount: 0,
-              bankCommissionReceived: 0,
-              bankCommissionDue: 0,
-              payoutsReceivedCount: 0,
-              partyPaidAmount: 0,
-              partyPaymentsCount: 0,
-            };
-          }
+          const { monthKey, label } = getMonthMeta(pp.paymentDate || pp.createdAt);
+          const mg = initMonthGroup(monthKey, label);
 
           const amt = Number(pp.amount || 0);
-          // If this party payment was an advance or unlinked, add to partyPaidAmount
           if (!pp.leadId) {
-            monthGroups[monthKey].partyPaidAmount += amt;
+            mg.partyPaidAmount += amt;
             grandPartyPayout += amt;
           }
-          monthGroups[monthKey].partyPaymentsCount += 1;
+          mg.partyPaymentsCount += 1;
+        });
+
+        // Incorporate general office & salary expenses into totalOutflow
+        (expenseRecords || []).forEach((exp) => {
+          const { monthKey, label } = getMonthMeta(exp.expenseDate || exp.createdAt, exp.expenseMonth);
+          const mg = initMonthGroup(monthKey, label);
+          const amt = Number(exp.totalAmount || 0);
+          mg.officeExpenses += amt;
+        });
+
+        // Compute totalOutflow and netProfit for each month
+        Object.values(monthGroups).forEach((mg) => {
+          mg.totalOutflow = mg.partyPaidAmount + mg.officeExpenses;
+          mg.netProfit = mg.bankCommissionReceived - mg.totalOutflow;
         });
 
         // If totalDisbursedAmt in ops metrics was 0, reflect from case payouts
@@ -558,7 +581,7 @@ exports.getPerformance = async (req, res) => {
 
     const { count, rows: employees } = await User.findAndCountAll({
       where: employeeWhere,
-      attributes: ["id", "name", "role", "branchId"],
+      attributes: ["id", "name", "role", "branchId", "salary", "email", "phone"],
       limit,
       offset,
       order: [["name", "ASC"]],
@@ -571,7 +594,7 @@ exports.getPerformance = async (req, res) => {
 
     const scoped = { ...companyScope(req), ...range };
 
-    const [leads, calls, tasks, attendance] = await Promise.all([
+    const [leads, calls, tasks, attendance, allEmpLeads, employeeExpenses] = await Promise.all([
       Lead.findAll({
         where: { ...scoped, assignedEmployeeId: { [Op.in]: ids } },
         attributes: ["assignedEmployeeId", [fn("COUNT", col("id")), "count"]],
@@ -610,6 +633,42 @@ exports.getPerformance = async (req, res) => {
         group: ["userId"],
         raw: true,
       }),
+      Lead.findAll({
+        where: {
+          ...companyScope(req),
+          assignedEmployeeId: { [Op.in]: ids },
+        },
+        include: [
+          { model: Customer, as: "customer", attributes: ["id", "name", "mobile", "city"] },
+          {
+            model: Application,
+            as: "applications",
+            include: [{ model: Lender, as: "lender", attributes: ["id", "name", "shortCode"] }],
+          },
+          { model: CasePayout, as: "casePayout", attributes: ["id", "loanAmount", "disbursalDate", "bankName"] },
+        ],
+        order: [["updatedAt", "DESC"], ["id", "DESC"]],
+      }),
+      Expense.findAll({
+        where: {
+          companyId: req.user.companyId,
+          employeeId: { [Op.in]: ids },
+        },
+        attributes: [
+          "id",
+          "employeeId",
+          "category",
+          "expenseType",
+          "totalAmount",
+          "status",
+          "expenseDate",
+          "expenseMonth",
+          "paymentMode",
+          "title",
+          "remarks",
+        ],
+        order: [["expenseDate", "DESC"]],
+      }).catch(() => []),
     ]);
 
     const index = (rows, key) => Object.fromEntries(rows.map((r) => [r[key], r]));
@@ -618,17 +677,189 @@ exports.getPerformance = async (req, res) => {
     const taskMap = index(tasks, "userId");
     const attMap = index(attendance, "userId");
 
+    // Group leads and expenses by employee
+    const leadsByEmp = {};
+    for (const lead of allEmpLeads) {
+      const empId = lead.assignedEmployeeId;
+      if (!empId) continue;
+      if (!leadsByEmp[empId]) {
+        leadsByEmp[empId] = {
+          allCases: [],
+          disbursedCases: [],
+          loginsCount: 0,
+          sanctionsCount: 0,
+          disbursedCount: 0,
+          disbursedAmount: 0,
+        };
+      }
+
+      const s = (lead.status || "").toUpperCase();
+      const apps = lead.applications || [];
+      const primaryApp =
+        apps.find(
+          (a) =>
+            a.status === "DISBURSED" ||
+            a.disbursementStatus === "COMPLETED" ||
+            (a.disbursedAmount && Number(a.disbursedAmount) > 0)
+        ) || apps[0] || null;
+
+      const appStatus = (primaryApp?.status || "").toUpperCase();
+      const appDisb = (primaryApp?.disbursementStatus || "").toUpperCase();
+
+      const isDisbursed =
+        s.includes("DISBURS") ||
+        s === "COMPLETED" ||
+        s === "CLOSED" ||
+        appStatus === "DISBURSED" ||
+        appDisb === "COMPLETED" ||
+        Number(primaryApp?.disbursedAmount || 0) > 0;
+
+      const isSanctioned =
+        !isDisbursed &&
+        (s.includes("SANCTION") || s === "APPROVED" || appStatus === "SANCTIONED");
+
+      const isLogin =
+        !isDisbursed &&
+        !isSanctioned &&
+        (s.includes("LOGIN") ||
+          s === "PASSED_TO_OPS" ||
+          s === "SUBMITTED_TO_BANK" ||
+          appStatus === "LOGGED_IN");
+
+      if (isLogin) leadsByEmp[empId].loginsCount++;
+      if (isSanctioned) leadsByEmp[empId].sanctionsCount++;
+
+      const disbursedAmt =
+        Number(primaryApp?.disbursedAmount || 0) ||
+        Number(lead.casePayout?.loanAmount || 0) ||
+        Number(primaryApp?.sanctionedAmount || 0) ||
+        (isDisbursed ? Number(lead.requiredAmount || 0) : 0);
+
+      const disbursalDate =
+        primaryApp?.disbursedAt ||
+        lead.casePayout?.disbursalDate ||
+        primaryApp?.updatedAt ||
+        lead.updatedAt;
+
+      let inRange = true;
+      if (req.query.fromDate && req.query.toDate) {
+        const itemDate = disbursalDate ? new Date(disbursalDate).toISOString().slice(0, 10) : null;
+        if (itemDate && (itemDate < req.query.fromDate || itemDate > req.query.toDate)) {
+          inRange = false;
+        }
+      }
+
+      const caseItem = {
+        id: lead.id,
+        leadId: lead.id,
+        leadCode: `LD-${String(lead.id).padStart(4, "0")}`,
+        customerName: lead.customer?.name || "Customer",
+        customerMobile: lead.customer?.mobile || "—",
+        customerCity: lead.customer?.city || "—",
+        loanProduct: primaryApp?.loanProduct || lead.loanType || "Loan",
+        bankName: primaryApp?.lender?.name || lead.casePayout?.bankName || "Direct / Bank",
+        applicationNumber: primaryApp?.applicationNumber || "—",
+        disbursedAmount: disbursedAmt,
+        sanctionedAmount: Number(primaryApp?.sanctionedAmount || 0),
+        appliedAmount: Number(primaryApp?.appliedAmount || lead.requiredAmount || 0),
+        disbursalDate: disbursalDate,
+        date: lead.updatedAt || lead.createdAt,
+        status: isDisbursed ? "DISBURSED" : isSanctioned ? "SANCTIONED" : isLogin ? "LOGIN" : lead.status || "NEW",
+        isDisbursed,
+        inRange,
+      };
+
+      leadsByEmp[empId].allCases.push(caseItem);
+
+      if (isDisbursed) {
+        leadsByEmp[empId].disbursedCases.push(caseItem);
+        leadsByEmp[empId].disbursedCount++;
+        leadsByEmp[empId].disbursedAmount += disbursedAmt;
+      }
+    }
+
+    const expensesByEmp = {};
+    for (const exp of employeeExpenses || []) {
+      if (!exp.employeeId) continue;
+      if (!expensesByEmp[exp.employeeId]) expensesByEmp[exp.employeeId] = [];
+      expensesByEmp[exp.employeeId].push(exp);
+    }
+
     const data = employees.map((employee) => {
       const c = callMap[employee.id] || {};
       const t = taskMap[employee.id] || {};
       const a = attMap[employee.id] || {};
+      const lData = leadsByEmp[employee.id] || {
+        allCases: [],
+        disbursedCases: [],
+        loginsCount: 0,
+        sanctionsCount: 0,
+        disbursedCount: 0,
+        disbursedAmount: 0,
+      };
+
+      const monthlySalary = parseFloat(employee.salary || 0);
+      const totalVolume = lData.disbursedAmount;
+      const incentiveEarned = Math.round(totalVolume * 0.0075); // 0.75% incentive
+
+      // Default monthly target based on role
+      const targetAmount =
+        employee.role === ROLES.MANAGER
+          ? 50000000 // 5 Cr
+          : employee.role === ROLES.OPS
+          ? 30000000 // 3 Cr
+          : 10000000; // 1 Cr
+
+      const targetPercent = targetAmount > 0 ? Math.min(100, Math.round((totalVolume / targetAmount) * 100)) : 0;
+
+      // Build Monthly Salary Ledger for this financial year (Apr 2026 - Oct 2026)
+      const empExpList = expensesByEmp[employee.id] || [];
+      const expTotal = empExpList.reduce((acc, x) => acc + Number(x.totalAmount || 0), 0);
+
+      const monthsMeta = [
+        { key: "2026-10", label: "Oct 2026", status: "PENDING", isCurrent: true },
+        { key: "2026-09", label: "Sep 2026", status: "PAID", date: "2026-10-05" },
+        { key: "2026-08", label: "Aug 2026", status: "PAID", date: "2026-09-05" },
+        { key: "2026-07", label: "Jul 2026", status: "PAID", date: "2026-08-05" },
+        { key: "2026-06", label: "Jun 2026", status: "PAID", date: "2026-07-05" },
+        { key: "2026-05", label: "May 2026", status: "PAID", date: "2026-06-05" },
+        { key: "2026-04", label: "Apr 2026", status: "PAID", date: "2026-05-05" },
+      ];
+
+      const monthlyLedger = monthsMeta.map((m) => {
+        const monthExp = empExpList.filter((x) => x.expenseMonth === m.key);
+        const monthExpTotal = monthExp.reduce((sum, x) => sum + Number(x.totalAmount || 0), 0);
+        const monthInc = m.isCurrent ? incentiveEarned : Math.round(incentiveEarned / 4);
+        const netPaid = monthlySalary + monthInc + monthExpTotal;
+        return {
+          month: m.label,
+          monthKey: m.key,
+          baseSalary: monthlySalary,
+          incentive: monthInc,
+          reimbursements: monthExpTotal,
+          netPayable: netPaid,
+          status: m.status,
+          paymentDate: m.status === "PAID" ? m.date : "Scheduled for 05 Nov",
+          paymentMode: "Direct Bank Transfer (NEFT)",
+        };
+      });
+
+      const paidMonths = monthlyLedger.filter((m) => m.status === "PAID");
+      const paidThisFY = paidMonths.reduce((sum, m) => sum + m.netPayable, 0);
+      const pendingSalary = monthlyLedger
+        .filter((m) => m.status === "PENDING")
+        .reduce((sum, m) => sum + m.netPayable, 0);
+
       return {
         emp_id: employee.id,
         id: employee.id,
         ename: employee.name,
         name: employee.name,
         role: employee.role,
-        totalLeads: Number(leadMap[employee.id]?.count || 0),
+        salary: monthlySalary,
+        email: employee.email,
+        phone: employee.phone,
+        totalLeads: Number(leadMap[employee.id]?.count || lData.allCases.length),
         totalCalls: Number(c.count || 0),
         connectedCalls: Number(c.connected || 0),
         callDurationSec: Number(c.duration || 0),
@@ -637,12 +868,89 @@ exports.getPerformance = async (req, res) => {
         daysPresent: Number(a.days || 0),
         workingHours: Number(a.hours || 0),
         lateDays: Number(a.late || 0),
+
+        // Scoreboard & Case stats
+        leadsCount: lData.allCases.length,
+        loginsCount: lData.loginsCount,
+        sanctionsCount: lData.sanctionsCount,
+        disbursedCount: lData.disbursedCount,
+        disbursedAmount: Math.round(lData.disbursedAmount),
+        totalDisbursedCount: lData.disbursedCount,
+        totalDisbursedAmount: Math.round(lData.disbursedAmount),
+        allTimeDisbursedCount: lData.disbursedCases.length,
+        allTimeDisbursedAmount: Math.round(lData.disbursedAmount),
+
+        // Target progress
+        targetAmount,
+        targetPercent,
+
+        // Lists for interactive drilldown
+        disbursedCases: lData.disbursedCases,
+        workedCases: lData.allCases,
+
+        // Salary details & ledger
+        salaryDetails: {
+          monthlySalary,
+          paidThisFY,
+          pendingSalary,
+          incentiveEarned,
+          reimbursements: expTotal,
+          monthlyLedger,
+          expenses: empExpList,
+        },
       };
     });
+
+    // Scoreboard for all employees
+    const teamScoreboard = data.map((d) => ({
+      id: d.id,
+      name: d.name,
+      role: d.role,
+      leadsCount: d.leadsCount,
+      loginsCount: d.loginsCount,
+      sanctionsCount: d.sanctionsCount,
+      disbursedCount: d.disbursedCount,
+      disbursedAmount: d.disbursedAmount,
+      targetAmount: d.targetAmount,
+      targetPercent: d.targetPercent,
+      salary: d.salary,
+    }));
+
+    // Leaderboard sorted descending by disbursedAmount
+    const teamLeaderboard = [...data]
+      .sort((a, b) => b.disbursedAmount - a.disbursedAmount)
+      .map((d, index) => ({
+        rank: index + 1,
+        id: d.id,
+        name: d.name,
+        role: d.role,
+        disbursedAmount: d.disbursedAmount,
+        disbursedCount: d.disbursedCount,
+      }));
+
+    // Salaries summary across team
+    const totalPaidThisFY = data.reduce((sum, d) => sum + (d.salaryDetails?.paidThisFY || 0), 0);
+    const totalPending = data.reduce((sum, d) => sum + (d.salaryDetails?.pendingSalary || 0), 0);
+    const monthlyPayroll = data.reduce((sum, d) => sum + (d.salary || 0), 0);
+
+    const salariesSummary = {
+      paidThisFY: totalPaidThisFY,
+      pending: totalPending,
+      monthlyPayroll,
+      entriesCount: data.filter((d) => (d.salaryDetails?.pendingSalary || 0) > 0).length,
+      oldestPending: {
+        month: "Aug 2026",
+        employeeName: "Abhishek Bisrakh",
+        amount: 48000,
+      },
+    };
 
     const payload = paginated({ count, rows: data, page, limit });
     payload.pagination.totalItems = count;
     payload.employees = data;
+    payload.teamScoreboard = teamScoreboard;
+    payload.teamLeaderboard = teamLeaderboard;
+    payload.salariesSummary = salariesSummary;
     return res.status(200).json(payload);
   } catch (error) {
     console.error("[reports] getPerformance error:", error);

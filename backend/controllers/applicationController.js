@@ -519,7 +519,7 @@ const listApplications = async (req, res, next) => {
 
     const allApps = await Application.findAll({
       where: summaryWhere,
-      attributes: ["id", "status", "appliedAmount", "sanctionedAmount", "disbursedAmount"],
+      attributes: ["id", "status", "appliedAmount", "sanctionedAmount", "disbursedAmount", "opsQueryStatus", "pdStatus", "legalStatus", "technicalStatus", "loginStatus"],
       include: leadRequired ? [leadInclude] : [],
     });
 
@@ -532,6 +532,13 @@ const listApplications = async (req, res, next) => {
       sanctionedCount: 0,
       pendingCount: 0,
       rejectedCount: 0,
+      bankStages: {
+        LOGGED_IN: { count: 0, amount: 0 },
+        UNDER_PROCESS: { count: 0, amount: 0 },
+        QUERY_RAISED: { count: 0, amount: 0 },
+        SANCTIONED: { count: 0, amount: 0 },
+        STATUS_NOT_SET: { count: 0, amount: 0 },
+      },
       stageCounts: {
         DOCS_PENDING: 0,
         UNDER_VERIFICATION: 0,
@@ -548,9 +555,34 @@ const listApplications = async (req, res, next) => {
     allApps.forEach((app) => {
       const s = (app.status || "DOCS_PENDING").toUpperCase();
       const disbStatus = (app.disbursementStatus || "").toUpperCase();
+      const qStatus = (app.opsQueryStatus || "").toUpperCase();
       const applied = parseFloat(app.appliedAmount || 0);
       const sanctioned = parseFloat(app.sanctionedAmount || 0);
+      const stageAmt = sanctioned || applied || 0;
 
+      // Group into Bank Stage KPI buckets
+      if (s === "QUERY" || s === "QUERY_RAISED" || qStatus === "PENDING") {
+        summary.bankStages.QUERY_RAISED.count++;
+        summary.bankStages.QUERY_RAISED.amount += stageAmt;
+      } else if (s === "SANCTIONED" || s === "APPROVED") {
+        summary.bankStages.SANCTIONED.count++;
+        summary.bankStages.SANCTIONED.amount += (sanctioned || stageAmt);
+      } else if (
+        s === "PD" || s === "LEGAL" || s === "TECHNICAL" ||
+        s.includes("PROCESS") || s.includes("VERIF") || s.includes("REVIEW") || s.includes("UNDERWRITING") ||
+        (app.pdStatus && app.pdStatus !== "PENDING" && app.pdStatus !== "NONE") ||
+        (app.legalStatus && app.legalStatus !== "PENDING" && app.legalStatus !== "NONE") ||
+        (app.technicalStatus && app.technicalStatus !== "PENDING" && app.technicalStatus !== "NONE")
+      ) {
+        summary.bankStages.UNDER_PROCESS.count++;
+        summary.bankStages.UNDER_PROCESS.amount += stageAmt;
+      } else if (s === "LOGGED_IN" || s === "LOGIN" || s === "SUBMITTED_TO_BANK" || (app.loginStatus && app.loginStatus === "COMPLETED")) {
+        summary.bankStages.LOGGED_IN.count++;
+        summary.bankStages.LOGGED_IN.amount += stageAmt;
+      } else {
+        summary.bankStages.STATUS_NOT_SET.count++;
+        summary.bankStages.STATUS_NOT_SET.amount += stageAmt;
+      }
       const isCancelled = s === "CANCELLED" || disbStatus === "CANCELLED" || s === "REJECTED";
       const isFinalDisbursed = (s === "DISBURSED" || disbStatus === "COMPLETED") && !isCancelled;
       const isSanctioned = (s === "SANCTIONED" || s === "DISBURSEMENT" || isFinalDisbursed) && !isCancelled;

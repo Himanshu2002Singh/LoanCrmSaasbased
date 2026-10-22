@@ -450,6 +450,47 @@ exports.getExpenseSummary = async (req, res) => {
 
     const netProfitOrLoss = totalBankCommissionReceived - grandTotalExpenses;
 
+    // 4b. Existing Salary Expense records for this month
+    const salaryExpenses = await Expense.findAll({
+      where: {
+        ...scope,
+        category: "Salary",
+        expenseMonth: targetMonth,
+      },
+      raw: true,
+    });
+
+    const salaryExpenseMap = {};
+    for (const se of salaryExpenses) {
+      const empId = se.employeeId ?? se.employee_id;
+      if (empId) {
+        salaryExpenseMap[empId] = se;
+      }
+    }
+
+    let staffSalariesPaid = 0;
+    let staffSalariesPending = 0;
+    let staffPaidCount = 0;
+    let staffPendingCount = 0;
+
+    for (const emp of Object.values(employeeCostMap)) {
+      const se = salaryExpenseMap[emp.id];
+      const status = se ? se.status : "PENDING";
+      emp.salaryStatus = status;
+      emp.salaryExpenseId = se ? se.id : null;
+      emp.paymentMode = se ? (se.paymentMode ?? se.payment_mode ?? "Net Banking") : "Net Banking";
+      emp.paidDate = se && se.status === "PAID" ? (se.expenseDate ?? se.expense_date) : null;
+      emp.salaryRemarks = se ? se.remarks : "";
+
+      if (status === "PAID") {
+        staffSalariesPaid += emp.totalPayable;
+        staffPaidCount += 1;
+      } else {
+        staffSalariesPending += emp.totalPayable;
+        staffPendingCount += 1;
+      }
+    }
+
     const staffBreakdown = Object.values(employeeCostMap).sort(
       (a, b) => b.totalPayable - a.totalPayable
     );
@@ -470,6 +511,10 @@ exports.getExpenseSummary = async (req, res) => {
         staffSalaries: totalStaffSalary,
         staffIncentives: totalStaffIncentives,
         staffTotalCost: totalStaffSalary + totalStaffIncentives,
+        staffSalariesPaid,
+        staffSalariesPending,
+        staffPaidCount,
+        staffPendingCount,
         partnerPayouts: totalPartyPayout,
         bankCommissionReceived: totalBankCommissionReceived,
         totalLoanDisbursed,
@@ -756,3 +801,104 @@ exports.getCategories = async (req, res) => {
     return res.status(500).json({ message: "Internal server error", error: error.message });
   }
 };
+
+/**
+ * POST /api/expenses/salary-status
+ * Update employee salary payment status (PAID / PENDING)
+ * Supports both single employee update and bulk selection
+ */
+exports.updateSalaryStatus = async (req, res) => {
+  try {
+    const { employeeIds, status, month, paymentMode } = req.body;
+
+    if (!Array.isArray(employeeIds) || employeeIds.length === 0) {
+      return res.status(400).json({ success: false, message: "Please select at least one employee" });
+    }
+
+    const targetStatus = (status || "").toUpperCase();
+    if (targetStatus !== "PAID" && targetStatus !== "PENDING") {
+      return res.status(400).json({ success: false, message: "Status must be PAID or PENDING" });
+    }
+
+    const targetMonth = getMonthStr(month);
+    const scope = companyScope(req);
+    const companyId = req.user?.companyId || 1;
+
+    // Fetch the target employees
+    const employees = await User.findAll({
+      where: {
+        ...scope,
+        id: { [Op.in]: employeeIds },
+      },
+      attributes: ["id", "name", "email", "salary", "companyId"],
+    });
+
+    if (!employees || employees.length === 0) {
+      return res.status(404).json({ success: false, message: "No valid employees found" });
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const updatedRecords = [];
+
+    for (const emp of employees) {
+      const sal = parseFloat(emp.salary) || 0;
+
+      // Check if an expense record already exists for this employee + month + category: "Salary"
+      let record = await Expense.findOne({
+        where: {
+          ...scope,
+          category: "Salary",
+          expenseMonth: targetMonth,
+          employeeId: emp.id,
+        },
+      });
+
+      if (record) {
+        record.status = targetStatus;
+        if (paymentMode) {
+          record.paymentMode = paymentMode;
+        }
+        if (targetStatus === "PAID") {
+          record.expenseDate = record.expenseDate || today;
+        }
+        record.remarks = `Salary marked as ${targetStatus} by ${req.user.name || "Admin"} on ${today}`;
+        await record.save();
+        updatedRecords.push(record);
+      } else {
+        record = await Expense.create({
+          companyId: emp.companyId || companyId,
+          expenseCode: `SAL-${targetMonth.replace("-", "")}-${emp.id}`,
+          expenseDate: today,
+          expenseMonth: targetMonth,
+          category: "Salary",
+          expenseType: "SALARY",
+          employeeId: emp.id,
+          vendorName: emp.name,
+          title: `Salary - ${emp.name} (${targetMonth})`,
+          amount: sal,
+          baseAmount: sal,
+          gstPercent: 0,
+          gstAmount: 0,
+          totalAmount: sal,
+          paymentMode: paymentMode || "Net Banking",
+          status: targetStatus,
+          createdById: req.user.id,
+          remarks: `Salary marked as ${targetStatus} by ${req.user.name || "Admin"} on ${today}`,
+        });
+        updatedRecords.push(record);
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Updated ${updatedRecords.length} staff salary status to ${targetStatus}`,
+      status: targetStatus,
+      month: targetMonth,
+      count: updatedRecords.length,
+    });
+  } catch (error) {
+    console.error("[expenses] updateSalaryStatus error:", error);
+    return res.status(500).json({ success: false, message: "Internal server error", error: error.message });
+  }
+};
+
