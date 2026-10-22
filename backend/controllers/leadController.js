@@ -1179,7 +1179,12 @@ exports.updateLead = async (req, res) => {
         : "Self";
     }
     if (body.loan_type !== undefined) data.loanType = body.loan_type;
-    if (body.est_budget !== undefined) data.requiredAmount = body.est_budget;
+    if (body.est_budget !== undefined) {
+      const rawBudget = body.est_budget;
+      data.requiredAmount = (rawBudget !== "" && rawBudget !== null && !isNaN(parseFloat(rawBudget)))
+        ? parseFloat(rawBudget)
+        : null;
+    }
     const rawMeeting = body.next_meeting ?? body.meetingDate ?? body.meeting_date ?? body.nextMeetingDate ?? body.nextFollowupDate;
     if (rawMeeting !== undefined) {
       let combinedMeeting = rawMeeting;
@@ -1341,7 +1346,10 @@ exports.updateLead = async (req, res) => {
       customerPatch.employmentType = body.employment_type || body.employmentType;
     }
     if (body.monthly_income !== undefined || body.monthlyIncome !== undefined || body.income !== undefined) {
-      customerPatch.monthlyIncome = body.monthly_income ?? body.monthlyIncome ?? body.income;
+      const rawInc = body.monthly_income ?? body.monthlyIncome ?? body.income;
+      customerPatch.monthlyIncome = (rawInc !== "" && rawInc !== null && !isNaN(parseFloat(rawInc)))
+        ? parseFloat(rawInc)
+        : null;
     }
     if (body.pan_number !== undefined || body.panNumber !== undefined) {
       customerPatch.panNumber = body.pan_number || body.panNumber;

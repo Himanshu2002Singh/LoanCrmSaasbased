@@ -173,6 +173,18 @@ const LeadEditScreen = () => {
         mobile: lead.number,
         number: lead.number,
         phone: lead.number,
+        monthly_income:
+          lead.monthly_income !== "" && lead.monthly_income !== null && !isNaN(parseFloat(lead.monthly_income))
+            ? parseFloat(lead.monthly_income)
+            : null,
+        income:
+          lead.monthly_income !== "" && lead.monthly_income !== null && !isNaN(parseFloat(lead.monthly_income))
+            ? parseFloat(lead.monthly_income)
+            : null,
+        est_budget:
+          lead.est_budget !== "" && lead.est_budget !== null && !isNaN(parseFloat(lead.est_budget))
+            ? parseFloat(lead.est_budget)
+            : null,
         commission_percent:
           lead.commission_percent !== "" && !isNaN(parseFloat(lead.commission_percent))
             ? parseFloat(lead.commission_percent)
@@ -382,13 +394,15 @@ const LeadEditScreen = () => {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700">Monthly Income (₹)</label>
+            <label className="block text-sm font-medium text-gray-700">
+              Monthly Income / Salary (₹) <span className="text-gray-400 font-normal text-xs">(Optional)</span>
+            </label>
             <input
               type="number"
               name="monthly_income"
               value={lead.monthly_income}
               onChange={handleInputChange}
-              placeholder="e.g. 50000"
+              placeholder="e.g. 50000 (Optional - not required)"
               className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
             />
           </div>

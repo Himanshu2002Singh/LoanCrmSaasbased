@@ -713,62 +713,67 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
         .cc-report-redesign {
           background: #f8fafc;
           min-height: 100vh;
-          padding: 20px;
+          padding: 10px 16px;
           color: #0f172a;
           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
         }
 
-        /* Top 4 KPI Cards */
+        /* Top 4 KPI Cards - Compact Sleek Design */
         .cc-kpi-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-          gap: 14px;
-          margin-bottom: 18px;
+          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+          gap: 10px;
+          margin-bottom: 10px;
         }
         .cc-kpi-card {
           background: #ffffff;
           border: 1px solid #e2e8f0;
-          border-radius: 12px;
-          padding: 14px 18px;
-          box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+          border-radius: 10px;
+          padding: 7px 14px;
+          box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
           display: flex;
           flex-direction: column;
-          gap: 4px;
+          gap: 1px;
           transition: transform 0.15s ease, box-shadow 0.15s ease;
         }
         .cc-kpi-card:hover {
-          box-shadow: 0 4px 12px rgba(15, 23, 42, 0.07);
+          box-shadow: 0 3px 8px rgba(15, 23, 42, 0.06);
           border-color: #cbd5e1;
         }
         .cc-kpi-label {
-          font-size: 11px;
+          font-size: 10px;
           font-weight: 700;
           text-transform: uppercase;
-          letter-spacing: 0.06em;
+          letter-spacing: 0.05em;
           color: #64748b;
-        }
-        .cc-kpi-num {
-          font-size: 26px;
-          font-weight: 800;
-          color: #0f172a;
           line-height: 1.1;
         }
+        .cc-kpi-num {
+          font-size: 19px;
+          font-weight: 800;
+          color: #0f172a;
+          line-height: 1.15;
+        }
         .cc-kpi-sub {
-          font-size: 11.5px;
+          font-size: 10.5px;
           color: #047857;
           font-weight: 600;
+          line-height: 1.1;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
 
         /* Main Report Panel */
         .cc-report-panel {
           background: #ffffff;
           border: 1px solid #e2e8f0;
-          border-radius: 14px;
-          padding: 18px;
-          box-shadow: 0 1px 4px rgba(15, 23, 42, 0.04);
+          border-radius: 12px;
+          padding: 12px 14px;
+          box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
           display: flex;
           flex-direction: column;
-          gap: 14px;
+          gap: 10px;
         }
 
         /* Toolbar */
@@ -888,13 +893,13 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
           background: #f8fafc;
         }
 
-        /* Table Container: Crisp Borders & Sticky Header */
+        /* Table Container: Crisp Borders & Sticky Header (Generous height so 12-15 rows fit without scroll) */
         .cc-leads-table-container {
           overflow: auto;
-          max-height: calc(100vh - 275px);
-          min-height: 440px;
+          max-height: 640px;
+          min-height: 520px;
           border: 1px solid #cbd5e1;
-          border-radius: 12px;
+          border-radius: 10px;
           background: #ffffff;
           box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
           position: relative;
@@ -917,11 +922,11 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
           z-index: 20;
           background: #f1f5f9 !important;
           color: #334155;
-          font-size: 11px;
+          font-size: 10.5px;
           font-weight: 700;
           text-transform: uppercase;
           letter-spacing: 0.05em;
-          padding: 12px 14px;
+          padding: 8px 10px;
           border-bottom: 2px solid #cbd5e1;
           border-right: 1px solid #e2e8f0;
           white-space: nowrap;
@@ -931,8 +936,8 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
           border-right: none;
         }
         .cc-leads-table-container tbody td {
-          padding: 11px 13px;
-          font-size: 13px;
+          padding: 6.5px 9px;
+          font-size: 12.5px;
           color: #1e293b;
           border-bottom: 1px solid #e2e8f0;
           border-right: 1px solid #edf2f7;
@@ -1622,6 +1627,7 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
                 setCurrentPage(1);
               }}
             >
+              <option value={15}>15 / page</option>
               <option value={20}>20 / page</option>
               <option value={40}>40 / page</option>
               <option value={50}>50 / page</option>
