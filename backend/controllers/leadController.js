@@ -624,6 +624,66 @@ exports.getLeads = async (req, res) => {
     });
     // The panel's table reads pagination.totalItems.
     payload.pagination.totalItems = count;
+
+    // Calculate summary statistics across the active filter scope
+    let summaryStats = null;
+    try {
+      const summaryQuery = `
+        SELECT 
+          COUNT(*) as totalCount,
+          COALESCE(SUM(l.required_amount), 0) as totalEnquiredAmount,
+          SUM(CASE WHEN l.status IN ('FILE_LOGIN', 'LOGIN', 'PASSED_TO_OPS', 'BANK_LOGIN', 'SUBMITTED', 'IN_PROCESS', 'SANCTIONED') OR l.status LIKE '%LOGIN%' OR l.status LIKE '%BANK%' OR l.status LIKE '%OPS%' OR l.status LIKE '%SANCTION%' THEN 1 ELSE 0 END) as sentToBankCount,
+          SUM(CASE WHEN l.status IN ('DOCS_PENDING', 'DOCUMENT_PENDING', 'DOCS_COLLECTED') OR l.status LIKE '%DOC%' THEN 1 ELSE 0 END) as docsPendingCount,
+          SUM(CASE WHEN l.status IN ('NEW', 'FRESH', 'UNASSIGNED') OR l.status IS NULL THEN 1 ELSE 0 END) as noStatusYetCount,
+          SUM(CASE WHEN l.status = 'DISBURSED' THEN 1 ELSE 0 END) as disbursedCount,
+          COALESCE(SUM(CASE WHEN l.status = 'DISBURSED' THEN COALESCE(app.disbursed_amount, app.sanctioned_amount, l.required_amount, 0) ELSE 0 END), 0) as totalDisbursedAmount,
+          COALESCE(AVG(CASE WHEN l.status = 'DISBURSED' THEN COALESCE(app.disbursed_amount, app.sanctioned_amount, l.required_amount, NULL) ELSE NULL END), 0) as avgDisbursedAmount
+        FROM leads l
+        LEFT JOIN (
+          SELECT lead_id, 
+                 MAX(disbursed_amount) as disbursed_amount, 
+                 MAX(sanctioned_amount) as sanctioned_amount
+          FROM applications
+          GROUP BY lead_id
+        ) app ON app.lead_id = l.id
+        WHERE l.company_id = :companyId
+          ${fromDate ? "AND l.created_at >= :fromDate" : ""}
+          ${toDate ? "AND l.created_at <= :toDate" : ""}
+          ${req.query.assignedEmployeeId && req.query.assignedEmployeeId !== "ALL" ? "AND l.assigned_employee_id = :assignedEmployeeId" : ""}
+          ${req.query.status && req.query.status !== "ALL" ? "AND l.status = :statusQuery" : ""}
+          ${req.query.statusCategory === "COMPLETED" ? "AND l.status IN ('DISBURSED', 'CLOSED', 'COMPLETED', 'REJECTED')" : req.query.statusCategory === "PENDING" ? "AND (l.status NOT IN ('DISBURSED', 'CLOSED', 'COMPLETED', 'REJECTED') OR l.status IS NULL)" : ""}
+          ${req.query.loanType && req.query.loanType !== "ALL" ? "AND l.loan_type = :loanTypeQuery" : ""}
+          ${req.query.source && req.query.source !== "ALL" ? "AND l.lead_source = :sourceQuery" : ""}
+      `;
+
+      const [sumRow] = await sequelize.query(summaryQuery, {
+        replacements: {
+          companyId,
+          fromDate: fromDate ? `${fromDate} 00:00:00` : null,
+          toDate: toDate ? `${toDate} 23:59:59` : null,
+          assignedEmployeeId: req.query.assignedEmployeeId && req.query.assignedEmployeeId !== "ALL" ? parseInt(req.query.assignedEmployeeId, 10) : null,
+          statusQuery: req.query.status && req.query.status !== "ALL" ? req.query.status : null,
+          loanTypeQuery: req.query.loanType && req.query.loanType !== "ALL" ? req.query.loanType : null,
+          sourceQuery: req.query.source && req.query.source !== "ALL" ? req.query.source : null,
+        },
+        type: sequelize.QueryTypes.SELECT,
+      });
+      summaryStats = sumRow;
+    } catch (e) {
+      console.warn("[leads] Failed to compute lead summary stats:", e.message);
+    }
+
+    payload.summary = {
+      totalCount: summaryStats ? parseInt(summaryStats.totalCount, 10) : count,
+      totalEnquiredAmount: summaryStats ? parseFloat(summaryStats.totalEnquiredAmount) : 0,
+      sentToBankCount: summaryStats ? parseInt(summaryStats.sentToBankCount, 10) : 0,
+      docsPendingCount: summaryStats ? parseInt(summaryStats.docsPendingCount, 10) : 0,
+      noStatusYetCount: summaryStats ? parseInt(summaryStats.noStatusYetCount, 10) : 0,
+      disbursedCount: summaryStats ? parseInt(summaryStats.disbursedCount, 10) : 0,
+      totalDisbursedAmount: summaryStats ? parseFloat(summaryStats.totalDisbursedAmount) : 0,
+      avgDisbursedAmount: summaryStats ? parseFloat(summaryStats.avgDisbursedAmount) : 0,
+    };
+
     return res.status(200).json(payload);
   } catch (error) {
     console.error("[leads] getLeads error:", error);

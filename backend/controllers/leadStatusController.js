@@ -88,8 +88,10 @@ exports.getLeadStatuses = async (req, res) => {
     const includeInactive = req.query.includeInactive === "true";
     let teamFilter = req.query.team;
 
-    // Auto-scope by user role if team parameter is omitted and not requesting all for settings management
-    if (!teamFilter && req.user && !includeInactive) {
+    // If caller requests 'all', don't apply any team filter
+    if (teamFilter === "all" || req.query.all === "true") {
+      teamFilter = null;
+    } else if (!teamFilter && req.user && !includeInactive) {
       if (req.user.role === "OPS") {
         teamFilter = TEAMS.OPERATIONS;
       } else if (req.user.role === "EMPLOYEE" || req.user.role === "MANAGER") {
@@ -106,7 +108,7 @@ exports.getLeadStatuses = async (req, res) => {
       })
       .map((row) => toStatus(row, initial.get(row.companyId) ?? null));
 
-    return res.status(200).json({ success: true, statuses });
+    return res.status(200).json({ success: true, statuses, data: statuses });
   } catch (error) {
     console.error("[leadStatus] getLeadStatuses error:", error);
     return res.status(500).json({ success: false, message: "Internal Server Error", error: error.message });

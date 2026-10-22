@@ -71,11 +71,14 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [backendSummary, setBackendSummary] = useState(null);
   const [loading, setLoading] = useState(true);
 
   // Filters
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
+  const [selectedFY, setSelectedFY] = useState("ALL");
   const [dateRange, setDateRange] = useState(defaults);
   const [statusCategory, setStatusCategory] = useState(isDisbursedView ? "COMPLETED" : "ALL"); // "ALL" | "PENDING" | "COMPLETED" | "WORKED"
   const [workedCount, setWorkedCount] = useState(0);
@@ -84,6 +87,34 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
   const [selectedProduct, setSelectedProduct] = useState("ALL");
   const [selectedSource, setSelectedSource] = useState("ALL");
   const [sortOrder, setSortOrder] = useState("DESC"); // "DESC" | "ASC"
+
+  // Sync mode when switching between All Leads and Disbursed Leads
+  useEffect(() => {
+    if (isDisbursedView) {
+      setSelectedStatus("DISBURSED");
+      setStatusCategory("COMPLETED");
+    } else {
+      setSelectedStatus("ALL");
+      setStatusCategory("ALL");
+    }
+    setCurrentPage(1);
+  }, [isDisbursedView]);
+
+  const handleFYChange = (fy) => {
+    setSelectedFY(fy);
+    setCurrentPage(1);
+    if (fy === "FY 2026-27") {
+      setDateRange({ from: "2026-04-01", to: "2027-03-31" });
+    } else if (fy === "FY 2025-26") {
+      setDateRange({ from: "2025-04-01", to: "2026-03-31" });
+    } else if (fy === "FY 2024-25") {
+      setDateRange({ from: "2024-04-01", to: "2025-03-31" });
+    } else if (fy === "FY 2023-24") {
+      setDateRange({ from: "2023-04-01", to: "2024-03-31" });
+    } else if (fy === "ALL") {
+      setDateRange({ from: "", to: "" });
+    }
+  };
 
   // Dropdown data
   const [statusesList, setStatusesList] = useState([]);
@@ -299,9 +330,9 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
       .catch((err) => console.error("Failed to load users:", err));
 
     axios
-      .get(`${API_URL}/lead-statuses`)
+      .get(`${API_URL}/lead-statuses?team=all`)
       .then((res) => {
-        const list = res.data?.data || res.data || [];
+        const list = res.data?.statuses || res.data?.data || (Array.isArray(res.data) ? res.data : []);
         setStatusesList(Array.isArray(list) ? list : []);
       })
       .catch((err) => console.error("Failed to load statuses:", err));
@@ -340,7 +371,7 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
 
       const params = {
         page,
-        limit: PAGE_SIZE,
+        limit: pageSize,
       };
 
       if (!isWorked) {
@@ -379,13 +410,17 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
         ? data
         : [];
       setRows(leadRows);
+      if (data.summary) {
+        setBackendSummary(data.summary);
+      }
       const pagination = data.pagination || {};
+      const total = pagination.totalItems ?? pagination.total ?? leadRows.length;
+      setTotalItems(total);
       setTotalPages(
         pagination.totalPages ||
-          Math.ceil((pagination.totalItems ?? pagination.total ?? leadRows.length) / PAGE_SIZE) ||
+          Math.ceil(total / pageSize) ||
           1
       );
-      setTotalItems(pagination.totalItems ?? pagination.total ?? leadRows.length);
     } catch (err) {
       console.error("Failed to fetch leads:", err);
       toast.error(err.response?.data?.message || "Failed to load leads");
@@ -397,7 +432,7 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
 
   useEffect(() => {
     fetchLeads(currentPage);
-  }, [currentPage, debouncedSearchTerm, dateRange.from, dateRange.to, statusCategory, selectedStatus, selectedEmployeeId, selectedProduct, selectedSource]);
+  }, [currentPage, pageSize, debouncedSearchTerm, dateRange.from, dateRange.to, statusCategory, selectedStatus, selectedEmployeeId, selectedProduct, selectedSource]);
 
   // Sorted and filtered displayed rows
   const displayedRows = useMemo(() => {
@@ -615,39 +650,45 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
 
   // KPI Metrics Calculation for Top Cards
   const kpiMetrics = useMemo(() => {
-    let totalEnquired = 0;
-    let sentToBank = 0;
-    let docsPending = 0;
-    let noStatusYet = 0;
+    let totalEnquired = backendSummary?.totalEnquiredAmount;
+    let sentToBank = backendSummary?.sentToBankCount;
+    let docsPending = backendSummary?.docsPendingCount;
+    let noStatusYet = backendSummary?.noStatusYetCount;
 
-    rows.forEach((r) => {
-      const b = parseFloat(r.est_budget) || 0;
-      totalEnquired += b;
-      const s = String(r.status || "").toUpperCase();
-      if (s.includes("BANK") || s.includes("LOGIN") || s.includes("SUBMITTED")) {
-        sentToBank++;
-      } else if (s.includes("DOC") || s.includes("VERIFICATION") || s.includes("KYC")) {
-        docsPending++;
-      } else if (!s || s === "NEW" || s === "FRESH" || s === "NOT SET" || s === "UNASSIGNED") {
-        noStatusYet++;
-      }
-    });
+    if (backendSummary === null || backendSummary === undefined) {
+      totalEnquired = 0;
+      sentToBank = 0;
+      docsPending = 0;
+      noStatusYet = 0;
+      rows.forEach((r) => {
+        const b = parseFloat(r.est_budget) || 0;
+        totalEnquired += b;
+        const s = String(r.status || "").toUpperCase();
+        if (s.includes("BANK") || s.includes("LOGIN") || s.includes("SUBMITTED") || s.includes("OPS") || s.includes("SANCTION")) {
+          sentToBank++;
+        } else if (s.includes("DOC") || s.includes("VERIFICATION") || s.includes("KYC")) {
+          docsPending++;
+        } else if (!s || s === "NEW" || s === "FRESH" || s === "NOT SET" || s === "UNASSIGNED") {
+          noStatusYet++;
+        }
+      });
+    }
 
     const enquiredFormatted =
       totalEnquired >= 10000000
         ? `₹${(totalEnquired / 10000000).toFixed(2)} Cr enquired`
         : totalEnquired >= 100000
         ? `₹${(totalEnquired / 100000).toFixed(2)} L enquired`
-        : `₹${Math.round(totalEnquired).toLocaleString("en-IN")} enquired`;
+        : `₹${Math.round(totalEnquired || 0).toLocaleString("en-IN")} enquired`;
 
     return {
-      totalCount: totalItems || rows.length,
+      totalCount: backendSummary?.totalCount ?? totalItems ?? rows.length,
       enquiredFormatted,
-      sentToBank,
-      docsPending,
-      noStatusYet,
+      sentToBank: sentToBank ?? 0,
+      docsPending: docsPending ?? 0,
+      noStatusYet: noStatusYet ?? 0,
     };
-  }, [rows, totalItems]);
+  }, [rows, totalItems, backendSummary]);
 
   // Click outside menus
   useEffect(() => {
@@ -1258,82 +1299,140 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
         }
       `}</style>
 
-      {/* TOP 4 KPI CARDS (Executive Clean White Styling) */}
-      <div className="cc-kpi-grid">
-        <div className="cc-kpi-card">
-          <small className="cc-kpi-label">TOTAL LEADS</small>
-          <strong className="cc-kpi-num">{kpiMetrics.totalCount}</strong>
-          <span className="cc-kpi-sub">{kpiMetrics.enquiredFormatted}</span>
-        </div>
+      {/* TOP 4 KPI CARDS */}
+      {isDisbursedView ? (
+        <div className="cc-kpi-grid">
+          <div className="cc-kpi-card">
+            <small className="cc-kpi-label">TOTAL DISBURSED CASES</small>
+            <strong className="cc-kpi-num" style={{ color: "#047857" }}>
+              {backendSummary ? backendSummary.disbursedCount : totalItems}
+            </strong>
+            <span className="cc-kpi-sub">Fully closed loan cases</span>
+          </div>
 
-        <div className="cc-kpi-card">
-          <small className="cc-kpi-label">SENT TO BANK</small>
-          <strong className="cc-kpi-num">{kpiMetrics.sentToBank}</strong>
-          <span className="cc-kpi-sub">Files active with lenders</span>
-        </div>
+          <div className="cc-kpi-card">
+            <small className="cc-kpi-label">TOTAL DISBURSED AMOUNT</small>
+            <strong className="cc-kpi-num" style={{ color: "#047857" }}>
+              {backendSummary?.totalDisbursedAmount
+                ? formatCurrencyCompact(backendSummary.totalDisbursedAmount)
+                : "₹0"}
+            </strong>
+            <span className="cc-kpi-sub">
+              {backendSummary?.totalDisbursedAmount
+                ? `₹${Math.round(backendSummary.totalDisbursedAmount).toLocaleString("en-IN")} total volume`
+                : "No volume yet"}
+            </span>
+          </div>
 
-        <div className="cc-kpi-card">
-          <small className="cc-kpi-label">DOCUMENTS PENDING</small>
-          <strong className="cc-kpi-num">{kpiMetrics.docsPending}</strong>
-          <span className="cc-kpi-sub">Waiting on customer documents</span>
-        </div>
+          <div className="cc-kpi-card">
+            <small className="cc-kpi-label">AVG TICKET SIZE</small>
+            <strong className="cc-kpi-num">
+              {backendSummary?.avgDisbursedAmount
+                ? formatCurrencyCompact(backendSummary.avgDisbursedAmount)
+                : "₹0"}
+            </strong>
+            <span className="cc-kpi-sub">Average per disbursed case</span>
+          </div>
 
-        <div className="cc-kpi-card">
-          <small className="cc-kpi-label">NO STATUS YET</small>
-          <strong className="cc-kpi-num">{kpiMetrics.noStatusYet}</strong>
-          <span className="cc-kpi-sub">Fresh / First update pending</span>
+          <div className="cc-kpi-card">
+            <small className="cc-kpi-label">DISBURSED CONVERSION</small>
+            <strong className="cc-kpi-num">100%</strong>
+            <span className="cc-kpi-sub">Active disbursed borrower portfolio</span>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="cc-kpi-grid">
+          <div className="cc-kpi-card">
+            <small className="cc-kpi-label">TOTAL LEADS</small>
+            <strong className="cc-kpi-num">{kpiMetrics.totalCount}</strong>
+            <span className="cc-kpi-sub">{kpiMetrics.enquiredFormatted}</span>
+          </div>
+
+          <div className="cc-kpi-card">
+            <small className="cc-kpi-label">SENT TO BANK</small>
+            <strong className="cc-kpi-num" style={{ color: "#4338ca" }}>
+              {kpiMetrics.sentToBank}
+            </strong>
+            <span className="cc-kpi-sub">Files active with lenders &amp; ops</span>
+          </div>
+
+          <div className="cc-kpi-card">
+            <small className="cc-kpi-label">DOCUMENTS PENDING</small>
+            <strong className="cc-kpi-num" style={{ color: "#d97706" }}>
+              {kpiMetrics.docsPending}
+            </strong>
+            <span className="cc-kpi-sub">Waiting on customer documents</span>
+          </div>
+
+          <div className="cc-kpi-card">
+            <small className="cc-kpi-label">NO STATUS YET</small>
+            <strong className="cc-kpi-num">{kpiMetrics.noStatusYet}</strong>
+            <span className="cc-kpi-sub">Fresh / Initial stage leads</span>
+          </div>
+        </div>
+      )}
 
       {/* MAIN REPORT PANEL */}
       <section className="cc-report-panel">
-        {/* Category Tabs */}
+        {/* Category Tabs / Disbursed Badge */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
-          <div className="cc-leads-category-tabs">
-            <button
-              type="button"
-              className={statusCategory === "ALL" ? "active" : ""}
-              onClick={() => {
-                setStatusCategory("ALL");
-                setCurrentPage(1);
-              }}
-            >
-              All Leads
-            </button>
-            <button
-              type="button"
-              className={statusCategory === "PENDING" ? "active" : ""}
-              onClick={() => {
-                setStatusCategory("PENDING");
-                setCurrentPage(1);
-              }}
-            >
-              Pending
-            </button>
-            <button
-              type="button"
-              className={statusCategory === "COMPLETED" ? "active" : ""}
-              onClick={() => {
-                setStatusCategory("COMPLETED");
-                setCurrentPage(1);
-              }}
-            >
-              Completed
-            </button>
-            {isEmployee && (
+          {isDisbursedView ? (
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 14px", background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: 10 }}>
+              <CheckCircle2 size={18} color="#047857" />
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#047857" }}>
+                Disbursed Loans Portfolio ({totalItems})
+              </span>
+              <span style={{ fontSize: 11.5, color: "#065f46" }}>
+                • Successfully closed loan deals
+              </span>
+            </div>
+          ) : (
+            <div className="cc-leads-category-tabs">
               <button
                 type="button"
-                className={statusCategory === "WORKED" ? "active" : ""}
+                className={statusCategory === "ALL" ? "active" : ""}
                 onClick={() => {
-                  setStatusCategory("WORKED");
+                  setStatusCategory("ALL");
                   setCurrentPage(1);
                 }}
-                title="Leads you previously worked on (Read-only view)"
               >
-                Worked Leads {workedCount > 0 && `(${workedCount})`}
+                All Leads
               </button>
-            )}
-          </div>
+              <button
+                type="button"
+                className={statusCategory === "PENDING" ? "active" : ""}
+                onClick={() => {
+                  setStatusCategory("PENDING");
+                  setCurrentPage(1);
+                }}
+              >
+                Pending
+              </button>
+              <button
+                type="button"
+                className={statusCategory === "COMPLETED" ? "active" : ""}
+                onClick={() => {
+                  setStatusCategory("COMPLETED");
+                  setCurrentPage(1);
+                }}
+              >
+                Completed
+              </button>
+              {isEmployee && (
+                <button
+                  type="button"
+                  className={statusCategory === "WORKED" ? "active" : ""}
+                  onClick={() => {
+                    setStatusCategory("WORKED");
+                    setCurrentPage(1);
+                  }}
+                  title="Leads you previously worked on (Read-only view)"
+                >
+                  Worked Leads {workedCount > 0 && `(${workedCount})`}
+                </button>
+              )}
+            </div>
+          )}
 
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             {canExport && (
@@ -1364,19 +1463,19 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
         {/* Toolbar & Filters */}
         <div className="cc-leads-toolbar">
           {/* Search box */}
-          <label className="cc-report-search" style={{ flex: "1 1 240px", minWidth: 200 }}>
+          <label className="cc-report-search" style={{ flex: "1 1 220px", minWidth: 180 }}>
             <Search size={16} />
             <input
               type="search"
-              placeholder="Search by customer, phone, code..."
+              placeholder="Search customer, phone, code..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </label>
 
           {/* Owner filter */}
-          <label className="cc-leads-filter-select" style={{ minWidth: 140 }}>
-            Owner
+          <label className="cc-leads-filter-select" style={{ minWidth: 135 }}>
+            Owner / Employee
             <select
               value={selectedEmployeeId}
               onChange={(e) => {
@@ -1393,24 +1492,86 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
             </select>
           </label>
 
-          {/* Status filter */}
-          <label className="cc-leads-filter-select" style={{ minWidth: 140 }}>
-            Status
+          {/* Financial Year filter */}
+          <label className="cc-leads-filter-select" style={{ minWidth: 125 }}>
+            Financial Year
             <select
-              value={selectedStatus}
-              onChange={(e) => {
-                setSelectedStatus(e.target.value);
-                setCurrentPage(1);
-              }}
+              value={selectedFY}
+              onChange={(e) => handleFYChange(e.target.value)}
             >
-              <option value="ALL">All Statuses</option>
-              {statusesList.map((st) => (
-                <option key={st.id || st.value} value={st.value}>
-                  {st.label || st.value}
-                </option>
-              ))}
+              <option value="ALL">All FY</option>
+              <option value="FY 2026-27">FY 2026-27</option>
+              <option value="FY 2025-26">FY 2025-26</option>
+              <option value="FY 2024-25">FY 2024-25</option>
+              <option value="FY 2023-24">FY 2023-24</option>
+              {selectedFY === "CUSTOM" && <option value="CUSTOM">Custom Date</option>}
             </select>
           </label>
+
+          {/* Date Range: From */}
+          <label className="cc-leads-filter-select" style={{ minWidth: 125 }}>
+            From Date
+            <input
+              type="date"
+              value={dateRange.from}
+              onChange={(e) => {
+                setSelectedFY("CUSTOM");
+                setDateRange((prev) => ({ ...prev, from: e.target.value }));
+                setCurrentPage(1);
+              }}
+              style={{
+                height: 38,
+                padding: "6px 8px",
+                border: "1px solid #d5ded7",
+                borderRadius: 10,
+                fontSize: 12,
+                outline: "none",
+              }}
+            />
+          </label>
+
+          {/* Date Range: To */}
+          <label className="cc-leads-filter-select" style={{ minWidth: 125 }}>
+            To Date
+            <input
+              type="date"
+              value={dateRange.to}
+              onChange={(e) => {
+                setSelectedFY("CUSTOM");
+                setDateRange((prev) => ({ ...prev, to: e.target.value }));
+                setCurrentPage(1);
+              }}
+              style={{
+                height: 38,
+                padding: "6px 8px",
+                border: "1px solid #d5ded7",
+                borderRadius: 10,
+                fontSize: 12,
+                outline: "none",
+              }}
+            />
+          </label>
+
+          {/* Status filter (Only in All Leads view) */}
+          {!isDisbursedView && (
+            <label className="cc-leads-filter-select" style={{ minWidth: 140 }}>
+              Status
+              <select
+                value={selectedStatus}
+                onChange={(e) => {
+                  setSelectedStatus(e.target.value);
+                  setCurrentPage(1);
+                }}
+              >
+                <option value="ALL">All Statuses</option>
+                {statusesList.map((st) => (
+                  <option key={st.status_id || st.id || st.value} value={st.value}>
+                    {st.name || st.label || st.value}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
 
           {/* Product filter */}
           <label className="cc-leads-filter-select" style={{ minWidth: 120 }}>
@@ -1450,40 +1611,22 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
             </select>
           </label>
 
-          {/* Date Range: From */}
-          <label className="cc-leads-filter-select" style={{ minWidth: 125 }}>
-            From
-            <input
-              type="date"
-              value={dateRange.from}
-              onChange={(e) => setDateRange((prev) => ({ ...prev, from: e.target.value }))}
-              style={{
-                height: 38,
-                padding: "6px 8px",
-                border: "1px solid #d5ded7",
-                borderRadius: 10,
-                fontSize: 12,
-                outline: "none",
+          {/* Rows per page selector */}
+          <label className="cc-leads-filter-select" style={{ minWidth: 105 }}>
+            Show Rows
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                const nextSize = parseInt(e.target.value, 10);
+                setPageSize(nextSize);
+                setCurrentPage(1);
               }}
-            />
-          </label>
-
-          {/* Date Range: To */}
-          <label className="cc-leads-filter-select" style={{ minWidth: 125 }}>
-            To
-            <input
-              type="date"
-              value={dateRange.to}
-              onChange={(e) => setDateRange((prev) => ({ ...prev, to: e.target.value }))}
-              style={{
-                height: 38,
-                padding: "6px 8px",
-                border: "1px solid #d5ded7",
-                borderRadius: 10,
-                fontSize: 12,
-                outline: "none",
-              }}
-            />
+            >
+              <option value={20}>20 / page</option>
+              <option value={40}>40 / page</option>
+              <option value={50}>50 / page</option>
+              <option value={100}>100 / page</option>
+            </select>
           </label>
         </div>
 
@@ -2106,7 +2249,7 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
           currentPage={currentPage}
           totalPages={totalPages}
           totalItems={totalItems}
-          pageSize={PAGE_SIZE}
+          pageSize={pageSize}
           onPageChange={(p) => setCurrentPage(p)}
         />
       </section>
