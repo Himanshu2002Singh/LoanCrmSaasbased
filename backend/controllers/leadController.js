@@ -571,8 +571,18 @@ exports.getLeads = async (req, res) => {
       where.status = { [Op.in]: validTeamStatusSet };
     }
 
-    if (req.query.loanType) where.loanType = req.query.loanType;
-    if (req.query.source) where.leadSource = req.query.source;
+    if (req.query.loanType && req.query.loanType !== "ALL") {
+      where[Op.and] = where[Op.and] || [];
+      where[Op.and].push(
+        sequelize.where(fn("LOWER", col("Lead.loan_type")), req.query.loanType.toLowerCase().trim())
+      );
+    }
+    if (req.query.source && req.query.source !== "ALL") {
+      where[Op.and] = where[Op.and] || [];
+      where[Op.and].push(
+        sequelize.where(fn("LOWER", col("Lead.lead_source")), req.query.source.toLowerCase().trim())
+      );
+    }
     if (req.query.priority) where.priority = String(req.query.priority).toUpperCase();
     if (!isWorkedView && req.query.assignedEmployeeId) where.assignedEmployeeId = parseInt(req.query.assignedEmployeeId, 10);
     if (req.query.assignedManagerId) where.assignedManagerId = parseInt(req.query.assignedManagerId, 10);
@@ -652,8 +662,8 @@ exports.getLeads = async (req, res) => {
           ${req.query.assignedEmployeeId && req.query.assignedEmployeeId !== "ALL" ? "AND l.assigned_employee_id = :assignedEmployeeId" : ""}
           ${req.query.status && req.query.status !== "ALL" ? "AND l.status = :statusQuery" : ""}
           ${req.query.statusCategory === "COMPLETED" ? "AND l.status IN ('DISBURSED', 'CLOSED', 'COMPLETED', 'REJECTED')" : req.query.statusCategory === "PENDING" ? "AND (l.status NOT IN ('DISBURSED', 'CLOSED', 'COMPLETED', 'REJECTED') OR l.status IS NULL)" : ""}
-          ${req.query.loanType && req.query.loanType !== "ALL" ? "AND l.loan_type = :loanTypeQuery" : ""}
-          ${req.query.source && req.query.source !== "ALL" ? "AND l.lead_source = :sourceQuery" : ""}
+          ${req.query.loanType && req.query.loanType !== "ALL" ? "AND LOWER(l.loan_type) = LOWER(:loanTypeQuery)" : ""}
+          ${req.query.source && req.query.source !== "ALL" ? "AND LOWER(l.lead_source) = LOWER(:sourceQuery)" : ""}
       `;
 
       const [sumRow] = await sequelize.query(summaryQuery, {
@@ -2312,6 +2322,120 @@ exports.downloadSampleExcel = async (req, res) => {
   } catch (error) {
     console.error("[leads] downloadSampleExcel error:", error);
     return res.status(500).json({ message: "Internal Server Error", error: error.message });
+  }
+};
+
+/**
+ * GET /api/leads/filter-options
+ * Fetches dynamic list of sources and loan products configured in MasterConfig
+ * and merged with any distinct sources/loan types present in the leads table.
+ */
+exports.getFilterOptions = async (req, res) => {
+  try {
+    const companyId = req.user?.companyId || req.companyId || (req.query?.companyId ? parseInt(req.query.companyId, 10) : null);
+
+    // 1. Fetch Loan Products from MasterConfig
+    const configProducts = await MasterConfig.findAll({
+      where: {
+        ...(companyId ? { companyId } : {}),
+        configType: "LOAN_PRODUCT",
+        isActive: true,
+      },
+      order: [["orderIndex", "ASC"], ["label", "ASC"]],
+      attributes: ["id", "label", "value"],
+    });
+
+    // 2. Fetch distinct loan_type from leads table
+    const leadProductWhere = {
+      ...(companyId ? { companyId } : {}),
+      loanType: { [Op.and]: [{ [Op.ne]: null }, { [Op.ne]: "" }] },
+    };
+    const distinctLeadProducts = await Lead.findAll({
+      where: leadProductWhere,
+      attributes: [[fn("DISTINCT", col("loan_type")), "loanType"]],
+      raw: true,
+    });
+
+    const normalize = (s) => (s || "").replace(/_/g, " ").trim().toLowerCase();
+
+    // Merge and deduplicate products:
+    const productMap = new Map();
+    for (const cp of configProducts) {
+      const label = (cp.label || cp.value || "").trim();
+      const key = normalize(label);
+      if (key && !productMap.has(key)) {
+        productMap.set(key, { label, value: label });
+      }
+    }
+    for (const lp of distinctLeadProducts) {
+      const val = (lp.loanType || "").trim();
+      const key = normalize(val);
+      if (key && !productMap.has(key)) {
+        productMap.set(key, { label: val, value: val });
+      }
+    }
+    const products = Array.from(productMap.values()).sort((a, b) => a.label.localeCompare(b.label));
+
+    // 3. Fetch Lead Sources from MasterConfig
+    const configSources = await MasterConfig.findAll({
+      where: {
+        ...(companyId ? { companyId } : {}),
+        configType: "LEAD_SOURCE",
+        isActive: true,
+      },
+      order: [["orderIndex", "ASC"], ["label", "ASC"]],
+      attributes: ["id", "label", "value", "code", "colorCode", "commissionPercent"],
+    });
+
+    // 4. Fetch distinct lead_source from leads table
+    const leadSourceWhere = {
+      ...(companyId ? { companyId } : {}),
+      leadSource: { [Op.and]: [{ [Op.ne]: null }, { [Op.ne]: "" }] },
+    };
+    const distinctLeadSources = await Lead.findAll({
+      where: leadSourceWhere,
+      attributes: [[fn("DISTINCT", col("lead_source")), "leadSource"]],
+      raw: true,
+    });
+
+    // Merge and deduplicate sources:
+    const sourceMap = new Map();
+    sourceMap.set("self", { label: "Self", value: "Self" });
+
+    for (const cs of configSources) {
+      const label = (cs.label || cs.value || "").trim();
+      const key = normalize(label);
+      if (key && !sourceMap.has(key)) {
+        sourceMap.set(key, {
+          label,
+          value: label,
+          code: cs.code,
+          colorCode: cs.colorCode,
+          commissionPercent: cs.commissionPercent,
+        });
+      }
+    }
+    for (const ls of distinctLeadSources) {
+      const val = (ls.leadSource || "").trim();
+      const key = normalize(val);
+      if (key && !sourceMap.has(key)) {
+        sourceMap.set(key, { label: val, value: val });
+      }
+    }
+    const sources = Array.from(sourceMap.values()).sort((a, b) => {
+      if (a.value === "Self") return -1;
+      if (b.value === "Self") return 1;
+      return a.label.localeCompare(b.label);
+    });
+
+    return res.status(200).json({
+      success: true,
+      products,
+      sources,
+    });
+  } catch (error) {
+    console.error("[leads] getFilterOptions error:", error);
+    return res.status(500).json({ success: false, message: "Failed to fetch filter options", error: error.message });
   }
 };
 

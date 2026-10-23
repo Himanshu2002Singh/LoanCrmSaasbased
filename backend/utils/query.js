@@ -1,7 +1,7 @@
 const { Op } = require("sequelize");
 
 const DEFAULT_LIMIT = 20;
-const MAX_LIMIT = 200;
+const MAX_LIMIT = 1000;
 
 /**
  * Turns the ?page/?limit/?search/?sortBy/?sortDir query string into Sequelize

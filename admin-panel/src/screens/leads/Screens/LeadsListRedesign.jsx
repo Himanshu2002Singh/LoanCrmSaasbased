@@ -71,7 +71,7 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const [pageSize, setPageSize] = useState(100);
   const [backendSummary, setBackendSummary] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -116,33 +116,11 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
     }
   };
 
-  // Dropdown data
+  // Dropdown data (dynamically fetched from backend)
   const [statusesList, setStatusesList] = useState([]);
   const [lendersList, setLendersList] = useState([]);
-  const [productsList, setProductsList] = useState([
-    "DOD",
-    "Personal Loan",
-    "Business Loan",
-    "Home Loan",
-    "Loan Against Property",
-    "Car Loan",
-    "Education Loan",
-    "Gold Loan",
-    "Overdraft",
-    "Working Capital",
-    "Credit Card",
-  ]);
-  const [sourcesList, setSourcesList] = useState([
-    "Self",
-    "Direct",
-    "Partner",
-    "Connector",
-    "Website",
-    "Meta Ads",
-    "Google Ads",
-    "Referral",
-    "Telecalling",
-  ]);
+  const [productsList, setProductsList] = useState([]);
+  const [sourcesList, setSourcesList] = useState([]);
 
   // Hand-to-hand inline editing
   const [editingCell, setEditingCell] = useState(null); // { leadId, field }
@@ -344,6 +322,37 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
         setLendersList(Array.isArray(list) ? list : []);
       })
       .catch((err) => console.error("Failed to load lenders:", err));
+
+    // Fetch dynamic products and sources from backend
+    axios
+      .get(`${API_URL}/leads/filter-options`)
+      .then((res) => {
+        if (res.data?.success) {
+          if (Array.isArray(res.data.products) && res.data.products.length > 0) {
+            setProductsList(res.data.products);
+          }
+          if (Array.isArray(res.data.sources) && res.data.sources.length > 0) {
+            setSourcesList(res.data.sources);
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn("Could not fetch filter options from /leads/filter-options, checking master configs:", err);
+        axios
+          .get(`${API_URL}/master-configs/LOAN_PRODUCT`)
+          .then((r) => {
+            const list = r.data?.data || [];
+            if (list.length > 0) setProductsList(list);
+          })
+          .catch(() => {});
+        axios
+          .get(`${API_URL}/master-configs/LEAD_SOURCE`)
+          .then((r) => {
+            const list = r.data?.data || [];
+            if (list.length > 0) setSourcesList(list);
+          })
+          .catch(() => {});
+      });
   }, []);
 
   const fetchWorkedCount = async () => {
@@ -776,12 +785,23 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
           gap: 10px;
         }
 
-        /* Toolbar */
+        /* Toolbar: Single line horizontal layout with neat scroll if needed */
         .cc-leads-toolbar {
           display: flex;
-          flex-wrap: wrap;
-          gap: 12px;
+          flex-wrap: nowrap;
+          gap: 8px;
           align-items: flex-end;
+          overflow-x: auto;
+          overflow-y: hidden;
+          padding: 2px 2px 6px 2px;
+          scrollbar-width: thin;
+        }
+        .cc-leads-toolbar::-webkit-scrollbar {
+          height: 4px;
+        }
+        .cc-leads-toolbar::-webkit-scrollbar-thumb {
+          background: #cbd5e1;
+          border-radius: 4px;
         }
         .cc-report-search {
           position: relative;
@@ -790,21 +810,22 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
         }
         .cc-report-search svg {
           position: absolute;
-          left: 12px;
+          left: 11px;
           color: #94a3b8;
           pointer-events: none;
         }
         .cc-report-search input {
           width: 100%;
           height: 38px;
-          padding: 8px 12px 8px 38px;
+          padding: 7px 12px 7px 34px;
           border: 1px solid #d5ded7;
           border-radius: 10px;
           background: #ffffff;
-          font-size: 13px;
+          font-size: 12.5px;
           color: #0f172a;
           outline: none;
           transition: border-color 0.15s ease, box-shadow 0.15s ease;
+          box-sizing: border-box;
         }
         .cc-report-search input:focus {
           border-color: #047857;
@@ -814,24 +835,31 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
         .cc-leads-filter-select {
           display: flex;
           flex-direction: column;
-          font-size: 11.5px;
+          font-size: 11px;
           font-weight: 600;
           color: #475569;
-          gap: 4px;
+          gap: 3px;
+          flex: 1 1 auto;
+          white-space: nowrap;
         }
-        .cc-leads-filter-select select {
-          height: 38px;
-          padding: 6px 10px;
+        .cc-leads-filter-select select,
+        .cc-leads-filter-select input[type="date"] {
+          height: 36px;
+          padding: 5px 8px;
           border: 1px solid #d5ded7;
-          border-radius: 10px;
-          font-size: 12.5px;
+          border-radius: 8px;
+          font-size: 12px;
           background: #ffffff;
           font-weight: 600;
           color: #0f172a;
           outline: none;
           cursor: pointer;
+          transition: border-color 0.15s ease;
+          width: 100%;
+          box-sizing: border-box;
         }
-        .cc-leads-filter-select select:focus {
+        .cc-leads-filter-select select:focus,
+        .cc-leads-filter-select input[type="date"]:focus {
           border-color: #047857;
         }
 
@@ -893,11 +921,12 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
           background: #f8fafc;
         }
 
-        /* Table Container: Crisp Borders & Sticky Header (Generous height so 12-15 rows fit without scroll) */
+        /* Table Container: Sized to show 10-12 leads in one view, then smooth vertical scroll */
         .cc-leads-table-container {
-          overflow: auto;
-          max-height: 640px;
-          min-height: 520px;
+          overflow-y: auto;
+          overflow-x: auto;
+          max-height: 520px;
+          min-height: 480px;
           border: 1px solid #cbd5e1;
           border-radius: 10px;
           background: #ffffff;
@@ -922,11 +951,11 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
           z-index: 20;
           background: #f1f5f9 !important;
           color: #334155;
-          font-size: 10.5px;
+          font-size: 10px;
           font-weight: 700;
           text-transform: uppercase;
           letter-spacing: 0.05em;
-          padding: 8px 10px;
+          padding: 7px 8px;
           border-bottom: 2px solid #cbd5e1;
           border-right: 1px solid #e2e8f0;
           white-space: nowrap;
@@ -936,13 +965,16 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
           border-right: none;
         }
         .cc-leads-table-container tbody td {
-          padding: 6.5px 9px;
-          font-size: 12.5px;
+          padding: 5px 8px;
+          height: 38px;
+          font-size: 12px;
+          line-height: 1.25;
           color: #1e293b;
           border-bottom: 1px solid #e2e8f0;
           border-right: 1px solid #edf2f7;
           background: #ffffff;
           vertical-align: middle;
+          white-space: nowrap;
           transition: background-color 0.12s ease;
         }
         .cc-leads-table-container tbody td:last-child {
@@ -979,14 +1011,18 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
         .cc-product-pill {
           display: inline-flex;
           align-items: center;
-          padding: 3px 9px;
-          border-radius: 999px;
+          padding: 2px 7px;
+          border-radius: 6px;
           background: #f1f5f9;
           color: #334155;
-          font-weight: 700;
+          font-weight: 600;
           font-size: 11px;
           border: 1px solid #e2e8f0;
           cursor: pointer;
+          white-space: nowrap;
+          max-width: 160px;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
         .cc-product-pill:hover {
           background: #e2e8f0;
@@ -995,27 +1031,29 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
         .cc-source-pill {
           display: inline-flex;
           align-items: center;
-          padding: 2px 8px;
-          border-radius: 12px;
-          font-size: 11.5px;
+          padding: 2px 7px;
+          border-radius: 999px;
+          font-size: 11px;
           font-weight: 600;
           background: #eff6ff;
           color: #1d4ed8;
           border: 1px solid #bfdbfe;
           cursor: pointer;
+          white-space: nowrap;
         }
 
         .cc-bank-pill {
           display: inline-flex;
           align-items: center;
-          padding: 3px 9px;
-          border-radius: 8px;
-          font-size: 11.5px;
-          font-weight: 700;
+          padding: 2px 7px;
+          border-radius: 6px;
+          font-size: 11px;
+          font-weight: 600;
           background: #f8fafc;
           color: #475569;
           border: 1px solid #cbd5e1;
           cursor: pointer;
+          white-space: nowrap;
         }
         .cc-bank-pill:hover {
           background: #eef2ff;
@@ -1107,26 +1145,30 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
 
         /* Remark Card */
         .cc-remark-card {
-          padding: 6px 10px;
+          padding: 3px 8px;
           background: #f8fafc;
           border: 1px solid #e2e8f0;
-          border-radius: 10px;
-          max-width: 320px;
+          border-radius: 6px;
+          max-width: 280px;
         }
         .cc-remark-text {
-          font-size: 12px;
+          font-size: 11.5px;
           color: #1e293b;
           font-weight: 500;
-          line-height: 1.4;
-          word-break: break-word;
+          line-height: 1.25;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          max-width: 260px;
         }
         .cc-remark-meta {
           display: flex;
           align-items: center;
-          gap: 6px;
-          margin-top: 4px;
-          font-size: 10.5px;
+          gap: 5px;
+          margin-top: 2px;
+          font-size: 10px;
           color: #64748b;
+          white-space: nowrap;
         }
         .cc-remark-btn {
           border: 0;
@@ -1439,7 +1481,18 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
             </div>
           )}
 
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            {/* Search customer, phone, code placed right before Export */}
+            <label className="cc-report-search" style={{ minWidth: 220, width: 280 }}>
+              <Search size={15} />
+              <input
+                type="search"
+                placeholder="Search customer, phone, code..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </label>
+
             {canExport && (
               <button
                 type="button"
@@ -1465,21 +1518,10 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
           </div>
         </div>
 
-        {/* Toolbar & Filters */}
+        {/* Toolbar & Filters (Single Horizontal Line) */}
         <div className="cc-leads-toolbar">
-          {/* Search box */}
-          <label className="cc-report-search" style={{ flex: "1 1 220px", minWidth: 180 }}>
-            <Search size={16} />
-            <input
-              type="search"
-              placeholder="Search customer, phone, code..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </label>
-
           {/* Owner filter */}
-          <label className="cc-leads-filter-select" style={{ minWidth: 135 }}>
+          <label className="cc-leads-filter-select" style={{ minWidth: 130, flex: "1 1 135px" }}>
             Owner / Employee
             <select
               value={selectedEmployeeId}
@@ -1498,7 +1540,7 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
           </label>
 
           {/* Financial Year filter */}
-          <label className="cc-leads-filter-select" style={{ minWidth: 125 }}>
+          <label className="cc-leads-filter-select" style={{ minWidth: 105, flex: "0 0 110px" }}>
             Financial Year
             <select
               value={selectedFY}
@@ -1514,7 +1556,7 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
           </label>
 
           {/* Date Range: From */}
-          <label className="cc-leads-filter-select" style={{ minWidth: 125 }}>
+          <label className="cc-leads-filter-select" style={{ minWidth: 120, flex: "0 0 120px" }}>
             From Date
             <input
               type="date"
@@ -1524,19 +1566,11 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
                 setDateRange((prev) => ({ ...prev, from: e.target.value }));
                 setCurrentPage(1);
               }}
-              style={{
-                height: 38,
-                padding: "6px 8px",
-                border: "1px solid #d5ded7",
-                borderRadius: 10,
-                fontSize: 12,
-                outline: "none",
-              }}
             />
           </label>
 
           {/* Date Range: To */}
-          <label className="cc-leads-filter-select" style={{ minWidth: 125 }}>
+          <label className="cc-leads-filter-select" style={{ minWidth: 120, flex: "0 0 120px" }}>
             To Date
             <input
               type="date"
@@ -1546,20 +1580,12 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
                 setDateRange((prev) => ({ ...prev, to: e.target.value }));
                 setCurrentPage(1);
               }}
-              style={{
-                height: 38,
-                padding: "6px 8px",
-                border: "1px solid #d5ded7",
-                borderRadius: 10,
-                fontSize: 12,
-                outline: "none",
-              }}
             />
           </label>
 
           {/* Status filter (Only in All Leads view) */}
           {!isDisbursedView && (
-            <label className="cc-leads-filter-select" style={{ minWidth: 140 }}>
+            <label className="cc-leads-filter-select" style={{ minWidth: 120, flex: "1 1 125px" }}>
               Status
               <select
                 value={selectedStatus}
@@ -1578,8 +1604,8 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
             </label>
           )}
 
-          {/* Product filter */}
-          <label className="cc-leads-filter-select" style={{ minWidth: 120 }}>
+          {/* Product filter (Dynamic from backend) */}
+          <label className="cc-leads-filter-select" style={{ minWidth: 125, flex: "1 1 130px" }}>
             Product
             <select
               value={selectedProduct}
@@ -1589,16 +1615,20 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
               }}
             >
               <option value="ALL">All Products</option>
-              {productsList.map((prod) => (
-                <option key={prod} value={prod}>
-                  {prod}
-                </option>
-              ))}
+              {productsList.map((prod, idx) => {
+                const val = typeof prod === "string" ? prod : (prod.value || prod.label || prod.name || "");
+                const label = typeof prod === "string" ? prod : (prod.label || prod.name || prod.value || "");
+                return (
+                  <option key={prod.id || `${val}_${idx}`} value={val}>
+                    {label}
+                  </option>
+                );
+              })}
             </select>
           </label>
 
-          {/* Source filter */}
-          <label className="cc-leads-filter-select" style={{ minWidth: 110 }}>
+          {/* Source filter (Dynamic from backend) */}
+          <label className="cc-leads-filter-select" style={{ minWidth: 115, flex: "1 1 120px" }}>
             Source
             <select
               value={selectedSource}
@@ -1608,16 +1638,20 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
               }}
             >
               <option value="ALL">All Sources</option>
-              {sourcesList.map((src) => (
-                <option key={src} value={src}>
-                  {src}
-                </option>
-              ))}
+              {sourcesList.map((src, idx) => {
+                const val = typeof src === "string" ? src : (src.value || src.label || src.name || "");
+                const label = typeof src === "string" ? src : (src.label || src.name || src.value || "");
+                return (
+                  <option key={src.id || `${val}_${idx}`} value={val}>
+                    {label}
+                  </option>
+                );
+              })}
             </select>
           </label>
 
           {/* Rows per page selector */}
-          <label className="cc-leads-filter-select" style={{ minWidth: 105 }}>
+          <label className="cc-leads-filter-select" style={{ minWidth: 100, flex: "0 0 105px" }}>
             Show Rows
             <select
               value={pageSize}
@@ -1627,11 +1661,12 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
                 setCurrentPage(1);
               }}
             >
-              <option value={15}>15 / page</option>
               <option value={20}>20 / page</option>
-              <option value={40}>40 / page</option>
               <option value={50}>50 / page</option>
               <option value={100}>100 / page</option>
+              <option value={200}>200 / page</option>
+              <option value={500}>500 / page</option>
+              <option value={1000}>1000 / page</option>
             </select>
           </label>
         </div>
@@ -1680,11 +1715,11 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
                 {/* Column 4: PHONE */}
                 <th style={{ minWidth: 120 }}>PHONE</th>
                 {/* Column 5: PRODUCT */}
-                <th style={{ minWidth: 110 }}>PRODUCT</th>
+                <th style={{ minWidth: 140 }}>PRODUCT</th>
                 {/* Column 6: AMOUNT */}
                 <th style={{ minWidth: 125 }}>AMOUNT</th>
                 {/* Column 7: SOURCE */}
-                <th style={{ minWidth: 110 }}>SOURCE</th>
+                <th style={{ minWidth: 115 }}>SOURCE</th>
                 {/* Column 8: PARTY COMMISSION (if authorized) */}
                 {canViewCommission && <th style={{ minWidth: 130 }}>PARTY COMMISSION</th>}
                 {/* Column 9: BANK */}
@@ -1832,11 +1867,15 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
                             className="cc-inline-select"
                           >
                             <option value="">Select</option>
-                            {productsList.map((p) => (
-                              <option key={p} value={p}>
-                                {p}
-                              </option>
-                            ))}
+                            {productsList.map((p, idx) => {
+                              const val = typeof p === "string" ? p : (p.value || p.label || "");
+                              const label = typeof p === "string" ? p : (p.label || p.value || "");
+                              return (
+                                <option key={p.id || `${val}_${idx}`} value={val}>
+                                  {label}
+                                </option>
+                              );
+                            })}
                           </select>
                         ) : (
                           <span
@@ -1913,11 +1952,15 @@ export default function LeadsListRedesign({ disbursedOnly = false }) {
                             onBlur={() => setEditingCell(null)}
                             className="cc-inline-select"
                           >
-                            {sourcesList.map((s) => (
-                              <option key={s} value={s}>
-                                {s}
-                              </option>
-                            ))}
+                            {sourcesList.map((s, idx) => {
+                              const val = typeof s === "string" ? s : (s.value || s.label || "");
+                              const label = typeof s === "string" ? s : (s.label || s.value || "");
+                              return (
+                                <option key={s.id || `${val}_${idx}`} value={val}>
+                                  {label}
+                                </option>
+                              );
+                            })}
                           </select>
                         ) : (
                           <span
