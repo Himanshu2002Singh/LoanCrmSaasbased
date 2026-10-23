@@ -104,6 +104,21 @@ const ensureSchemaMigrations = async (sequelize) => {
   } catch (err) {
     console.warn("[Migration] CasePayout sync notice:", err.message);
   }
+
+  const casePayoutCols = [
+    { col: "lg_user_id", sql: "ALTER TABLE `case_payouts` ADD COLUMN `lg_user_id` INT NULL" },
+    { col: "lg_amount", sql: "ALTER TABLE `case_payouts` ADD COLUMN `lg_amount` DECIMAL(12,2) NOT NULL DEFAULT 0.00" },
+    { col: "lc_user_id", sql: "ALTER TABLE `case_payouts` ADD COLUMN `lc_user_id` INT NULL" },
+    { col: "lc_amount", sql: "ALTER TABLE `case_payouts` ADD COLUMN `lc_amount` DECIMAL(12,2) NOT NULL DEFAULT 0.00" },
+  ];
+  for (const c of casePayoutCols) {
+    try {
+      await sequelize.query(c.sql);
+      console.log(`[Migration] Added ${c.col} to case_payouts.`);
+    } catch (e) {
+      // Column already exists
+    }
+  }
 };
 
 const start = async () => {

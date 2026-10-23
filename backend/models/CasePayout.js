@@ -233,6 +233,42 @@ const CasePayout = sequelize.define(
       field: "extra_charges",
       comment: "Extra / manpower / operational deductions",
     },
+    lgUserId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      field: "lg_user_id",
+      references: {
+        model: "users",
+        key: "id",
+      },
+      onDelete: "SET NULL",
+      comment: "Lead Generator: Person who started working first on the lead up to document collection",
+    },
+    lgAmount: {
+      type: DataTypes.DECIMAL(12, 2),
+      allowNull: false,
+      defaultValue: 0.0,
+      field: "lg_amount",
+      comment: "Lead Generator (LG) Incentive Amount in INR (added directly to employee salary incentive)",
+    },
+    lcUserId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      field: "lc_user_id",
+      references: {
+        model: "users",
+        key: "id",
+      },
+      onDelete: "SET NULL",
+      comment: "Lead Converter: Operations team member who processed and converted the lead",
+    },
+    lcAmount: {
+      type: DataTypes.DECIMAL(12, 2),
+      allowNull: false,
+      defaultValue: 0.0,
+      field: "lc_amount",
+      comment: "Lead Converter (LC) Incentive Amount in INR (added directly to employee salary incentive)",
+    },
     partyNetPayable: {
       type: DataTypes.DECIMAL(15, 2),
       allowNull: false,

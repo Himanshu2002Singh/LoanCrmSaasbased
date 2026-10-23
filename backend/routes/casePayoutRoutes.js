@@ -12,11 +12,17 @@ const {
   getInvoiceData,
   updateGstrStatus,
   getCasePaymentHistory,
+  getCaseCollaborators,
+  getLeadCollaborators,
+  updateCaseIncentives,
 } = require("../controllers/casePayoutController");
 
 router.get("/cases", isAuthenticated, requirePermission("viewPayouts"), getDisbursedPayouts);
 router.post("/cases", isAuthenticated, requirePermission("managePayouts"), createCasePayout);
 router.post("/cases/bulk", isAuthenticated, requirePermission("managePayouts"), bulkCreateCasePayouts);
+router.get("/cases/:id/collaborators", isAuthenticated, getCaseCollaborators);
+router.put("/cases/:id/incentives", isAuthenticated, requirePermission("managePayouts"), updateCaseIncentives);
+router.get("/lead-collaborators/:leadId", isAuthenticated, getLeadCollaborators);
 router.put("/cases/:id", isAuthenticated, requirePermission("managePayouts"), updateCasePayoutRates);
 router.put("/cases/:id/gstr-status", isAuthenticated, requirePermission("managePayouts"), updateGstrStatus);
 router.post("/cases/:id/bank-receipt", isAuthenticated, requirePermission("managePayouts"), recordBankReceipt);

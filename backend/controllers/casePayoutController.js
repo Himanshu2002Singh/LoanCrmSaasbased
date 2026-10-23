@@ -51,6 +51,339 @@ const logActivity = async (req, { recordType, recordId, action, previousValue, n
 };
 
 /**
+ * Helper to retrieve collaborators and candidate LG / LC for a lead.
+ * - LG (Lead Generator): whoever first started work on the lead up to document collection
+ * - LC (Lead Converter): operations team member who processed and converted the lead
+ */
+const detectLeadCollaborators = async (leadId, companyId) => {
+  try {
+    const lead = await Lead.findByPk(leadId, {
+      include: [
+        { model: Customer, as: "customer", attributes: ["id", "name", "mobile", "email"] },
+        { model: User, as: "assignedEmployee", attributes: ["id", "name", "email", "phone", "role"] },
+        { model: User, as: "assignedManager", attributes: ["id", "name", "email", "phone", "role"] },
+        {
+          model: db.LeadAssignmentHistory,
+          as: "assignmentHistories",
+          include: [
+            { model: User, as: "assignee", attributes: ["id", "name", "role", "email"] },
+            { model: User, as: "assignedBy", attributes: ["id", "name", "role"] },
+          ],
+          order: [["assignedAt", "ASC"], ["createdAt", "ASC"]],
+          required: false,
+        },
+        {
+          model: db.Document,
+          as: "documents",
+          include: [{ model: User, as: "uploader", attributes: ["id", "name", "role"] }],
+          order: [["createdAt", "ASC"]],
+          required: false,
+        },
+        {
+          model: db.LeadDocumentRequest,
+          as: "documentRequests",
+          include: [{ model: User, as: "creator", attributes: ["id", "name", "role"] }],
+          required: false,
+        },
+        {
+          model: Application,
+          as: "applications",
+          include: [
+            { model: User, as: "assignedBanker", attributes: ["id", "name", "email", "phone", "role"] },
+          ],
+          required: false,
+        },
+      ],
+    });
+
+    if (!lead) return null;
+
+    // Operation status history for lead and its applications
+    const appIds = (lead.applications || []).map((a) => a.id).filter(Boolean);
+    const opsHistories = await db.OperationStatusHistory.findAll({
+      where: {
+        companyId,
+        [Op.or]: [
+          { leadId },
+          ...(appIds.length > 0 ? [{ applicationId: { [Op.in]: appIds } }] : []),
+        ],
+      },
+      include: [{ model: User, as: "updater", attributes: ["id", "name", "email", "phone", "role"] }],
+      order: [["createdAt", "ASC"]],
+      required: false,
+    });
+
+    // Call logs and notes
+    const [callLogs, notes] = await Promise.all([
+      db.CallLog.findAll({
+        where: { leadId },
+        include: [{ model: User, as: "user", attributes: ["id", "name", "role"] }],
+        order: [["createdAt", "ASC"]],
+      }),
+      db.Note.findAll({
+        where: { leadId },
+        include: [{ model: User, as: "user", attributes: ["id", "name", "role"] }],
+        order: [["createdAt", "ASC"]],
+      }),
+    ]);
+
+    // All active users in company
+    const allUsers = await User.findAll({
+      where: {
+        companyId,
+        status: "active",
+        role: { [Op.ne]: "SUPERADMIN" },
+      },
+      attributes: ["id", "name", "email", "phone", "role"],
+      order: [["name", "ASC"]],
+    });
+
+    const collaboratorsMap = new Map();
+
+    const addAction = (user, actionText, tag, isEarly = false) => {
+      if (!user || !user.id) return;
+      if (!collaboratorsMap.has(user.id)) {
+        collaboratorsMap.set(user.id, {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          role: user.role,
+          actions: [],
+          tags: new Set(),
+          isLgCandidate: false,
+          isLcCandidate: false,
+          scoreLg: 0,
+          scoreLc: 0,
+        });
+      }
+      const entry = collaboratorsMap.get(user.id);
+      entry.actions.push(actionText);
+      if (tag) entry.tags.add(tag);
+      if (tag === "APP_CREATOR") {
+        entry.isLgCandidate = true;
+        entry.scoreLg += 60; // Top score: Prepared Loan Application
+      }
+      if (tag === "DOC_COLLECTOR") {
+        entry.isLgCandidate = true;
+        entry.scoreLg += isEarly ? 35 : 25; // Collected Documents
+      }
+      if (tag === "FIRST_WORKER") {
+        entry.isLgCandidate = true;
+        entry.scoreLg += 15;
+      }
+      if (tag === "ASSIGNED_EMP") {
+        entry.isLgCandidate = true;
+        entry.scoreLg += 20;
+      }
+      if (tag === "SANCTIONED_BY") {
+        entry.isLcCandidate = true;
+        entry.scoreLc += 70; // Top score: Got Bank Sanction
+      }
+      if (tag === "DISBURSED_BY") {
+        entry.isLcCandidate = true;
+        entry.scoreLc += 50; // Handled Disbursement
+      }
+      if (tag === "OPS_TEAM") {
+        entry.isLcCandidate = true;
+        entry.scoreLc += 20;
+      }
+    };
+
+    // 1. Check who prepared and created the Loan Application(s) (Priority 1 for LG)
+    if (appIds.length > 0 && db.ActivityLog) {
+      try {
+        const appLogs = await db.ActivityLog.findAll({
+          where: {
+            companyId,
+            recordType: "Application",
+            recordId: { [Op.in]: appIds.map(String) },
+            action: "CREATED",
+          },
+          order: [["createdAt", "ASC"]],
+        });
+        appLogs.forEach((al) => {
+          if (al.userId) {
+            const creator = allUsers.find((u) => u.id === al.userId);
+            if (creator) {
+              addAction(
+                creator,
+                "Prepared and created loan application file",
+                "APP_CREATOR",
+                true
+              );
+            }
+          }
+        });
+      } catch (e) {
+        // ignore log lookup error
+      }
+    }
+
+    // 2. Documents collected / uploaded (Lead Generator scope up to docs)
+    if (lead.documents && lead.documents.length > 0) {
+      const uploaderCounts = {};
+      lead.documents.forEach((doc) => {
+        if (doc.uploader) {
+          uploaderCounts[doc.uploader.id] = (uploaderCounts[doc.uploader.id] || 0) + 1;
+        }
+      });
+      Object.entries(uploaderCounts).forEach(([uid, count], idx) => {
+        const doc = lead.documents.find((d) => d.uploader && d.uploader.id === parseInt(uid, 10));
+        if (doc?.uploader) {
+          addAction(
+            doc.uploader,
+            `Collected & uploaded ${count} customer verification document(s)`,
+            "DOC_COLLECTOR",
+            idx === 0
+          );
+        }
+      });
+    }
+
+    // Document Requests sent
+    if (lead.documentRequests && lead.documentRequests.length > 0) {
+      lead.documentRequests.forEach((dr) => {
+        if (dr.creator) {
+          addAction(dr.creator, "Requested documents from customer via secure portal", "DOC_COLLECTOR");
+        }
+      });
+    }
+
+    // 3. Initial Assignment History (who started work first)
+    if (lead.assignmentHistories && lead.assignmentHistories.length > 0) {
+      lead.assignmentHistories.forEach((ah, idx) => {
+        if (ah.assignee) {
+          const isFirst = idx === 0;
+          addAction(
+            ah.assignee,
+            isFirst
+              ? `First assigned to lead on ${new Date(ah.assignedAt || ah.createdAt).toLocaleDateString("en-IN")}`
+              : `Assigned on ${new Date(ah.assignedAt || ah.createdAt).toLocaleDateString("en-IN")}`,
+            isFirst ? "FIRST_WORKER" : "WORKED",
+            isFirst
+          );
+        }
+      });
+    }
+
+    // Current assigned employee
+    if (lead.assignedEmployee) {
+      addAction(lead.assignedEmployee, "Assigned Agent / Telecaller on Lead", "ASSIGNED_EMP", true);
+    }
+
+    // Call logs and notes
+    callLogs.forEach((cl) => {
+      if (cl.user) addAction(cl.user, `Logged call: ${cl.callType || "Call"}`, "CALL_LOG");
+    });
+    notes.forEach((n) => {
+      if (n.user) addAction(n.user, "Added lead progress note", "NOTE");
+    });
+
+    // 4. Operations Team & Who got Bank Sanction / Disbursement (Priority for LC)
+    (lead.applications || []).forEach((app) => {
+      if (app.sanctionUpdatedBy) {
+        const sanctionUser = allUsers.find((u) => u.id === app.sanctionUpdatedBy);
+        if (sanctionUser) {
+          addAction(
+            sanctionUser,
+            `Bank Operations: Got loan sanctioned from bank (Amount: ₹${parseFloat(app.sanctionedAmount || app.disbursedAmount || 0).toLocaleString("en-IN")})`,
+            "SANCTIONED_BY",
+            true
+          );
+        }
+      }
+      if (app.disbursedBy) {
+        const disbUser = allUsers.find((u) => u.id === app.disbursedBy);
+        if (disbUser) {
+          addAction(
+            disbUser,
+            "Bank Operations: Disbursed loan with bank",
+            "DISBURSED_BY",
+            true
+          );
+        }
+      }
+      if (app.assignedBanker) {
+        addAction(app.assignedBanker, "Assigned Operations / Banker on Loan Application", "OPS_TEAM");
+      }
+    });
+
+    // Operations Status History
+    opsHistories.forEach((oh) => {
+      if (oh.updater) {
+        const st = (oh.newStatus || "").toUpperCase();
+        let tag = "OPS_TEAM";
+        let isEarly = false;
+        if (st.includes("SANCTION") || st.includes("APPROVED")) {
+          tag = "SANCTIONED_BY";
+          isEarly = true;
+        } else if (st.includes("DISBURSED") || st.includes("DISBURSEMENT")) {
+          tag = "DISBURSED_BY";
+          isEarly = true;
+        }
+
+        addAction(
+          oh.updater,
+          `Operations workflow: Changed status to ${oh.newStatus}${oh.remark ? ` (${oh.remark})` : ""}`,
+          tag,
+          isEarly
+        );
+      }
+    });
+
+    // Finalize collaborators array
+    const collaborators = Array.from(collaboratorsMap.values()).map((c) => ({
+      ...c,
+      tags: Array.from(c.tags),
+      actionsText: c.actions.join(" • "),
+    }));
+
+    // Find best LG Candidate:
+    // 1st Priority: Who prepared the Loan Application or collected documents
+    let suggestedLg = null;
+    const lgCandidates = collaborators
+      .filter((c) => c.isLgCandidate || c.tags.includes("APP_CREATOR") || c.tags.includes("DOC_COLLECTOR") || c.tags.includes("ASSIGNED_EMP") || c.tags.includes("FIRST_WORKER"))
+      .sort((a, b) => b.scoreLg - a.scoreLg);
+
+    if (lgCandidates.length > 0) {
+      suggestedLg = lgCandidates[0];
+    } else if (lead.assignedEmployee) {
+      suggestedLg = lead.assignedEmployee;
+    } else if (allUsers.length > 0) {
+      suggestedLg = allUsers[0];
+    }
+
+    // Find best LC Candidate:
+    // 1st Priority: Operations member who got the file sanctioned from the bank
+    let suggestedLc = null;
+    const lcCandidates = collaborators
+      .filter((c) => c.isLcCandidate || c.tags.includes("SANCTIONED_BY") || c.tags.includes("DISBURSED_BY") || c.tags.includes("OPS_TEAM"))
+      .sort((a, b) => b.scoreLc - a.scoreLc);
+
+    if (lcCandidates.length > 0) {
+      suggestedLc = lcCandidates[0];
+    } else {
+      const opsUser = allUsers.find((u) => ["OPS", "OPERATIONS", "MANAGER"].includes((u.role || "").toUpperCase()));
+      suggestedLc = opsUser || allUsers[0] || null;
+    }
+
+    return {
+      leadId: lead.id,
+      customerName: lead.customer?.name || "Customer",
+      suggestedLg,
+      suggestedLc,
+      collaborators,
+      allStaff: allUsers,
+      allUsers,
+    };
+  } catch (err) {
+    console.error("[detectLeadCollaborators] error:", err);
+    return null;
+  }
+};
+
+/**
  * Auto-syncs any newly disbursed leads into case_payouts table,
  * and purges any payouts whose lead/application is CANCELLED, REJECTED,
  * or not completed through Final Disbursement.
@@ -261,6 +594,17 @@ const autoSyncDisbursedCases = async (companyId) => {
         const currentYear = new Date().getFullYear();
         const invoiceNumber = `INV-${currentYear}-${String(lead.id).padStart(4, "0")}`;
 
+        // Auto-detect LG (first worker who took docs) and LC (ops member who converted)
+        let autoLgId = null;
+        let autoLcId = null;
+        try {
+          const colab = await detectLeadCollaborators(lead.id, companyId);
+          if (colab?.suggestedLg) autoLgId = colab.suggestedLg.id;
+          if (colab?.suggestedLc) autoLcId = colab.suggestedLc.id;
+        } catch (e) {
+          // ignore
+        }
+
         payout = await CasePayout.create({
           companyId,
           leadId: lead.id,
@@ -295,6 +639,10 @@ const autoSyncDisbursedCases = async (companyId) => {
           partyGstPercent,
           partyGstAmount,
           extraCharges,
+          lgUserId: autoLgId,
+          lgAmount: 0.0,
+          lcUserId: autoLcId,
+          lcAmount: 0.0,
           partyNetPayable,
           partyPaidAmount: 0.0,
           partyRemainingDue: partyNetPayable,
@@ -307,6 +655,21 @@ const autoSyncDisbursedCases = async (companyId) => {
           status: "PENDING",
         });
       } else {
+        // If LG or LC is not yet populated on existing payout, auto-detect and populate
+        if (!payout.lgUserId || !payout.lcUserId) {
+          try {
+            const colab = await detectLeadCollaborators(lead.id, companyId);
+            const patch = {};
+            if (!payout.lgUserId && colab?.suggestedLg) patch.lgUserId = colab.suggestedLg.id;
+            if (!payout.lcUserId && colab?.suggestedLc) patch.lcUserId = colab.suggestedLc.id;
+            if (Object.keys(patch).length > 0) {
+              await payout.update(patch);
+            }
+          } catch (e) {
+            // ignore
+          }
+        }
+
         // If loanAmount was updated on lead/app and no receipts/payments yet, keep payout in sync
         if (
           parseFloat(payout.bankReceivedAmount || 0) === 0 &&
@@ -526,6 +889,18 @@ exports.getDisbursedPayouts = async (req, res) => {
           as: "application",
           attributes: ["id", "applicationNumber", "loanProduct", "appliedAmount", "sanctionedAmount", "disbursedAmount", "status"],
         },
+        {
+          model: User,
+          as: "lgUser",
+          attributes: ["id", "name", "email", "phone", "role"],
+          required: false,
+        },
+        {
+          model: User,
+          as: "lcUser",
+          attributes: ["id", "name", "email", "phone", "role"],
+          required: false,
+        },
       ],
       order: [["disbursalDate", "DESC"], ["id", "DESC"]],
     });
@@ -544,6 +919,8 @@ exports.getDisbursedPayouts = async (req, res) => {
     let totalPartyTds = 0;
     let totalPartyGst = 0;
     let totalExtraCharges = 0;
+    let totalLgIncentives = 0;
+    let totalLcIncentives = 0;
     let totalPartyNetPayable = 0;
     let totalPartyPaid = 0;
     let totalPartyRemainingDue = 0;
@@ -563,6 +940,8 @@ exports.getDisbursedPayouts = async (req, res) => {
       totalPartyTds += parseFloat(c.partyTdsAmount || 0);
       totalPartyGst += parseFloat(c.partyGstAmount || 0);
       totalExtraCharges += parseFloat(c.extraCharges || 0);
+      totalLgIncentives += parseFloat(c.lgAmount || 0);
+      totalLcIncentives += parseFloat(c.lcAmount || 0);
       totalPartyNetPayable += parseFloat(c.partyNetPayable || c.partyCommissionDue || 0);
       totalPartyPaid += parseFloat(c.partyPaidAmount || 0);
       totalPartyRemainingDue += parseFloat(c.partyRemainingDue || 0);
@@ -585,6 +964,9 @@ exports.getDisbursedPayouts = async (req, res) => {
       totalPartyTds: Math.round(totalPartyTds),
       totalPartyGst: Math.round(totalPartyGst),
       totalExtraCharges: Math.round(totalExtraCharges),
+      totalLgIncentives: Math.round(totalLgIncentives),
+      totalLcIncentives: Math.round(totalLcIncentives),
+      totalLeadIncentives: Math.round(totalLgIncentives + totalLcIncentives),
       totalPartyNetPayable: Math.round(totalPartyNetPayable),
       totalPartyPaid: Math.round(totalPartyPaid),
       totalPartyRemainingDue: Math.round(totalPartyRemainingDue),
@@ -772,6 +1154,10 @@ exports.updateCasePayoutRates = async (req, res) => {
         partyGstPercent: newPartyGstPct,
         partyGstAmount: newPartyGstAmt,
         extraCharges: newExtraCharges,
+        lgUserId: req.body.lgUserId !== undefined ? (req.body.lgUserId ? parseInt(req.body.lgUserId, 10) : null) : casePayout.lgUserId,
+        lgAmount: req.body.lgAmount !== undefined && req.body.lgAmount !== "" ? Math.max(0, parseFloat(req.body.lgAmount)) : parseFloat(casePayout.lgAmount || 0),
+        lcUserId: req.body.lcUserId !== undefined ? (req.body.lcUserId ? parseInt(req.body.lcUserId, 10) : null) : casePayout.lcUserId,
+        lcAmount: req.body.lcAmount !== undefined && req.body.lcAmount !== "" ? Math.max(0, parseFloat(req.body.lcAmount)) : parseFloat(casePayout.lcAmount || 0),
         partyNetPayable,
         partyRemainingDue,
         netMargin,
@@ -1473,6 +1859,10 @@ exports.createCasePayout = async (req, res) => {
           partyCommissionPercent: partyCommPct,
           partyCommissionDue: partyCommDue,
           extraCharges: newExtra,
+          lgUserId: req.body.lgUserId ? parseInt(req.body.lgUserId, 10) : (payout.lgUserId || null),
+          lgAmount: req.body.lgAmount !== undefined && req.body.lgAmount !== "" ? Math.max(0, parseFloat(req.body.lgAmount)) : parseFloat(payout.lgAmount || 0),
+          lcUserId: req.body.lcUserId ? parseInt(req.body.lcUserId, 10) : (payout.lcUserId || null),
+          lcAmount: req.body.lcAmount !== undefined && req.body.lcAmount !== "" ? Math.max(0, parseFloat(req.body.lcAmount)) : parseFloat(payout.lcAmount || 0),
           partyNetPayable,
           partyRemainingDue: Math.max(0, partyNetPayable - parseFloat(payout.partyPaidAmount || 0)),
           netMargin,
@@ -1519,6 +1909,10 @@ exports.createCasePayout = async (req, res) => {
           partyGstPercent: 0,
           partyGstAmount: 0,
           extraCharges: newExtra,
+          lgUserId: req.body.lgUserId ? parseInt(req.body.lgUserId, 10) : null,
+          lgAmount: req.body.lgAmount ? Math.max(0, parseFloat(req.body.lgAmount)) : 0.0,
+          lcUserId: req.body.lcUserId ? parseInt(req.body.lcUserId, 10) : null,
+          lcAmount: req.body.lcAmount ? Math.max(0, parseFloat(req.body.lcAmount)) : 0.0,
           partyNetPayable,
           partyPaidAmount: 0.0,
           partyRemainingDue: partyNetPayable,
@@ -2004,5 +2398,174 @@ exports.getCasePaymentHistory = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/payouts/cases/:id/collaborators
+ * Returns list of team members who worked on the lead (with suggested LG and LC)
+ */
+exports.getCaseCollaborators = async (req, res) => {
+  try {
+    const companyId = resolveCompanyId(req);
+    const { id } = req.params;
+
+    const casePayout = await CasePayout.findOne({
+      where: { id, companyId },
+      include: [
+        { model: User, as: "lgUser", attributes: ["id", "name", "email", "phone", "role"] },
+        { model: User, as: "lcUser", attributes: ["id", "name", "email", "phone", "role"] },
+        { model: Lead, as: "lead" },
+      ],
+    });
+
+    if (!casePayout) {
+      return res.status(404).json({ message: "Case payout record not found" });
+    }
+
+    const detection = await detectLeadCollaborators(casePayout.leadId, companyId);
+
+    return res.status(200).json({
+      success: true,
+      casePayoutId: casePayout.id,
+      leadId: casePayout.leadId,
+      customerName: casePayout.customerName,
+      loanAmount: casePayout.loanAmount,
+      loanProduct: casePayout.loanProduct,
+      bankName: casePayout.bankName,
+      disbursalDate: casePayout.disbursalDate,
+      lgUserId: casePayout.lgUserId || detection?.suggestedLg?.id || null,
+      lgAmount: parseFloat(casePayout.lgAmount || 0),
+      lgUser: casePayout.lgUser || detection?.suggestedLg || null,
+      lcUserId: casePayout.lcUserId || detection?.suggestedLc?.id || null,
+      lcAmount: parseFloat(casePayout.lcAmount || 0),
+      lcUser: casePayout.lcUser || detection?.suggestedLc || null,
+      suggestedLg: detection?.suggestedLg || null,
+      suggestedLc: detection?.suggestedLc || null,
+      collaborators: detection?.collaborators || [],
+      allStaff: detection?.allStaff || [],
+      allUsers: detection?.allUsers || detection?.allStaff || [],
+    });
+
+    // Auto-persist default LG and LC if not already set on this case
+    if (!casePayout.lgUserId && detection?.suggestedLg?.id) {
+      casePayout.update({ lgUserId: detection.suggestedLg.id }).catch(() => {});
+    }
+    if (!casePayout.lcUserId && detection?.suggestedLc?.id) {
+      casePayout.update({ lcUserId: detection.suggestedLc.id }).catch(() => {});
+    }
+    return;
+  } catch (err) {
+    console.error("[getCaseCollaborators] error:", err);
+    return res.status(500).json({ message: "Failed to fetch lead collaborators", error: err.message });
+  }
+};
+
+/**
+ * GET /api/payouts/lead-collaborators/:leadId
+ * Retrieves collaborator analysis directly for a lead
+ */
+exports.getLeadCollaborators = async (req, res) => {
+  try {
+    const companyId = resolveCompanyId(req);
+    const { leadId } = req.params;
+
+    const detection = await detectLeadCollaborators(parseInt(leadId, 10), companyId);
+    if (!detection) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
+    const casePayout = await CasePayout.findOne({
+      where: { leadId, companyId },
+      include: [
+        { model: User, as: "lgUser", attributes: ["id", "name", "email", "phone", "role"] },
+        { model: User, as: "lcUser", attributes: ["id", "name", "email", "phone", "role"] },
+      ],
+    });
+
+    return res.status(200).json({
+      success: true,
+      ...detection,
+      casePayout,
+    });
+  } catch (err) {
+    console.error("[getLeadCollaborators] error:", err);
+    return res.status(500).json({ message: "Failed to fetch lead collaborators", error: err.message });
+  }
+};
+
+/**
+ * PUT /api/payouts/cases/:id/incentives
+ * Updates Lead Generator (LG) and Lead Converter (LC) employee assignments and incentive amounts.
+ * Pure internal employee incentive - does NOT affect bank payouts or vendor deductions!
+ */
+exports.updateCaseIncentives = async (req, res) => {
+  const t = await sequelize.transaction();
+  try {
+    const companyId = resolveCompanyId(req);
+    const { id } = req.params;
+    const { lgUserId, lgAmount, lcUserId, lcAmount } = req.body;
+
+    const casePayout = await CasePayout.findOne({
+      where: { id, companyId },
+      transaction: t,
+    });
+
+    if (!casePayout) {
+      await t.rollback();
+      return res.status(404).json({ message: "Case payout record not found" });
+    }
+
+    const previousValue = casePayout.toJSON();
+
+    const updatedLgId = lgUserId !== undefined ? (lgUserId ? parseInt(lgUserId, 10) : null) : casePayout.lgUserId;
+    const updatedLgAmt = lgAmount !== undefined && lgAmount !== "" ? Math.max(0, parseFloat(lgAmount)) : parseFloat(casePayout.lgAmount || 0);
+
+    const updatedLcId = lcUserId !== undefined ? (lcUserId ? parseInt(lcUserId, 10) : null) : casePayout.lcUserId;
+    const updatedLcAmt = lcAmount !== undefined && lcAmount !== "" ? Math.max(0, parseFloat(lcAmount)) : parseFloat(casePayout.lcAmount || 0);
+
+    await casePayout.update(
+      {
+        lgUserId: updatedLgId,
+        lgAmount: updatedLgAmt,
+        lcUserId: updatedLcId,
+        lcAmount: updatedLcAmt,
+      },
+      { transaction: t }
+    );
+
+    await logActivity(
+      req,
+      {
+        recordType: "CasePayout",
+        recordId: casePayout.id,
+        action: "UPDATED_INCENTIVES",
+        previousValue,
+        newValue: casePayout.toJSON(),
+        remarks: `Updated lead incentives: LG (ID: ${updatedLgId}) = ₹${updatedLgAmt}, LC (ID: ${updatedLcId}) = ₹${updatedLcAmt} on Case #${casePayout.id}`,
+      },
+      t
+    );
+
+    await t.commit();
+
+    const refreshed = await CasePayout.findByPk(casePayout.id, {
+      include: [
+        { model: User, as: "lgUser", attributes: ["id", "name", "email", "phone", "role"] },
+        { model: User, as: "lcUser", attributes: ["id", "name", "email", "phone", "role"] },
+        { model: Lead, as: "lead" },
+      ],
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Lead LG and LC incentives updated successfully",
+      data: refreshed,
+    });
+  } catch (err) {
+    await t.rollback();
+    console.error("[updateCaseIncentives] error:", err);
+    return res.status(500).json({ message: "Failed to update case incentives", error: err.message });
+  }
+};
+
 exports.autoSyncDisbursedCases = autoSyncDisbursedCases;
+exports.detectLeadCollaborators = detectLeadCollaborators;
 

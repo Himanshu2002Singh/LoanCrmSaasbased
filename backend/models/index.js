@@ -193,6 +193,12 @@ CasePayout.belongsTo(Application, { foreignKey: "application_id", as: "applicati
 Lender.hasMany(CasePayout, { foreignKey: "lender_id", as: "casePayouts", onDelete: "SET NULL" });
 CasePayout.belongsTo(Lender, { foreignKey: "lender_id", as: "lender" });
 
+CasePayout.belongsTo(User, { foreignKey: "lg_user_id", as: "lgUser" });
+User.hasMany(CasePayout, { foreignKey: "lg_user_id", as: "lgPayouts" });
+
+CasePayout.belongsTo(User, { foreignKey: "lc_user_id", as: "lcUser" });
+User.hasMany(CasePayout, { foreignKey: "lc_user_id", as: "lcPayouts" });
+
 CasePayout.hasMany(BankReceipt, { foreignKey: "case_payout_id", as: "bankReceipts", onDelete: "CASCADE" });
 BankReceipt.belongsTo(CasePayout, { foreignKey: "case_payout_id", as: "casePayout" });
 

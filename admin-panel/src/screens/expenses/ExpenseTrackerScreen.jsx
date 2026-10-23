@@ -1674,7 +1674,21 @@ export default function ExpenseTrackerScreen() {
                             color: emp.totalIncentive > 0 ? "#d97706" : "#64748b",
                           }}
                         >
-                          {currencyFormatter.format(emp.totalIncentive || 0)}
+                          <div>{currencyFormatter.format(emp.totalIncentive || 0)}</div>
+                          {(emp.lgIncentiveTotal > 0 || emp.lcIncentiveTotal > 0) && (
+                            <div style={{ display: "flex", gap: 3, justifyContent: "flex-end", marginTop: 3, flexWrap: "wrap" }}>
+                              {emp.lgIncentiveTotal > 0 && (
+                                <span style={{ fontSize: 9.5, background: "#f0fdf4", border: "1px solid #86efac", color: "#166534", padding: "1px 4px", borderRadius: 4, fontWeight: 700 }} title="Lead Generator Incentive">
+                                  LG: ₹{Math.round(emp.lgIncentiveTotal).toLocaleString("en-IN")}
+                                </span>
+                              )}
+                              {emp.lcIncentiveTotal > 0 && (
+                                <span style={{ fontSize: 9.5, background: "#eff6ff", border: "1px solid #93c5fd", color: "#1e40af", padding: "1px 4px", borderRadius: 4, fontWeight: 700 }} title="Lead Converter (Operations) Incentive">
+                                  LC: ₹{Math.round(emp.lcIncentiveTotal).toLocaleString("en-IN")}
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </td>
 
                         <td style={{ textAlign: "right", fontWeight: 800, color: "#047857", fontSize: 14 }}>
@@ -1793,8 +1807,8 @@ export default function ExpenseTrackerScreen() {
                   <th>Disbursal Date</th>
                   <th style={{ textAlign: "right" }}>Loan Amount</th>
                   <th style={{ textAlign: "right" }}>Base Commission (₹)</th>
-                  <th>Assigned Employee</th>
-                  <th style={{ textAlign: "right", color: "#d97706" }}>Staff Incentive (Manpower)</th>
+                  <th>Assigned Employee / Role</th>
+                  <th style={{ textAlign: "right", color: "#d97706" }}>Staff Incentive (LG / LC)</th>
                   <th>Party / Source Name</th>
                   <th style={{ textAlign: "right", color: "#7c3aed" }}>Partner Net Payout</th>
                 </tr>
@@ -1808,7 +1822,7 @@ export default function ExpenseTrackerScreen() {
                   </tr>
                 ) : (
                   summaryData.incentiveCases.map((c) => (
-                    <tr key={c.caseId} className="cc-exp-row">
+                    <tr key={c.uniqueKey || `${c.caseId}_${c.roleTag || 'item'}`} className="cc-exp-row">
                       <td style={{ fontWeight: 600 }}>#{c.caseId}</td>
                       <td>
                         <strong style={{ color: "#0f172a" }}>{c.customerName}</strong>
@@ -1821,9 +1835,26 @@ export default function ExpenseTrackerScreen() {
                       </td>
                       <td style={{ textAlign: "right" }}>{currencyFormatter.format(c.baseAmount || 0)}</td>
                       <td>
-                        <span className="cc-exp-emp-tag">👤 {c.employeeName}</span>
+                        <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+                          <span className="cc-exp-emp-tag">👤 {c.employeeName}</span>
+                          {c.roleTag === "LG" && (
+                            <span style={{ fontSize: 10, background: "#f0fdf4", border: "1px solid #86efac", color: "#166534", padding: "1px 5px", borderRadius: 4, fontWeight: 800 }}>
+                              LG
+                            </span>
+                          )}
+                          {c.roleTag === "LC" && (
+                            <span style={{ fontSize: 10, background: "#eff6ff", border: "1px solid #93c5fd", color: "#1e40af", padding: "1px 5px", borderRadius: 4, fontWeight: 800 }}>
+                              LC
+                            </span>
+                          )}
+                          {c.roleTag === "MANPOWER" && (
+                            <span style={{ fontSize: 10, background: "#fef3c7", border: "1px solid #fde68a", color: "#92400e", padding: "1px 5px", borderRadius: 4, fontWeight: 700 }}>
+                              Manpower
+                            </span>
+                          )}
+                        </div>
                       </td>
-                      <td style={{ textAlign: "right", fontWeight: 700, color: "#d97706" }}>
+                      <td style={{ textAlign: "right", fontWeight: 700, color: c.roleTag === "LG" ? "#15803d" : c.roleTag === "LC" ? "#1d4ed8" : "#d97706" }}>
                         {currencyFormatter.format(c.incentiveAmount || 0)}
                       </td>
                       <td>{c.partyName || "Direct"}</td>

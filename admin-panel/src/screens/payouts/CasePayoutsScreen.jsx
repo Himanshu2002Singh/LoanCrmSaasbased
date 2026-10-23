@@ -242,8 +242,21 @@ export default function CasePayoutsScreen() {
   const [paymentHistoryModalOpen, setPaymentHistoryModalOpen] = useState(false);
   const [historyTargetCase, setHistoryTargetCase] = useState(null);
   const [historyData, setHistoryData] = useState(null);
-  const [loadingHistory, setLoadingHistory] = useState(false);
   const [historyTab, setHistoryTab] = useState("ALL"); // "ALL" | "BANK" | "PARTY"
+
+  // LG (Lead Generator) & LC (Lead Converter) Incentive Modal State
+  const [lgLcModalOpen, setLgLcModalOpen] = useState(false);
+  const [lgLcTargetCase, setLgLcTargetCase] = useState(null);
+  const [lgLcLoading, setLgLcLoading] = useState(false);
+  const [lgLcData, setLgLcData] = useState(null);
+  const [lgLcActiveTab, setLgLcActiveTab] = useState("BOTH"); // "BOTH" | "LG" | "LC"
+  const [lgLcForm, setLgLcForm] = useState({
+    lgUserId: "",
+    lgAmount: "",
+    lcUserId: "",
+    lcAmount: "",
+  });
+  const [savingLgLc, setSavingLgLc] = useState(false);
 
   // Financial Years
   const financialYears = useMemo(() => {
@@ -465,6 +478,10 @@ export default function CasePayoutsScreen() {
       extraCharges: extra,
       partyNetPayable: netPayable,
       netMargin: margin,
+      lgUserId: item.lgUserId || item.lgUser?.id ? String(item.lgUserId || item.lgUser?.id) : "",
+      lgAmount: item.lgAmount !== undefined && item.lgAmount !== null ? parseFloat(item.lgAmount) : 0,
+      lcUserId: item.lcUserId || item.lcUser?.id ? String(item.lcUserId || item.lcUser?.id) : "",
+      lcAmount: item.lcAmount !== undefined && item.lcAmount !== null ? parseFloat(item.lcAmount) : 0,
       gstrStatus: item.gstrStatus || "PENDING",
       gstrAmount: parseFloat(item.gstrAmount || bGstAmt),
       gstrReceivedAmount: parseFloat(item.gstrReceivedAmount || 0),
@@ -1408,6 +1425,69 @@ export default function CasePayoutsScreen() {
     window.print();
   };
 
+  // Open LG & LC Modal
+  const openLgLcModal = async (c, initialTab = "BOTH") => {
+    setLgLcTargetCase(c);
+    setLgLcActiveTab(initialTab);
+    setLgLcForm({
+      lgUserId: c.lgUserId || c.lgUser?.id ? String(c.lgUserId || c.lgUser?.id) : "",
+      lgAmount: c.lgAmount !== undefined && c.lgAmount !== null ? String(c.lgAmount) : "0",
+      lcUserId: c.lcUserId || c.lcUser?.id ? String(c.lcUserId || c.lcUser?.id) : "",
+      lcAmount: c.lcAmount !== undefined && c.lcAmount !== null ? String(c.lcAmount) : "0",
+    });
+    setLgLcModalOpen(true);
+    setLgLcLoading(true);
+    try {
+      const res = await axios.get(`${API_URL}/payouts/cases/${c.id}/collaborators`);
+      if (res.data?.success) {
+        setLgLcData(res.data);
+        const defaultLgId = res.data.lgUserId ? String(res.data.lgUserId) : (res.data.suggestedLg?.id ? String(res.data.suggestedLg.id) : "");
+        const defaultLcId = res.data.lcUserId ? String(res.data.lcUserId) : (res.data.suggestedLc?.id ? String(res.data.suggestedLc.id) : "");
+        setLgLcForm((prev) => ({
+          ...prev,
+          lgUserId: prev.lgUserId || defaultLgId,
+          lgAmount: prev.lgAmount !== "" && prev.lgAmount !== "0" ? prev.lgAmount : String(res.data.lgAmount || 0),
+          lcUserId: prev.lcUserId || defaultLcId,
+          lcAmount: prev.lcAmount !== "" && prev.lcAmount !== "0" ? prev.lcAmount : String(res.data.lcAmount || 0),
+        }));
+      }
+    } catch (err) {
+      console.error("Error loading lead collaborators:", err);
+      toast.error(err.response?.data?.message || "Could not fetch lead collaborators, using active staff list");
+    } finally {
+      setLgLcLoading(false);
+    }
+  };
+
+  // Submit LG & LC Incentive
+  const handleSaveLgLc = async () => {
+    if (!lgLcTargetCase) return;
+    try {
+      setSavingLgLc(true);
+      const res = await axios.put(`${API_URL}/payouts/cases/${lgLcTargetCase.id}/incentives`, {
+        lgUserId: lgLcForm.lgUserId || null,
+        lgAmount: lgLcForm.lgAmount !== "" ? parseFloat(lgLcForm.lgAmount) : 0,
+        lcUserId: lgLcForm.lcUserId || null,
+        lcAmount: lgLcForm.lcAmount !== "" ? parseFloat(lgLcForm.lcAmount) : 0,
+      });
+
+      if (res.data?.success) {
+        toast.success("Lead LG & LC incentives updated successfully!");
+        setLgLcModalOpen(false);
+        const updated = res.data.data;
+        setCases((prev) =>
+          prev.map((item) => (item.id === updated.id ? { ...item, ...updated } : item))
+        );
+        fetchCasePayouts();
+      }
+    } catch (err) {
+      console.error("Error saving lead incentives:", err);
+      toast.error(err.response?.data?.message || "Failed to save incentives");
+    } finally {
+      setSavingLgLc(false);
+    }
+  };
+
   // Export Cases to Excel
   const handleExportCasesExcel = () => {
     if (!cases.length) {
@@ -1442,6 +1522,11 @@ export default function CasePayoutsScreen() {
         "Vendor TDS Deducted (₹)": isSelf ? 0 : (c.partyTdsAmount || 0),
         "Vendor GST Deducted (₹)": isSelf ? 0 : (c.partyGstAmount || 0),
         "Manpower / Staff Cost (₹)": c.extraCharges || 0,
+        "LG Staff (Lead Generator)": c.lgUser?.name || "—",
+        "LG Incentive (₹)": parseFloat(c.lgAmount || 0),
+        "LC Staff (Lead Converter)": c.lcUser?.name || "—",
+        "LC Incentive (₹)": parseFloat(c.lcAmount || 0),
+        "Total Lead Incentive (₹)": parseFloat(c.lgAmount || 0) + parseFloat(c.lcAmount || 0),
         "Final Net Payable (₹)": isSelf ? 0 : (c.partyNetPayable || c.partyCommissionDue),
         "Party Paid (₹)": isSelf ? 0 : c.partyPaidAmount,
         "Party Remaining (₹)": isSelf ? 0 : c.partyRemainingDue,
@@ -1475,6 +1560,11 @@ export default function CasePayoutsScreen() {
       "Vendor TDS Deducted (₹)": grandTotals.totalPartyTds,
       "Vendor GST Deducted (₹)": grandTotals.totalPartyGst,
       "Manpower / Staff Cost (₹)": grandTotals.totalExtraCharges,
+      "LG Staff (Lead Generator)": "—",
+      "LG Incentive (₹)": grandTotals.totalLgIncentives || 0,
+      "LC Staff (Lead Converter)": "—",
+      "LC Incentive (₹)": grandTotals.totalLcIncentives || 0,
+      "Total Lead Incentive (₹)": grandTotals.totalLeadIncentives || (parseFloat(grandTotals.totalLgIncentives || 0) + parseFloat(grandTotals.totalLcIncentives || 0)),
       "Final Net Payable (₹)": grandTotals.totalPartyNetPayable,
       "Party Paid (₹)": grandTotals.totalPartyPaid,
       "Party Remaining (₹)": grandTotals.totalPartyRemainingDue,
@@ -1720,6 +1810,23 @@ export default function CasePayoutsScreen() {
             </div>
             <div className="cc-pkpi-sub">Bank Credit − Vendor Net Outflow</div>
           </div>
+
+          {/* KPI 6: Staff Incentives (LG & LC) */}
+          <div className="cc-pkpi-card" style={{ background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
+            <div className="cc-pkpi-top">
+              <span className="cc-pkpi-label" style={{ color: "#166534" }}>Staff Incentives (LG &amp; LC)</span>
+              <div className="cc-pkpi-icon emerald" style={{ background: "#dcfce7", color: "#166534" }}>
+                <Coins size={16} />
+              </div>
+            </div>
+            <div className="cc-pkpi-val" style={{ color: "#047857" }}>
+              {currencyFormatter.format(grandTotals.totalLeadIncentives || (parseFloat(grandTotals.totalLgIncentives || 0) + parseFloat(grandTotals.totalLcIncentives || 0)))}
+            </div>
+            <div className="cc-pkpi-sub" style={{ color: "#15803d" }}>
+              LG: <strong>{currencyFormatter.format(grandTotals.totalLgIncentives || 0)}</strong> • LC:{" "}
+              <strong>{currencyFormatter.format(grandTotals.totalLcIncentives || 0)}</strong>
+            </div>
+          </div>
         </section>
       )}
 
@@ -1906,6 +2013,8 @@ export default function CasePayoutsScreen() {
                   <th>Lead &amp; Customer</th>
                   <th>Loan &amp; Disbursal</th>
                   <th>Loan Amount (₹)</th>
+                  <th style={{ background: "#f0fdf4", color: "#166534" }}>LG (Lead Gen)</th>
+                  <th style={{ background: "#eff6ff", color: "#1e40af" }}>LC (Lead Conv)</th>
                   <th>Bank %</th>
                   <th className="th-credit">Bank Gross Base (₹)</th>
                   <th>Bank Net Receivable (₹)</th>
@@ -1924,14 +2033,14 @@ export default function CasePayoutsScreen() {
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={16} style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
+                    <td colSpan={18} style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
                       <RefreshCw size={24} className="cc-spin" style={{ marginBottom: 10 }} />
                       <p>Loading disbursed cases &amp; payout balances...</p>
                     </td>
                   </tr>
                 ) : cases.length === 0 ? (
                   <tr>
-                    <td colSpan={16} style={{ textAlign: "center", padding: "40px", color: "#94a3b8" }}>
+                    <td colSpan={18} style={{ textAlign: "center", padding: "40px", color: "#94a3b8" }}>
                       No completed or disbursed loan cases match the selected filters.
                     </td>
                   </tr>
@@ -2019,6 +2128,58 @@ export default function CasePayoutsScreen() {
                           <strong style={{ fontSize: 13, color: "#0f172a" }}>
                             {currencyFormatter.format(c.loanAmount || c.baseAmount)}
                           </strong>
+                        </td>
+
+                        {/* 3a. LG: Lead Generator */}
+                        <td style={{ minWidth: 140 }}>
+                          <div
+                            onClick={() => openLgLcModal(c, "LG")}
+                            style={{
+                              cursor: "pointer",
+                              padding: "5px 8px",
+                              borderRadius: 6,
+                              background: parseFloat(c.lgAmount || 0) > 0 ? "#f0fdf4" : "#f8fafc",
+                              border: `1px solid ${parseFloat(c.lgAmount || 0) > 0 ? "#86efac" : "#e2e8f0"}`,
+                              transition: "all 0.15s ease",
+                            }}
+                            title="Click to view/change Lead Generator staff & incentive"
+                          >
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
+                              <span style={{ fontSize: 10, fontWeight: 700, color: "#166534", textTransform: "uppercase" }}>LG</span>
+                              <span style={{ fontSize: 11.5, fontWeight: 700, color: parseFloat(c.lgAmount || 0) > 0 ? "#15803d" : "#94a3b8" }}>
+                                ₹{parseFloat(c.lgAmount || 0).toLocaleString("en-IN")}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: 11, color: "#334155", fontWeight: 600, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {c.lgUser?.name || "— Not Set —"}
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* 3b. LC: Lead Converter */}
+                        <td style={{ minWidth: 140 }}>
+                          <div
+                            onClick={() => openLgLcModal(c, "LC")}
+                            style={{
+                              cursor: "pointer",
+                              padding: "5px 8px",
+                              borderRadius: 6,
+                              background: parseFloat(c.lcAmount || 0) > 0 ? "#eff6ff" : "#f8fafc",
+                              border: `1px solid ${parseFloat(c.lcAmount || 0) > 0 ? "#93c5fd" : "#e2e8f0"}`,
+                              transition: "all 0.15s ease",
+                            }}
+                            title="Click to view/change Lead Converter (Operations) staff & incentive"
+                          >
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
+                              <span style={{ fontSize: 10, fontWeight: 700, color: "#1e40af", textTransform: "uppercase" }}>LC</span>
+                              <span style={{ fontSize: 11.5, fontWeight: 700, color: parseFloat(c.lcAmount || 0) > 0 ? "#1d4ed8" : "#94a3b8" }}>
+                                ₹{parseFloat(c.lcAmount || 0).toLocaleString("en-IN")}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: 11, color: "#334155", fontWeight: 600, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {c.lcUser?.name || "— Not Set —"}
+                            </div>
+                          </div>
                         </td>
 
                         {/* 4. Bank Commission % */}
@@ -2317,6 +2478,27 @@ export default function CasePayoutsScreen() {
                               type="button"
                               className="cc-action-btn"
                               style={{
+                                background: "#f0fdf4",
+                                border: "1px solid #86efac",
+                                color: "#166534",
+                                fontWeight: 700,
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 3,
+                                padding: "4px 8px",
+                                borderRadius: 6,
+                                fontSize: 11,
+                                cursor: "pointer",
+                              }}
+                              onClick={() => openLgLcModal(c, "BOTH")}
+                              title="Manage LG (Lead Generator) & LC (Lead Converter) Staff Incentives"
+                            >
+                              <Coins size={11} /> LG/LC
+                            </button>
+                            <button
+                              type="button"
+                              className="cc-action-btn"
+                              style={{
                                 background: "#eff6ff",
                                 border: "1px solid #bfdbfe",
                                 color: "#1d4ed8",
@@ -2402,6 +2584,18 @@ export default function CasePayoutsScreen() {
                     <td>
                       <strong>
                         {currencyFormatter.format(grandTotals.totalLoanVolume || grandTotals.totalDisbursedVolume)}
+                      </strong>
+                    </td>
+                    <td style={{ background: "#f0fdf4" }}>
+                      <div style={{ fontSize: 10, color: "#166534", fontWeight: 700 }}>LG TOTAL</div>
+                      <strong style={{ color: "#15803d", fontSize: 12 }}>
+                        {currencyFormatter.format(grandTotals.totalLgIncentives || 0)}
+                      </strong>
+                    </td>
+                    <td style={{ background: "#eff6ff" }}>
+                      <div style={{ fontSize: 10, color: "#1e40af", fontWeight: 700 }}>LC TOTAL</div>
+                      <strong style={{ color: "#1d4ed8", fontSize: 12 }}>
+                        {currencyFormatter.format(grandTotals.totalLcIncentives || 0)}
                       </strong>
                     </td>
                     <td>—</td>
@@ -6011,6 +6205,665 @@ export default function CasePayoutsScreen() {
                 onClick={() => setPaymentHistoryModalOpen(false)}
               >
                 Close Ledger
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: LG (LEAD GENERATOR) & LC (LEAD CONVERTER) INCENTIVES */}
+      {lgLcModalOpen && lgLcTargetCase && (
+        <div className="cc-modal-overlay" onClick={() => setLgLcModalOpen(false)}>
+          <div
+            className="cc-modal-box"
+            style={{
+              maxWidth: 780,
+              width: "95%",
+              maxHeight: "92vh",
+              display: "flex",
+              flexDirection: "column",
+              borderRadius: 14,
+              overflow: "hidden",
+              boxShadow: "0 20px 40px -10px rgba(15, 23, 42, 0.35)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div
+              className="cc-modal-header"
+              style={{
+                background: "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)",
+                color: "#fff",
+                padding: "16px 22px",
+                borderBottom: "1px solid #334155",
+              }}
+            >
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div
+                    style={{
+                      background: "rgba(34, 197, 94, 0.2)",
+                      border: "1px solid rgba(34, 197, 94, 0.4)",
+                      padding: "4px 8px",
+                      borderRadius: 6,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 4,
+                      color: "#4ade80",
+                      fontSize: 12,
+                      fontWeight: 700,
+                    }}
+                  >
+                    <Coins size={14} />
+                    STAFF INCENTIVES
+                  </div>
+                  <h3 style={{ margin: 0, fontSize: 17, color: "#fff", fontWeight: 700 }}>
+                    LG &amp; LC Incentives for Lead #{lgLcTargetCase.leadId}
+                  </h3>
+                </div>
+                <p style={{ margin: "4px 0 0", color: "#94a3b8", fontSize: 12 }}>
+                  Customer: <strong style={{ color: "#f8fafc" }}>{lgLcTargetCase.customerName}</strong> • {lgLcTargetCase.loanProduct} • Disbursed: <strong style={{ color: "#38bdf8" }}>{currencyFormatter.format(lgLcTargetCase.loanAmount || 0)}</strong> ({lgLcTargetCase.bankName || "Bank"})
+                </p>
+              </div>
+              <button
+                type="button"
+                className="cc-modal-close"
+                style={{ color: "#94a3b8" }}
+                onClick={() => setLgLcModalOpen(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Salary & Company Expense Note Banner */}
+            <div
+              style={{
+                background: "#f0fdf4",
+                borderBottom: "1px solid #bbf7d0",
+                padding: "10px 20px",
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                fontSize: 11.5,
+                color: "#166534",
+              }}
+            >
+              <div style={{ color: "#15803d", flexShrink: 0 }}>
+                <CheckCircle2 size={16} />
+              </div>
+              <div>
+                <strong>Direct Salary &amp; Expense Credit:</strong> This incentive is credited directly into the employee's monthly incentive ledger alongside their salary, and added into company expenses. It does <strong>not</strong> affect bank receivables or connector commissions.
+              </div>
+            </div>
+
+            {/* Tabs Bar */}
+            <div
+              style={{
+                padding: "8px 20px",
+                background: "#f8fafc",
+                borderBottom: "1px solid #e2e8f0",
+                display: "flex",
+                gap: 8,
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setLgLcActiveTab("BOTH")}
+                style={{
+                  padding: "6px 14px",
+                  borderRadius: 6,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  border: "1px solid",
+                  background: lgLcActiveTab === "BOTH" ? "#0f172a" : "#fff",
+                  color: lgLcActiveTab === "BOTH" ? "#fff" : "#475569",
+                  borderColor: lgLcActiveTab === "BOTH" ? "#0f172a" : "#cbd5e1",
+                  transition: "all 0.15s",
+                }}
+              >
+                Both LG &amp; LC
+              </button>
+              <button
+                type="button"
+                onClick={() => setLgLcActiveTab("LG")}
+                style={{
+                  padding: "6px 14px",
+                  borderRadius: 6,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  border: "1px solid",
+                  background: lgLcActiveTab === "LG" ? "#166534" : "#fff",
+                  color: lgLcActiveTab === "LG" ? "#fff" : "#166534",
+                  borderColor: lgLcActiveTab === "LG" ? "#166534" : "#86efac",
+                  transition: "all 0.15s",
+                }}
+              >
+                LG: Lead Generator
+              </button>
+              <button
+                type="button"
+                onClick={() => setLgLcActiveTab("LC")}
+                style={{
+                  padding: "6px 14px",
+                  borderRadius: 6,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  border: "1px solid",
+                  background: lgLcActiveTab === "LC" ? "#1e40af" : "#fff",
+                  color: lgLcActiveTab === "LC" ? "#fff" : "#1e40af",
+                  borderColor: lgLcActiveTab === "LC" ? "#1e40af" : "#93c5fd",
+                  transition: "all 0.15s",
+                }}
+              >
+                LC: Lead Converter
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div
+              style={{
+                padding: "18px 22px",
+                overflowY: "auto",
+                flex: 1,
+                display: "flex",
+                flexDirection: "column",
+                gap: 18,
+              }}
+            >
+              {lgLcLoading ? (
+                <div style={{ textAlign: "center", padding: "40px 20px", color: "#64748b" }}>
+                  <RefreshCw size={24} className="cc-spin" style={{ marginBottom: 10 }} />
+                  <p style={{ margin: 0, fontWeight: 600 }}>Analyzing lead history &amp; collaborators...</p>
+                  <small style={{ color: "#94a3b8" }}>Detecting initial doc collectors and operations team</small>
+                </div>
+              ) : (
+                <>
+                  {/* LG Section */}
+                  {(lgLcActiveTab === "BOTH" || lgLcActiveTab === "LG") && (
+                    <div
+                      style={{
+                        background: "#fff",
+                        border: "1.5px solid #86efac",
+                        borderRadius: 10,
+                        padding: "14px 16px",
+                        boxShadow: "0 2px 6px rgba(34, 197, 94, 0.08)",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span
+                            style={{
+                              background: "#166534",
+                              color: "#fff",
+                              fontWeight: 800,
+                              fontSize: 11,
+                              padding: "2px 7px",
+                              borderRadius: 4,
+                            }}
+                          >
+                            LG
+                          </span>
+                          <div>
+                            <strong style={{ fontSize: 14, color: "#14532d" }}>Lead Generator (LG)</strong>
+                            <span style={{ fontSize: 11, color: "#166534", marginLeft: 6 }}>
+                              — First worker up to Document Collection
+                            </span>
+                          </div>
+                        </div>
+                        {lgLcData?.suggestedLg && (
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#15803d", background: "#f0fdf4", border: "1px solid #bbf7d0", padding: "3px 8px", borderRadius: 6 }}>
+                            <span>⭐ Detected: <strong>{lgLcData.suggestedLg.name}</strong></span>
+                            <button
+                              type="button"
+                              onClick={() => setLgLcForm((prev) => ({ ...prev, lgUserId: String(lgLcData.suggestedLg.id) }))}
+                              style={{
+                                background: "#166534",
+                                color: "#fff",
+                                border: "none",
+                                borderRadius: 4,
+                                padding: "2px 6px",
+                                fontSize: 10,
+                                fontWeight: 700,
+                                cursor: "pointer",
+                              }}
+                            >
+                              Select
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Collaborators who worked on this lead */}
+                      {lgLcData?.collaborators?.length > 0 && (
+                        <div style={{ marginBottom: 12 }}>
+                          <label style={{ fontSize: 11, color: "#475569", fontWeight: 600, display: "block", marginBottom: 6 }}>
+                            People who worked on this Lead (Click to assign as LG):
+                          </label>
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                            {lgLcData.collaborators.map((u) => {
+                              const isSelected = String(lgLcForm.lgUserId) === String(u.id);
+                              const isDocOrFirst = u.tags.includes("FIRST_WORKER") || u.tags.includes("DOC_COLLECTOR");
+                              return (
+                                <div
+                                  key={`lg_collab_${u.id}`}
+                                  onClick={() => setLgLcForm((prev) => ({ ...prev, lgUserId: String(u.id) }))}
+                                  style={{
+                                    cursor: "pointer",
+                                    padding: "6px 10px",
+                                    borderRadius: 6,
+                                    border: `1.5px solid ${isSelected ? "#166534" : isDocOrFirst ? "#86efac" : "#e2e8f0"}`,
+                                    background: isSelected ? "#dcfce7" : isDocOrFirst ? "#f0fdf4" : "#f8fafc",
+                                    fontSize: 11.5,
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 6,
+                                    transition: "all 0.15s",
+                                  }}
+                                >
+                                  {isSelected && <CheckCircle2 size={13} color="#166534" />}
+                                  <div>
+                                    <strong style={{ color: isSelected ? "#14532d" : "#0f172a" }}>{u.name}</strong>
+                                    <div style={{ fontSize: 10, color: "#64748b" }}>
+                                      {u.role} {u.tags.includes("FIRST_WORKER") && "• First Contact"} {u.tags.includes("DOC_COLLECTOR") && "• Collected Docs"}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Dropdown & Amount Grid */}
+                      <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 12, alignItems: "start" }}>
+                        <div>
+                          <label style={{ fontSize: 11, color: "#334155", fontWeight: 700, display: "block", marginBottom: 4 }}>
+                            Select Lead Generator Employee:
+                          </label>
+                          <select
+                            style={{
+                              width: "100%",
+                              padding: "8px 10px",
+                              borderRadius: 6,
+                              border: "1px solid #cbd5e1",
+                              fontSize: 12.5,
+                              background: "#fff",
+                              fontWeight: 600,
+                            }}
+                            value={lgLcForm.lgUserId}
+                            onChange={(e) => setLgLcForm((prev) => ({ ...prev, lgUserId: e.target.value }))}
+                          >
+                            <option value="">— Unassigned / No LG Incentive —</option>
+                            {lgLcData?.collaborators?.length > 0 && (
+                              <optgroup label="⭐ Team who worked on this Lead">
+                                {lgLcData.collaborators.map((u) => {
+                                  const isSuggested = String(lgLcData?.suggestedLg?.id) === String(u.id);
+                                  return (
+                                    <option key={`collab_lg_${u.id}`} value={u.id}>
+                                      {u.name} ({u.role}){isSuggested ? " ⭐ [DEFAULT: Prepared App / Collected Docs]" : ` — ${u.actions[0] || "Worked on Lead"}`}
+                                    </option>
+                                  );
+                                })}
+                              </optgroup>
+                            )}
+                            <optgroup label="All Company Staff">
+                              {(lgLcData?.allUsers || lgLcData?.allStaff || []).map((u) => (
+                                <option key={`all_lg_${u.id}`} value={u.id}>
+                                  {u.name} ({u.role})
+                                </option>
+                              ))}
+                            </optgroup>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label style={{ fontSize: 11, color: "#334155", fontWeight: 700, display: "block", marginBottom: 4 }}>
+                            LG Incentive Amount (₹):
+                          </label>
+                          <div style={{ position: "relative" }}>
+                            <span style={{ position: "absolute", left: 10, top: 8, fontSize: 13, color: "#64748b", fontWeight: 600 }}>₹</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="50"
+                              placeholder="0"
+                              style={{
+                                width: "100%",
+                                padding: "8px 10px 8px 24px",
+                                borderRadius: 6,
+                                border: "1px solid #cbd5e1",
+                                fontSize: 13,
+                                fontWeight: 700,
+                                color: "#166534",
+                              }}
+                              value={lgLcForm.lgAmount}
+                              onChange={(e) => setLgLcForm((prev) => ({ ...prev, lgAmount: e.target.value }))}
+                            />
+                          </div>
+                          {/* Quick presets */}
+                          <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
+                            {[200, 500, 1000, 2000].map((amt) => (
+                              <button
+                                key={`lg_amt_${amt}`}
+                                type="button"
+                                onClick={() => setLgLcForm((prev) => ({ ...prev, lgAmount: String(amt) }))}
+                                style={{
+                                  background: "#f1f5f9",
+                                  border: "1px solid #cbd5e1",
+                                  borderRadius: 4,
+                                  padding: "2px 5px",
+                                  fontSize: 10,
+                                  cursor: "pointer",
+                                  color: "#334155",
+                                }}
+                              >
+                                +₹{amt}
+                              </button>
+                            ))}
+                            <button
+                              type="button"
+                              onClick={() => setLgLcForm((prev) => ({ ...prev, lgAmount: "0" }))}
+                              style={{
+                                background: "#fee2e2",
+                                border: "1px solid #fca5a5",
+                                borderRadius: 4,
+                                padding: "2px 5px",
+                                fontSize: 10,
+                                cursor: "pointer",
+                                color: "#b91c1c",
+                              }}
+                            >
+                              Clear
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* LC Section */}
+                  {(lgLcActiveTab === "BOTH" || lgLcActiveTab === "LC") && (
+                    <div
+                      style={{
+                        background: "#fff",
+                        border: "1.5px solid #93c5fd",
+                        borderRadius: 10,
+                        padding: "14px 16px",
+                        boxShadow: "0 2px 6px rgba(59, 130, 246, 0.08)",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span
+                            style={{
+                              background: "#1e40af",
+                              color: "#fff",
+                              fontWeight: 800,
+                              fontSize: 11,
+                              padding: "2px 7px",
+                              borderRadius: 4,
+                            }}
+                          >
+                            LC
+                          </span>
+                          <div>
+                            <strong style={{ fontSize: 14, color: "#1e3a8a" }}>Lead Converter (LC)</strong>
+                            <span style={{ fontSize: 11, color: "#1d4ed8", marginLeft: 6 }}>
+                              — Operations Team who processed &amp; disbursed
+                            </span>
+                          </div>
+                        </div>
+                        {lgLcData?.suggestedLc && (
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#1d4ed8", background: "#eff6ff", border: "1px solid #bfdbfe", padding: "3px 8px", borderRadius: 6 }}>
+                            <span>⭐ Detected: <strong>{lgLcData.suggestedLc.name}</strong></span>
+                            <button
+                              type="button"
+                              onClick={() => setLgLcForm((prev) => ({ ...prev, lcUserId: String(lgLcData.suggestedLc.id) }))}
+                              style={{
+                                background: "#1e40af",
+                                color: "#fff",
+                                border: "none",
+                                borderRadius: 4,
+                                padding: "2px 6px",
+                                fontSize: 10,
+                                fontWeight: 700,
+                                cursor: "pointer",
+                              }}
+                            >
+                              Select
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Operations Collaborators who worked on this lead */}
+                      {lgLcData?.collaborators?.length > 0 && (
+                        <div style={{ marginBottom: 12 }}>
+                          <label style={{ fontSize: 11, color: "#475569", fontWeight: 600, display: "block", marginBottom: 6 }}>
+                            Operations &amp; Team Members on this Lead (Click to assign as LC):
+                          </label>
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                            {lgLcData.collaborators.map((u) => {
+                              const isSelected = String(lgLcForm.lcUserId) === String(u.id);
+                              const isOpsOrDisb = u.tags.includes("DISBURSED_BY") || u.tags.includes("SANCTIONED_BY") || u.tags.includes("OPS_TEAM");
+                              return (
+                                <div
+                                  key={`lc_collab_${u.id}`}
+                                  onClick={() => setLgLcForm((prev) => ({ ...prev, lcUserId: String(u.id) }))}
+                                  style={{
+                                    cursor: "pointer",
+                                    padding: "6px 10px",
+                                    borderRadius: 6,
+                                    border: `1.5px solid ${isSelected ? "#1e40af" : isOpsOrDisb ? "#93c5fd" : "#e2e8f0"}`,
+                                    background: isSelected ? "#dbeafe" : isOpsOrDisb ? "#eff6ff" : "#f8fafc",
+                                    fontSize: 11.5,
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 6,
+                                    transition: "all 0.15s",
+                                  }}
+                                >
+                                  {isSelected && <CheckCircle2 size={13} color="#1e40af" />}
+                                  <div>
+                                    <strong style={{ color: isSelected ? "#1e3a8a" : "#0f172a" }}>{u.name}</strong>
+                                    <div style={{ fontSize: 10, color: "#64748b" }}>
+                                      {u.role} {u.tags.includes("DISBURSED_BY") && "• Disbursed File"} {u.tags.includes("SANCTIONED_BY") && "• Sanctioned"}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Dropdown & Amount Grid */}
+                      <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 12, alignItems: "start" }}>
+                        <div>
+                          <label style={{ fontSize: 11, color: "#334155", fontWeight: 700, display: "block", marginBottom: 4 }}>
+                            Select Lead Converter Employee:
+                          </label>
+                          <select
+                            style={{
+                              width: "100%",
+                              padding: "8px 10px",
+                              borderRadius: 6,
+                              border: "1px solid #cbd5e1",
+                              fontSize: 12.5,
+                              background: "#fff",
+                              fontWeight: 600,
+                            }}
+                            value={lgLcForm.lcUserId}
+                            onChange={(e) => setLgLcForm((prev) => ({ ...prev, lcUserId: e.target.value }))}
+                          >
+                            <option value="">— Unassigned / No LC Incentive —</option>
+                            {lgLcData?.collaborators?.length > 0 && (
+                              <optgroup label="⭐ Operations & Team on this Lead">
+                                {lgLcData.collaborators.map((u) => {
+                                  const isSuggested = String(lgLcData?.suggestedLc?.id) === String(u.id);
+                                  return (
+                                    <option key={`collab_lc_${u.id}`} value={u.id}>
+                                      {u.name} ({u.role}){isSuggested ? " ⭐ [DEFAULT: Got Bank Sanction]" : ` — ${u.actions[0] || "Operations"}`}
+                                    </option>
+                                  );
+                                })}
+                              </optgroup>
+                            )}
+                            <optgroup label="All Company Staff">
+                              {(lgLcData?.allUsers || lgLcData?.allStaff || []).map((u) => (
+                                <option key={`all_lc_${u.id}`} value={u.id}>
+                                  {u.name} ({u.role})
+                                </option>
+                              ))}
+                            </optgroup>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label style={{ fontSize: 11, color: "#334155", fontWeight: 700, display: "block", marginBottom: 4 }}>
+                            LC Incentive Amount (₹):
+                          </label>
+                          <div style={{ position: "relative" }}>
+                            <span style={{ position: "absolute", left: 10, top: 8, fontSize: 13, color: "#64748b", fontWeight: 600 }}>₹</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="50"
+                              placeholder="0"
+                              style={{
+                                width: "100%",
+                                padding: "8px 10px 8px 24px",
+                                borderRadius: 6,
+                                border: "1px solid #cbd5e1",
+                                fontSize: 13,
+                                fontWeight: 700,
+                                color: "#1e40af",
+                              }}
+                              value={lgLcForm.lcAmount}
+                              onChange={(e) => setLgLcForm((prev) => ({ ...prev, lcAmount: e.target.value }))}
+                            />
+                          </div>
+                          {/* Quick presets */}
+                          <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
+                            {[500, 1000, 2500, 5000].map((amt) => (
+                              <button
+                                key={`lc_amt_${amt}`}
+                                type="button"
+                                onClick={() => setLgLcForm((prev) => ({ ...prev, lcAmount: String(amt) }))}
+                                style={{
+                                  background: "#f1f5f9",
+                                  border: "1px solid #cbd5e1",
+                                  borderRadius: 4,
+                                  padding: "2px 5px",
+                                  fontSize: 10,
+                                  cursor: "pointer",
+                                  color: "#334155",
+                                }}
+                              >
+                                +₹{amt}
+                              </button>
+                            ))}
+                            <button
+                              type="button"
+                              onClick={() => setLgLcForm((prev) => ({ ...prev, lcAmount: "0" }))}
+                              style={{
+                                background: "#fee2e2",
+                                border: "1px solid #fca5a5",
+                                borderRadius: 4,
+                                padding: "2px 5px",
+                                fontSize: 10,
+                                cursor: "pointer",
+                                color: "#b91c1c",
+                              }}
+                            >
+                              Clear
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Summary Box */}
+                  <div
+                    style={{
+                      background: "#f8fafc",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: 10,
+                      padding: "12px 16px",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      flexWrap: "wrap",
+                      gap: 10,
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontSize: 11, color: "#64748b", textTransform: "uppercase", fontWeight: 700 }}>
+                        Total Staff Incentive for this Lead
+                      </div>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: "#0f172a" }}>
+                        ₹{(parseFloat(lgLcForm.lgAmount || 0) + parseFloat(lgLcForm.lcAmount || 0)).toLocaleString("en-IN")}
+                      </div>
+                    </div>
+
+                    <div style={{ fontSize: 11.5, color: "#475569", lineHeight: 1.4 }}>
+                      <div>LG ({currencyFormatter.format(parseFloat(lgLcForm.lgAmount || 0))}): <strong>{(lgLcData?.allUsers || []).find((u) => String(u.id) === String(lgLcForm.lgUserId))?.name || "Unassigned"}</strong></div>
+                      <div>LC ({currencyFormatter.format(parseFloat(lgLcForm.lcAmount || 0))}): <strong>{(lgLcData?.allUsers || []).find((u) => String(u.id) === String(lgLcForm.lcUserId))?.name || "Unassigned"}</strong></div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Footer Actions */}
+            <div
+              className="cc-modal-actions"
+              style={{
+                padding: "14px 22px",
+                borderTop: "1px solid #e2e8f0",
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: 10,
+                background: "#fff",
+              }}
+            >
+              <button
+                type="button"
+                className="cc-pbtn secondary"
+                onClick={() => setLgLcModalOpen(false)}
+                disabled={savingLgLc}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="cc-pbtn primary"
+                style={{
+                  background: "#166534",
+                  borderColor: "#166534",
+                  color: "#fff",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontWeight: 700,
+                  padding: "8px 18px",
+                }}
+                onClick={handleSaveLgLc}
+                disabled={savingLgLc || lgLcLoading}
+              >
+                {savingLgLc ? (
+                  <>
+                    <RefreshCw size={14} className="cc-spin" /> Saving Incentives...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 size={15} /> Save LG &amp; LC Incentives
+                  </>
+                )}
               </button>
             </div>
           </div>

@@ -352,12 +352,16 @@ exports.getExpenseSummary = async (req, res) => {
         role: emp.role,
         monthlySalary: sal,
         incentiveCount: 0,
+        lgIncentiveCount: 0,
+        lgIncentiveTotal: 0,
+        lcIncentiveCount: 0,
+        lcIncentiveTotal: 0,
         totalIncentive: 0,
         totalPayable: sal,
       };
     }
 
-    // 3. Employee Incentives (from CasePayout manpower / extraCharges in this month)
+    // 3. Employee Incentives (from CasePayout LG, LC, and manpower incentives in this month)
     const casePayouts = await CasePayout.findAll({
       where: {
         ...scope,
@@ -381,6 +385,18 @@ exports.getExpenseSummary = async (req, res) => {
           ],
           required: false,
         },
+        {
+          model: User,
+          as: "lgUser",
+          attributes: ["id", "name", "email", "salary", "role"],
+          required: false,
+        },
+        {
+          model: User,
+          as: "lcUser",
+          attributes: ["id", "name", "email", "salary", "role"],
+          required: false,
+        },
       ],
     });
 
@@ -391,28 +407,98 @@ exports.getExpenseSummary = async (req, res) => {
     const incentiveCases = [];
 
     for (const cp of casePayouts) {
-      const extra = parseFloat(cp.extraCharges) || 0;
+      const extraLegacy = parseFloat(cp.extraCharges) || 0;
+      const lgAmt = parseFloat(cp.lgAmount) || 0;
+      const lcAmt = parseFloat(cp.lcAmount) || 0;
       const partyNet = parseFloat(cp.partyNetPayable) || 0;
       const bankRec = parseFloat(cp.bankReceivedAmount) || 0;
       const loanAmt = parseFloat(cp.loanAmount) || 0;
 
-      totalStaffIncentives += extra;
       totalPartyPayoutsFromCases += partyNet;
       totalBankCommissionReceived += bankRec;
       totalLoanDisbursed += loanAmt;
 
-      const assignedEmp = cp.lead?.assignedEmployee;
-      const empId = assignedEmp?.id || cp.lead?.assignedEmployeeId;
+      let caseHasAssignedIncentive = false;
 
-      if (empId && employeeCostMap[empId]) {
-        employeeCostMap[empId].incentiveCount += 1;
-        employeeCostMap[empId].totalIncentive += extra;
-        employeeCostMap[empId].totalPayable += extra;
-      }
+      // 1. Lead Generator (LG) Incentive: Added straight to employee salary incentive
+      if (cp.lgUserId && lgAmt > 0) {
+        totalStaffIncentives += lgAmt;
+        caseHasAssignedIncentive = true;
 
-      if (extra > 0 || cp.loanAmount > 0) {
+        if (employeeCostMap[cp.lgUserId]) {
+          employeeCostMap[cp.lgUserId].incentiveCount += 1;
+          employeeCostMap[cp.lgUserId].lgIncentiveCount = (employeeCostMap[cp.lgUserId].lgIncentiveCount || 0) + 1;
+          employeeCostMap[cp.lgUserId].lgIncentiveTotal = (employeeCostMap[cp.lgUserId].lgIncentiveTotal || 0) + lgAmt;
+          employeeCostMap[cp.lgUserId].totalIncentive += lgAmt;
+          employeeCostMap[cp.lgUserId].totalPayable += lgAmt;
+        }
+
         incentiveCases.push({
           caseId: cp.id,
+          leadId: cp.leadId,
+          customerName: cp.customerName,
+          loanProduct: cp.loanProduct,
+          bankName: cp.bankName,
+          disbursalDate: cp.disbursalDate,
+          loanAmount: loanAmt,
+          baseAmount: parseFloat(cp.baseAmount) || 0,
+          employeeId: cp.lgUserId,
+          employeeName: cp.lgUser?.name || "Lead Generator",
+          roleType: "LG (Lead Generator)",
+          roleTag: "LG",
+          incentiveAmount: lgAmt,
+          partyName: cp.partyName,
+          partyNetPayable: partyNet,
+        });
+      }
+
+      // 2. Lead Converter (LC) Incentive: Added straight to operations employee salary incentive
+      if (cp.lcUserId && lcAmt > 0) {
+        totalStaffIncentives += lcAmt;
+        caseHasAssignedIncentive = true;
+
+        if (employeeCostMap[cp.lcUserId]) {
+          employeeCostMap[cp.lcUserId].incentiveCount += 1;
+          employeeCostMap[cp.lcUserId].lcIncentiveCount = (employeeCostMap[cp.lcUserId].lcIncentiveCount || 0) + 1;
+          employeeCostMap[cp.lcUserId].lcIncentiveTotal = (employeeCostMap[cp.lcUserId].lcIncentiveTotal || 0) + lcAmt;
+          employeeCostMap[cp.lcUserId].totalIncentive += lcAmt;
+          employeeCostMap[cp.lcUserId].totalPayable += lcAmt;
+        }
+
+        incentiveCases.push({
+          caseId: cp.id,
+          leadId: cp.leadId,
+          customerName: cp.customerName,
+          loanProduct: cp.loanProduct,
+          bankName: cp.bankName,
+          disbursalDate: cp.disbursalDate,
+          loanAmount: loanAmt,
+          baseAmount: parseFloat(cp.baseAmount) || 0,
+          employeeId: cp.lcUserId,
+          employeeName: cp.lcUser?.name || "Lead Converter (Operations)",
+          roleType: "LC (Lead Converter)",
+          roleTag: "LC",
+          incentiveAmount: lcAmt,
+          partyName: cp.partyName,
+          partyNetPayable: partyNet,
+        });
+      }
+
+      // 3. Fallback for legacy extraCharges if no LG/LC was defined
+      if (!caseHasAssignedIncentive && extraLegacy > 0) {
+        totalStaffIncentives += extraLegacy;
+        const assignedEmp = cp.lead?.assignedEmployee;
+        const empId = assignedEmp?.id || cp.lead?.assignedEmployeeId;
+
+        if (empId && employeeCostMap[empId]) {
+          employeeCostMap[empId].incentiveCount += 1;
+          employeeCostMap[empId].totalIncentive += extraLegacy;
+          employeeCostMap[empId].totalPayable += extraLegacy;
+        }
+
+        incentiveCases.push({
+          caseId: cp.id,
+          leadId: cp.leadId,
           customerName: cp.customerName,
           loanProduct: cp.loanProduct,
           bankName: cp.bankName,
@@ -421,7 +507,28 @@ exports.getExpenseSummary = async (req, res) => {
           baseAmount: parseFloat(cp.baseAmount) || 0,
           employeeId: empId || null,
           employeeName: assignedEmp?.name || "Direct / Admin",
-          incentiveAmount: extra,
+          roleType: "Deal Incentive",
+          roleTag: "DEAL",
+          incentiveAmount: extraLegacy,
+          partyName: cp.partyName,
+          partyNetPayable: partyNet,
+        });
+      } else if (!caseHasAssignedIncentive && cp.loanAmount > 0) {
+        // Disbursed case with 0 incentive still shown in deal list
+        incentiveCases.push({
+          caseId: cp.id,
+          leadId: cp.leadId,
+          customerName: cp.customerName,
+          loanProduct: cp.loanProduct,
+          bankName: cp.bankName,
+          disbursalDate: cp.disbursalDate,
+          loanAmount: loanAmt,
+          baseAmount: parseFloat(cp.baseAmount) || 0,
+          employeeId: cp.lead?.assignedEmployeeId || null,
+          employeeName: cp.lead?.assignedEmployee?.name || "Direct / Admin",
+          roleType: "Disbursed Deal",
+          roleTag: "NONE",
+          incentiveAmount: 0,
           partyName: cp.partyName,
           partyNetPayable: partyNet,
         });
