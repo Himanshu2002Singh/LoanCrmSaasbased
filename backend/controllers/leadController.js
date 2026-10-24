@@ -254,6 +254,7 @@ const serializeLead = (lead, statusMap = {}, requestingUser = null, latestRemark
     ? parseFloat(lead.requiredAmount)
     : null;
   const bankName = primaryApp?.lender?.name || null;
+  const bankType = primaryApp?.lender?.lenderType || null;
   const sanctionDate = primaryApp?.sanctionedAmount ? primaryApp.updatedAt : null;
   
   const isEmployee = requestingUser && (requestingUser.role === ROLES.EMPLOYEE || requestingUser.role === "EMPLOYEE");
@@ -284,6 +285,8 @@ const serializeLead = (lead, statusMap = {}, requestingUser = null, latestRemark
     commissionPercent: commPercent,
     commission_amount: commissionAmount,
     bank_name: bankName,
+    lender_type: bankType,
+    lenderType: bankType,
     application_number: primaryApp?.applicationNumber || null,
     applicationNumber: primaryApp?.applicationNumber || null,
     application_id: primaryApp?.id || null,

@@ -51,7 +51,7 @@ import LeadDocumentRequestModal from "../leads/LeadDocumentRequestModal";
 import CcPagination from "../../components/CcPagination";
 import { formatLeadCode, formatCurrencyCompact } from "../../utils/leadUtils";
 
-const PAGE_SIZE = 20;
+const DEFAULT_PAGE_SIZE = 10;
 const numberFormatter = new Intl.NumberFormat("en-IN");
 const currencyFormatter = new Intl.NumberFormat("en-IN", {
   style: "currency",
@@ -725,6 +725,7 @@ export default function OperationsRedesign() {
   const [selectedStageFilter, setSelectedStageFilter] = useState("ALL");
   const [activeStageCard, setActiveStageCard] = useState(null);
   const [appCurrentPage, setAppCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [appTotalPages, setAppTotalPages] = useState(1);
   const [appTotalItems, setAppTotalItems] = useState(0);
 
@@ -1153,7 +1154,7 @@ export default function OperationsRedesign() {
     try {
       const params = {
         page,
-        limit: displayType === "kanban" ? 150 : PAGE_SIZE,
+        limit: displayType === "kanban" ? 150 : pageSize,
         search: debouncedAppSearch || undefined,
         status: selectedStages.length > 0 ? selectedStages.join(",") : (selectedStageFilter !== "ALL" ? selectedStageFilter : undefined),
         employeeIds: selectedEmployees.length > 0 ? selectedEmployees.join(",") : undefined,
@@ -1191,6 +1192,7 @@ export default function OperationsRedesign() {
     selectedAssociations,
     selectedLenderFilter,
     displayType,
+    pageSize,
     filterPeriodType,
     customFromDate,
     customToDate,
@@ -1204,7 +1206,7 @@ export default function OperationsRedesign() {
     try {
       const endpoint = `${API_URL}/leads`;
       const params = {
-        limit: PAGE_SIZE,
+        limit: pageSize,
         page,
         search: debouncedLeadSearch || undefined,
         team: "operations",
@@ -1230,6 +1232,7 @@ export default function OperationsRedesign() {
     }
   }, [
     debouncedLeadSearch,
+    pageSize,
     leadStatusCategory,
     selectedLenderFilter,
     filterPeriodType,
@@ -1574,6 +1577,27 @@ export default function OperationsRedesign() {
           >
             <X size={13} /> Clear Filters
           </button>
+        )}
+
+        {(!isPipeline || displayType === "table") && (
+          <div className="cc-ops-filter-control cc-ops-page-size-control">
+            <label htmlFor="cc-ops-page-size">Show rows</label>
+            <select
+              id="cc-ops-page-size"
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value));
+                setAppCurrentPage(1);
+                setLeadCurrentPage(1);
+              }}
+              className="cc-ops-select"
+              title="Leads or applications per page"
+            >
+              {[10, 20, 50, 100].map((size) => (
+                <option key={size} value={size}>{size} / page</option>
+              ))}
+            </select>
+          </div>
         )}
 
         {/* Refresh Button */}
@@ -3086,102 +3110,81 @@ export default function OperationsRedesign() {
         </div>
       </section>
 
-      {/* Banker Stage KPI Cards (Files at the bank by stage, then sanctioned files waiting to disburse) */}
-      <section style={{ marginBottom: "24px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px", flexWrap: "wrap", gap: "10px" }}>
-          <p style={{ color: "#64748b", fontSize: "14px", margin: 0, fontWeight: 500, letterSpacing: "-0.01em" }}>
-            Files at the bank by stage, then sanctioned files waiting to disburse.
-          </p>
-          {activeStageCard && (
-            <button
-              type="button"
-              onClick={() => setActiveStageCard(null)}
+      {/* Banker Stage KPI Cards - Compact horizontally & vertically */}
+      <section style={{ marginBottom: "8px", display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+        <span style={{ color: "#64748b", fontSize: "10.5px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", marginRight: 2 }}>
+          Stage KPI:
+        </span>
+        {BANK_STAGE_CARDS.map((card) => {
+          const metric = stageKpiMetrics[card.key] || { count: 0, amount: 0 };
+          const isActive = activeStageCard === card.key;
+          return (
+            <div
+              key={card.key}
+              onClick={() => setActiveStageCard((prev) => (prev === card.key ? null : card.key))}
               style={{
+                backgroundColor: "#0b1328",
+                backgroundImage: "linear-gradient(180deg, #0e172e 0%, #080e1d 100%)",
+                borderRadius: "5px",
+                padding: "2px 8px",
+                border: isActive ? "2px solid #38bdf8" : "1px solid rgba(255, 255, 255, 0.12)",
+                boxShadow: isActive ? "0 0 8px rgba(56, 189, 248, 0.3)" : "none",
+                cursor: "pointer",
+                transition: "all 0.15s ease-in-out",
+                userSelect: "none",
                 display: "inline-flex",
                 alignItems: "center",
-                gap: "6px",
-                background: "#f1f5f9",
-                border: "1px solid #cbd5e1",
-                borderRadius: "6px",
-                padding: "4px 10px",
-                fontSize: "12px",
-                fontWeight: 600,
-                color: "#475569",
-                cursor: "pointer",
+                gap: "5px",
+                height: "26px",
               }}
+              className="cc-bank-stage-card"
+              title={`Click to filter by ${card.label}`}
             >
-              <RotateCcw size={12} /> Clear Stage Filter ({BANK_STAGE_CARDS.find((c) => c.key === activeStageCard)?.label})
-            </button>
-          )}
-        </div>
-
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-            gap: "16px",
-          }}
-          className="cc-bank-stage-cards-grid"
-        >
-          {BANK_STAGE_CARDS.map((card) => {
-            const metric = stageKpiMetrics[card.key] || { count: 0, amount: 0 };
-            const isActive = activeStageCard === card.key;
-            return (
-              <div
-                key={card.key}
-                onClick={() => setActiveStageCard((prev) => (prev === card.key ? null : card.key))}
-                style={{
-                  backgroundColor: "#0b1328",
-                  backgroundImage: "linear-gradient(180deg, #0e172e 0%, #080e1d 100%)",
-                  borderRadius: "14px",
-                  padding: "20px 24px",
-                  border: isActive ? "2px solid #38bdf8" : "1px solid rgba(255, 255, 255, 0.08)",
-                  boxShadow: isActive ? "0 0 20px rgba(56, 189, 248, 0.25)" : "0 4px 12px rgba(0, 0, 0, 0.15)",
-                  cursor: "pointer",
-                  transition: "all 0.2s ease-in-out",
-                  userSelect: "none",
-                  position: "relative",
-                }}
-                className="cc-bank-stage-card"
-                title={`Click to filter by ${card.label}`}
-              >
-                <div
-                  style={{
-                    fontSize: "12px",
-                    fontWeight: 700,
-                    letterSpacing: "0.06em",
-                    color: isActive ? "#38bdf8" : "#94a3b8",
-                    textTransform: "uppercase",
-                    marginBottom: "10px",
-                  }}
-                >
-                  {card.label}
-                </div>
-                <div
-                  style={{
-                    fontSize: "32px",
-                    fontWeight: 800,
-                    color: "#ffffff",
-                    lineHeight: 1.1,
-                    marginBottom: "8px",
-                  }}
-                >
-                  {metric.count}
-                </div>
-                <div
-                  style={{
-                    fontSize: "15px",
-                    fontWeight: 500,
-                    color: "#cbd5e1",
-                    letterSpacing: "-0.01em",
-                  }}
-                >
+              <div style={{ display: "flex", alignItems: "center", gap: "4px", lineHeight: 1 }}>
+                <span style={{ fontSize: "9.5px", fontWeight: 700, color: isActive ? "#38bdf8" : "#94a3b8", textTransform: "uppercase" }}>
+                  {card.label}:
+                </span>
+                <span style={{ fontSize: "9.5px", fontWeight: 600, color: "#cbd5e1" }}>
                   {formatCurrencyCompact(metric.amount)}
-                </div>
+                </span>
               </div>
-            );
-          })}
-        </div>
+              <span
+                style={{
+                  fontSize: "12px",
+                  fontWeight: 800,
+                  color: "#ffffff",
+                  paddingLeft: "5px",
+                  borderLeft: "1px solid rgba(255, 255, 255, 0.18)",
+                  lineHeight: 1,
+                }}
+              >
+                {metric.count}
+              </span>
+            </div>
+          );
+        })}
+        {activeStageCard && (
+          <button
+            type="button"
+            onClick={() => setActiveStageCard(null)}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "3px",
+              background: "#f1f5f9",
+              border: "1px solid #cbd5e1",
+              borderRadius: "5px",
+              padding: "2px 7px",
+              fontSize: "10.5px",
+              fontWeight: 600,
+              color: "#475569",
+              cursor: "pointer",
+              height: "26px",
+            }}
+          >
+            <RotateCcw size={10} /> Clear
+          </button>
+        )}
       </section>
 
       {/* VIEW MODE: PIPELINE (KANBAN / TABLE) */}
@@ -3270,7 +3273,7 @@ export default function OperationsRedesign() {
                                     e.stopPropagation();
                                     openEditBankModal(app);
                                   }}
-                                  title="Click to change or edit assigned Bank"
+                                  title={`Click to change or edit assigned ${app.lender?.lenderType || "Bank"}`}
                                   style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}
                                 >
                                   <Building2 size={12} /> {app.lender?.shortCode || app.lender?.name || "Direct Bank"}
@@ -3305,7 +3308,7 @@ export default function OperationsRedesign() {
           ) : (
             /* TABLE LIST VIEW */
             <section className="cc-report-panel">
-              <div className="cc-report-table-scroll cc-ops-table-container">
+              <div className="cc-report-table-scroll cc-ops-table-container cc-ops-pipeline-table-container">
                 <table>
                   <thead>
                     <tr>
@@ -3348,33 +3351,22 @@ export default function OperationsRedesign() {
                         >
                           {/* 1. App & Borrower */}
                           <td>
-                            <strong>{app.applicationNumber}</strong>
-                            <small style={{ display: "block", color: "#94a3b8", fontSize: 11 }}>
-                              {new Date(app.createdAt).toLocaleDateString("en-IN")}
-                            </small>
-                            <div style={{ marginTop: 2 }}>
-                              <strong style={{ fontSize: 13, color: "#0f172a" }}>{app.customer?.name || "Customer"}</strong>
-                              <small style={{ display: "block", color: "#64748b", fontSize: 11.5 }}>
-                                {app.customer?.mobile || "—"}
-                              </small>
-                            </div>
-                            <div style={{ marginTop: 2, fontSize: 12 }}>
-                              <span style={{ color: "#475569" }}>{app.loanProduct}</span> • <strong>{currencyFormatter.format(app.appliedAmount || 0)}</strong>
-                              {app.sanctionedAmount ? (
-                                <small style={{ display: "block", color: "#0284c7", fontSize: 11 }}>
-                                  Sanct: {currencyFormatter.format(app.sanctionedAmount)}
-                                </small>
-                              ) : null}
-                            </div>
-                            <div style={{ marginTop: 4, display: "flex", flexWrap: "wrap", gap: 4 }}>
-                              {app.lead?.leadSource && (
-                                <span className="cc-ops-source-tag" title={`Lead Source / Association: ${app.lead.leadSource}`}>
-                                  <Users size={10} /> {app.lead.leadSource}
-                                </span>
+                            <div style={{ display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>
+                              <strong style={{ fontSize: 11.5, color: "#0f172a" }}>{app.customer?.name || "Customer"}</strong>
+                              {app.customer?.mobile && (
+                                <span style={{ fontSize: 10.5, color: "#64748b" }}>({app.customer.mobile})</span>
                               )}
-                              {app.lender?.lenderType === "DSA" && (
-                                <span className="cc-ops-dsa-tag" title={`DSA Partner: ${app.lender.name}`}>
-                                  DSA: {app.lender.shortCode || app.lender.name}
+                              <span style={{ fontSize: 9.5, color: "#94a3b8" }}>#{app.applicationNumber}</span>
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 3, marginTop: 1, fontSize: 10.5, whiteSpace: "nowrap" }}>
+                              <span style={{ color: "#475569" }}>{app.loanProduct}</span>:
+                              <strong style={{ color: "#0f172a" }}>{currencyFormatter.format(app.appliedAmount || 0)}</strong>
+                              {app.sanctionedAmount ? (
+                                <span style={{ color: "#0284c7", fontWeight: 600 }}>• Sanct: {currencyFormatter.format(app.sanctionedAmount)}</span>
+                              ) : null}
+                              {app.lead?.leadSource && (
+                                <span style={{ fontSize: 9, color: "#475569", background: "#f1f5f9", padding: "0 3px", borderRadius: 2 }}>
+                                  {app.lead.leadSource}
                                 </span>
                               )}
                             </div>
@@ -3382,62 +3374,11 @@ export default function OperationsRedesign() {
 
                           {/* 2. Bank & Team */}
                           <td>
-                            {app.lender ? (
-                              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-                                <div style={{
-                                  width: 26, height: 26, borderRadius: 6, background: "#eef2ff",
-                                  color: "#4f46e5", display: "grid", placeItems: "center", flexShrink: 0,
-                                  border: "1px solid #c7d2fe"
-                                }}>
-                                  <Building2 size={13} />
-                                </div>
-                                <div>
-                                  <strong style={{ fontSize: 12.5, color: "#0f172a", display: "block", lineHeight: 1.2 }}>
-                                    {app.lender.name}
-                                  </strong>
-                                  <span style={{ fontSize: 10.5, color: "#64748b" }}>
-                                    {app.lender.shortCode || app.lender.lenderType || "Bank"}
-                                  </span>
-                                </div>
-                              </div>
-                            ) : (
-                              <span style={{ color: "#94a3b8", fontSize: 11.5, fontStyle: "italic", display: "block" }}>
-                                Bank: Unassigned
-                              </span>
-                            )}
-                            {app.assignedBanker?.name ? (
-                              <span className="cc-ops-badge banker" style={{ marginBottom: 3, display: "inline-flex" }}>
-                                <UserCheck size={11} /> {app.assignedBanker.name}
-                              </span>
-                            ) : null}
-                            {app.lead?.assignedEmployee?.name ? (
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  openReassignModal(app);
-                                }}
-                                className="cc-ops-badge employee"
-                                title={`Assigned Staff: ${app.lead.assignedEmployee.name}. Click to reassign.`}
-                                style={{ display: "inline-flex", cursor: "pointer", border: "1px dashed #bbf7d0", background: "#f0fdf4", color: "#166534" }}
-                              >
-                                <UserCheck size={11} /> {app.lead.assignedEmployee.name} ✏️
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  openReassignModal(app);
-                                }}
-                                className="cc-ops-badge employee"
-                                title="Click to assign staff member"
-                                style={{ display: "inline-flex", cursor: "pointer", border: "1px dashed #cbd5e1", background: "#f8fafc", color: "#64748b" }}
-                              >
-                                <User size={11} /> Unassigned ✏️
-                              </button>
-                            )}
-                            <div style={{ marginTop: 4, display: "flex", gap: 5, flexWrap: "wrap" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>
+                              <Building2 size={11} color="#4f46e5" />
+                              <strong style={{ fontSize: 11.5, color: "#0f172a" }}>
+                                {app.lender?.name || `Unassigned ${app.lender?.lenderType || "Bank"}`}
+                              </strong>
                               <button
                                 type="button"
                                 className="cc-ops-edit-bank-btn"
@@ -3445,22 +3386,39 @@ export default function OperationsRedesign() {
                                   e.stopPropagation();
                                   openEditBankModal(app);
                                 }}
-                                title="Click to change or update assigned Bank & Banker"
+                                style={{ padding: "0 4px", fontSize: 9, height: 16, lineHeight: "14px" }}
+                                title={`Edit ${app.lender?.lenderType || "Bank"}`}
                               >
-                                <Pencil size={11} /> Edit Bank
+                                <Pencil size={8} />
                               </button>
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 3, marginTop: 1, fontSize: 10.5, whiteSpace: "nowrap" }}>
+                              <span style={{ color: "#64748b" }}>Staff:</span>
                               <button
                                 type="button"
-                                className="cc-ops-edit-bank-btn"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   openReassignModal(app);
                                 }}
-                                title="Reassign staff member handling this file"
-                                style={{ background: "#f0fdf4", color: "#166534", borderColor: "#bbf7d0" }}
+                                title="Click to reassign staff"
+                                style={{
+                                  background: "none",
+                                  border: "none",
+                                  padding: 0,
+                                  color: app.lead?.assignedEmployee?.name ? "#166534" : "#94a3b8",
+                                  fontWeight: 600,
+                                  fontSize: 10.5,
+                                  cursor: "pointer",
+                                  textDecoration: "underline dotted",
+                                }}
                               >
-                                <UserCheck size={11} /> Reassign
+                                {app.lead?.assignedEmployee?.name || "Unassigned"} ✏️
                               </button>
+                              {app.assignedBanker?.name ? (
+                                <span style={{ color: "#047857", fontSize: 10, marginLeft: 2 }}>
+                                  • {app.assignedBanker.name.split(" ")[0]}
+                                </span>
+                              ) : null}
                             </div>
                           </td>
 
@@ -3554,110 +3512,52 @@ export default function OperationsRedesign() {
                               e.stopPropagation();
                               openSanctionModal(app);
                             }}
-                            style={{ cursor: "pointer" }}
+                            className="cc-ops-clickable-status-td"
                             title="Click to view or update Bank Sanction status & amount"
                           >
                             <div className="cc-ops-status-cell-inner">
-                              {(app.sanctionStatus || "").toUpperCase() === "SANCTIONED" || app.status === "SANCTIONED" ? (
-                                <span className="cc-substatus-pill resolved" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                                  <CheckCircle2 size={11} /> <strong>Sanctioned ✓</strong>
-                                </span>
-                              ) : (app.sanctionStatus || "").toUpperCase() === "REJECTED" ? (
-                                <span className="cc-substatus-pill rejected" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                                  <XCircle size={11} /> <strong>Rejected ❌</strong>
-                                </span>
-                              ) : (
-                                <span className="cc-substatus-pill pending" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                                  <Clock size={11} /> <strong>Pending ⏳</strong>
-                                </span>
-                              )}
-
-                              {app.sanctionAmount || app.sanctionedAmount ? (
-                                <div style={{ fontSize: 11, fontWeight: 700, color: "#15803d", marginTop: 3 }}>
-                                  {currencyFormatter.format(app.sanctionAmount || app.sanctionedAmount)}
+                              <div style={{ display: "flex", alignItems: "center", gap: 3, whiteSpace: "nowrap" }}>
+                                {(app.sanctionStatus || "").toUpperCase() === "SANCTIONED" || app.status === "SANCTIONED" ? (
+                                  <span className="cc-substatus-pill resolved">
+                                    <CheckCircle2 size={10} /> <strong>Sanctioned ✓</strong>
+                                  </span>
+                                ) : (app.sanctionStatus || "").toUpperCase() === "REJECTED" ? (
+                                  <span className="cc-substatus-pill rejected">
+                                    <XCircle size={10} /> <strong>Rejected ❌</strong>
+                                  </span>
+                                ) : (
+                                  <span className="cc-substatus-pill pending">
+                                    <Clock size={10} /> <strong>Pending ⏳</strong>
+                                  </span>
+                                )}
+                                {(app.sanctionAmount || app.sanctionedAmount) ? (
+                                  <strong style={{ fontSize: 10.5, color: "#15803d" }}>
+                                    {currencyFormatter.format(app.sanctionAmount || app.sanctionedAmount)}
+                                  </strong>
+                                ) : null}
+                              </div>
+                              {app.sanctionRemark ? (
+                                <div
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setRemarkViewModal({
+                                      title: "Sanction Remark",
+                                      stage: "Sanctioned",
+                                      remark: app.sanctionRemark,
+                                      updatedAt: app.sanctionUpdatedAt,
+                                      app,
+                                    });
+                                  }}
+                                  title={`Sanction Remark: "${app.sanctionRemark}" (Click to view)`}
+                                  style={{ fontSize: 9.5, color: "#475569", cursor: "pointer", maxWidth: 105, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginTop: 1 }}
+                                >
+                                  💬 {app.sanctionRemark}
+                                </div>
+                              ) : app.sanctionUpdatedAt ? (
+                                <div className="cc-status-cell-time" style={{ fontSize: 9.5, color: "#94a3b8", marginTop: 1, lineHeight: 1 }}>
+                                  {new Date(app.sanctionUpdatedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
                                 </div>
                               ) : null}
-
-                              {app.sanctionUpdatedAt && (
-                                <div className="cc-status-cell-time" style={{ marginTop: 2 }}>
-                                  <Clock size={10} />
-                                  <span>{new Date(app.sanctionUpdatedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</span>
-                                </div>
-                              )}
-
-                              {app.sanctionRemark && (
-                                <div
-                                  style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: 4,
-                                    marginTop: 3,
-                                    background: "#f8fafc",
-                                    border: "1px solid #e2e8f0",
-                                    borderRadius: 6,
-                                    padding: "2px 5px",
-                                    maxWidth: "100%",
-                                  }}
-                                >
-                                  <div
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setRemarkViewModal({
-                                        title: "Sanction Remark",
-                                        stage: "Sanctioned",
-                                        remark: app.sanctionRemark,
-                                        updatedAt: app.sanctionUpdatedAt,
-                                        app,
-                                      });
-                                    }}
-                                    title="Click to view full remark popup"
-                                    style={{
-                                      flex: 1,
-                                      fontSize: 11,
-                                      color: "#1e293b",
-                                      cursor: "pointer",
-                                      whiteSpace: "nowrap",
-                                      overflow: "hidden",
-                                      textOverflow: "ellipsis",
-                                    }}
-                                  >
-                                    "{app.sanctionRemark.length > 18 ? app.sanctionRemark.slice(0, 18) + "…" : app.sanctionRemark}"
-                                    <span style={{ color: "#2563eb", fontWeight: 700, marginLeft: 4, fontSize: 10 }}>View</span>
-                                  </div>
-                                  {(app.customer?.mobile || app.customerMobile) && (
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        shareOnWhatsApp({
-                                          mobile: app.customer?.mobile || app.customerMobile,
-                                          customerName: app.customer?.name,
-                                          appNumber: app.applicationNumber,
-                                          lenderName: app.lender?.name,
-                                          stageTitle: "Sanction Approved",
-                                          remark: app.sanctionRemark,
-                                        });
-                                      }}
-                                      title="Share Sanction Update to Customer on WhatsApp"
-                                      style={{
-                                        background: "#dcfce7",
-                                        border: "1px solid #86efac",
-                                        borderRadius: "50%",
-                                        width: 20,
-                                        height: 20,
-                                        display: "inline-flex",
-                                        alignItems: "center",
-                                        justifyContent: "center",
-                                        cursor: "pointer",
-                                        padding: 0,
-                                        flexShrink: 0,
-                                      }}
-                                    >
-                                      <WhatsAppIcon size={12} />
-                                    </button>
-                                  )}
-                                </div>
-                              )}
                             </div>
                           </td>
 
@@ -3667,110 +3567,52 @@ export default function OperationsRedesign() {
                               e.stopPropagation();
                               openDisbursementStageModal(app);
                             }}
-                            style={{ cursor: "pointer" }}
+                            className="cc-ops-clickable-status-td"
                             title="Click to view or update Loan Disbursement status & amount"
                           >
                             <div className="cc-ops-status-cell-inner">
-                              {(app.disbursementStatus || "").toUpperCase() === "DISBURSED" || (app.disbursementStatus || "").toUpperCase() === "COMPLETED" || app.status === "DISBURSEMENT" ? (
-                                <span className="cc-substatus-pill resolved" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                                  <CheckCircle2 size={11} /> <strong>Disbursed ✓</strong>
-                                </span>
-                              ) : (app.disbursementStatus || "").toUpperCase() === "INITIATED" ? (
-                                <span className="cc-substatus-pill initiated" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                                  <Clock size={11} /> <strong>Initiated ⚡</strong>
-                                </span>
-                              ) : (
-                                <span className="cc-substatus-pill pending" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                                  <Clock size={11} /> <strong>Pending ⏳</strong>
-                                </span>
-                              )}
-
-                              {app.disbursedAmount ? (
-                                <div style={{ fontSize: 11, fontWeight: 700, color: "#047857", marginTop: 3 }}>
-                                  {currencyFormatter.format(app.disbursedAmount)}
+                              <div style={{ display: "flex", alignItems: "center", gap: 3, whiteSpace: "nowrap" }}>
+                                {(app.disbursementStatus || "").toUpperCase() === "DISBURSED" || (app.disbursementStatus || "").toUpperCase() === "COMPLETED" || app.status === "DISBURSEMENT" ? (
+                                  <span className="cc-substatus-pill resolved">
+                                    <CheckCircle2 size={10} /> <strong>Disbursed ✓</strong>
+                                  </span>
+                                ) : (app.disbursementStatus || "").toUpperCase() === "INITIATED" ? (
+                                  <span className="cc-substatus-pill initiated">
+                                    <Clock size={10} /> <strong>Initiated ⚡</strong>
+                                  </span>
+                                ) : (
+                                  <span className="cc-substatus-pill pending">
+                                    <Clock size={10} /> <strong>Pending ⏳</strong>
+                                  </span>
+                                )}
+                                {app.disbursedAmount ? (
+                                  <strong style={{ fontSize: 10.5, color: "#047857" }}>
+                                    {currencyFormatter.format(app.disbursedAmount)}
+                                  </strong>
+                                ) : null}
+                              </div>
+                              {app.disbursedRemark ? (
+                                <div
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setRemarkViewModal({
+                                      title: "Disbursement Remark",
+                                      stage: "Disbursement",
+                                      remark: app.disbursedRemark,
+                                      updatedAt: app.disbursedAt,
+                                      app,
+                                    });
+                                  }}
+                                  title={`Disbursement Remark: "${app.disbursedRemark}" (Click to view)`}
+                                  style={{ fontSize: 9.5, color: "#475569", cursor: "pointer", maxWidth: 105, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginTop: 1 }}
+                                >
+                                  💬 {app.disbursedRemark}
+                                </div>
+                              ) : app.disbursedAt ? (
+                                <div className="cc-status-cell-time" style={{ fontSize: 9.5, color: "#94a3b8", marginTop: 1, lineHeight: 1 }}>
+                                  {new Date(app.disbursedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
                                 </div>
                               ) : null}
-
-                              {app.disbursedAt && (
-                                <div className="cc-status-cell-time" style={{ marginTop: 2 }}>
-                                  <Clock size={10} />
-                                  <span>{new Date(app.disbursedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</span>
-                                </div>
-                              )}
-
-                              {app.disbursedRemark && (
-                                <div
-                                  style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: 4,
-                                    marginTop: 3,
-                                    background: "#f8fafc",
-                                    border: "1px solid #e2e8f0",
-                                    borderRadius: 6,
-                                    padding: "2px 5px",
-                                    maxWidth: "100%",
-                                  }}
-                                >
-                                  <div
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setRemarkViewModal({
-                                        title: "Disbursement Remark",
-                                        stage: "Disbursement",
-                                        remark: app.disbursedRemark,
-                                        updatedAt: app.disbursedAt,
-                                        app,
-                                      });
-                                    }}
-                                    title="Click to view full remark popup"
-                                    style={{
-                                      flex: 1,
-                                      fontSize: 11,
-                                      color: "#1e293b",
-                                      cursor: "pointer",
-                                      whiteSpace: "nowrap",
-                                      overflow: "hidden",
-                                      textOverflow: "ellipsis",
-                                    }}
-                                  >
-                                    "{app.disbursedRemark.length > 18 ? app.disbursedRemark.slice(0, 18) + "…" : app.disbursedRemark}"
-                                    <span style={{ color: "#2563eb", fontWeight: 700, marginLeft: 4, fontSize: 10 }}>View</span>
-                                  </div>
-                                  {(app.customer?.mobile || app.customerMobile) && (
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        shareOnWhatsApp({
-                                          mobile: app.customer?.mobile || app.customerMobile,
-                                          customerName: app.customer?.name,
-                                          appNumber: app.applicationNumber,
-                                          lenderName: app.lender?.name,
-                                          stageTitle: "Disbursement Update",
-                                          remark: app.disbursedRemark,
-                                        });
-                                      }}
-                                      title="Share Disbursement Update to Customer on WhatsApp"
-                                      style={{
-                                        background: "#dcfce7",
-                                        border: "1px solid #86efac",
-                                        borderRadius: "50%",
-                                        width: 20,
-                                        height: 20,
-                                        display: "inline-flex",
-                                        alignItems: "center",
-                                        justifyContent: "center",
-                                        cursor: "pointer",
-                                        padding: 0,
-                                        flexShrink: 0,
-                                      }}
-                                    >
-                                      <WhatsAppIcon size={12} />
-                                    </button>
-                                  )}
-                                </div>
-                              )}
                             </div>
                           </td>
 
@@ -3796,29 +3638,10 @@ export default function OperationsRedesign() {
                                   className="cc-substatus-pill rejected"
                                   title={app.disbursedRemark || app.rejectionReason || "Disbursement cancelled"}
                                   onClick={() => initiateDisburseModal(app)}
-                                  style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}
+                                  style={{ cursor: "pointer" }}
                                 >
-                                  <XCircle size={11} /> <strong>Cancelled ❌</strong>
+                                  <XCircle size={10} /> <strong>Cancelled ❌</strong>
                                 </span>
-                                {app.disbursedRemark && (
-                                  <div
-                                    className="cc-status-cell-remark"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setRemarkViewModal({
-                                        title: "Cancellation Reason",
-                                        stage: "Cancelled",
-                                        remark: app.disbursedRemark,
-                                        updatedAt: app.updatedAt,
-                                        app,
-                                      });
-                                    }}
-                                    style={{ cursor: "pointer", fontSize: 11, color: "#991b1b", marginTop: 2 }}
-                                    title="Click to view full cancellation remark"
-                                  >
-                                    "{app.disbursedRemark.length > 18 ? app.disbursedRemark.slice(0, 18) + "…" : app.disbursedRemark}" <span style={{ color: "#2563eb", fontWeight: 700 }}>View</span>
-                                  </div>
-                                )}
                               </div>
                             ) : (
                               <button
@@ -3828,10 +3651,10 @@ export default function OperationsRedesign() {
                                   setDisburseModalApp(app);
                                   setDisburseStatusInput("CANCEL");
                                 }}
-                                style={{ color: "#ef4444", borderColor: "#fca5a5", background: "#fef2f2", fontSize: 11, padding: "3px 8px" }}
+                                style={{ color: "#ef4444", borderColor: "#fca5a5", background: "#fef2f2", fontSize: 10, padding: "2px 5px", height: 20 }}
                                 title="Click to cancel loan disbursement"
                               >
-                                <XCircle size={11} /> Cancel
+                                <XCircle size={10} /> Cancel
                               </button>
                             )}
                           </td>
@@ -3840,37 +3663,26 @@ export default function OperationsRedesign() {
                           <td onClick={(e) => e.stopPropagation()}>
                             {app.status === "DISBURSED" ? (
                               <div className="cc-ops-status-cell-inner">
-                                <span className="cc-disbursed-done-tag" title="Loan application is fully Disbursed">
-                                  <CheckCircle2 size={12} /> Disbursed
-                                </span>
-                                {app.disbursedAmount ? (
-                                  <div style={{ fontSize: 11, fontWeight: 700, color: "#047857", marginTop: 2 }}>
-                                    {currencyFormatter.format(app.disbursedAmount)}
-                                  </div>
-                                ) : null}
-                                {app.disbursedAt && (
-                                  <div className="cc-status-cell-time">
-                                    <Clock size={10} />
-                                    <span>
-                                      {new Date(app.disbursedAt).toLocaleDateString("en-IN", {
-                                        day: "2-digit",
-                                        month: "short",
-                                        hour: "2-digit",
-                                        minute: "2-digit",
-                                        hour12: true,
-                                      })}
-                                    </span>
-                                  </div>
-                                )}
+                                <div style={{ display: "flex", alignItems: "center", gap: 3, whiteSpace: "nowrap" }}>
+                                  <span className="cc-disbursed-done-tag" style={{ padding: "1px 5px", fontSize: 10 }} title="Loan application is fully Disbursed">
+                                    <CheckCircle2 size={10} /> Disbursed
+                                  </span>
+                                  {app.disbursedAmount ? (
+                                    <strong style={{ fontSize: 10.5, color: "#047857" }}>
+                                      {currencyFormatter.format(app.disbursedAmount)}
+                                    </strong>
+                                  ) : null}
+                                </div>
                               </div>
                             ) : (
                               <button
                                 type="button"
                                 className="cc-ops-action-btn cc-btn-disburse"
+                                style={{ padding: "2px 5px", fontSize: 10, height: 20 }}
                                 title="Confirm & Mark Loan as Disbursed"
                                 onClick={() => initiateDisburseModal(app)}
                               >
-                                <CheckCircle2 size={12} /> Disburse
+                                <CheckCircle2 size={10} /> Disburse
                               </button>
                             )}
                           </td>
@@ -3889,16 +3701,17 @@ export default function OperationsRedesign() {
                             onWhatsApp: shareOnWhatsApp,
                           })}
 
-                          {/* 15. Actions */}
-                          <td onClick={(e) => e.stopPropagation()}>
-                            <div style={{ display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap" }}>
+                          {/* 15. Actions - Strictly Horizontal Row */}
+                          <td onClick={(e) => e.stopPropagation()} style={{ whiteSpace: "nowrap" }}>
+                            <div style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 3, flexWrap: "nowrap", whiteSpace: "nowrap" }}>
                               <button
                                 type="button"
                                 className="cc-ops-action-btn cc-btn-history"
                                 title="View Status History & Audit Trail"
                                 onClick={() => openHistoryModal(app)}
+                                style={{ padding: "2px 5px", fontSize: "10px", height: 20, whiteSpace: "nowrap" }}
                               >
-                                <Clock size={12} /> History
+                                <Clock size={10} /> History
                               </button>
 
                               <button
@@ -3906,26 +3719,28 @@ export default function OperationsRedesign() {
                                 className="cc-ops-action-btn mail-dispatch"
                                 title="Send Loan Application & KYC to Bank via Email"
                                 onClick={() => openBankMailModal(app)}
+                                style={{ padding: "2px 5px", fontSize: "10px", height: 20, whiteSpace: "nowrap" }}
                               >
-                                <Mail size={12} /> Email
+                                <Mail size={10} /> Email
                               </button>
 
                               <button
                                 type="button"
                                 className="cc-ops-action-btn"
-                                style={{ color: "#047857", borderColor: "#a7f3d0", background: "#ecfdf5", fontWeight: 700 }}
+                                style={{ color: "#047857", borderColor: "#a7f3d0", background: "#ecfdf5", fontWeight: 700, padding: "2px 5px", fontSize: "10px", height: 20, whiteSpace: "nowrap" }}
                                 title="All Process Completed (Mark Completed, Disburse & Sync Payout)"
                                 onClick={() => openAllProcessCompletedModal(app)}
                               >
-                                <CheckCircle2 size={12} /> All Done
+                                <CheckCircle2 size={10} /> All Done
                               </button>
 
                               <button
                                 type="button"
                                 className="cc-ops-action-btn"
                                 onClick={() => openVerificationDrawer(app)}
+                                style={{ padding: "2px 5px", fontSize: "10px", height: 20, whiteSpace: "nowrap" }}
                               >
-                                KYC <ChevronRight size={13} />
+                                KYC <ChevronRight size={10} />
                               </button>
                             </div>
                           </td>
@@ -3940,6 +3755,7 @@ export default function OperationsRedesign() {
                 currentPage={appCurrentPage}
                 totalPages={appTotalPages}
                 totalItems={appTotalItems}
+                pageSize={pageSize}
                 onPageChange={setAppCurrentPage}
                 itemLabel="applications"
               />
@@ -3960,7 +3776,7 @@ export default function OperationsRedesign() {
               </p>
             </div>
 
-            <div className="cc-report-table-scroll cc-ops-table-container">
+            <div className="cc-report-table-scroll cc-ops-table-container cc-ops-leads-table-container">
               <table>
                 <thead>
                   <tr>
@@ -4043,7 +3859,7 @@ export default function OperationsRedesign() {
                                       id: lead.application_id,
                                       applicationNumber: lead.application_number || `Lead #${formatLeadCode(lead)}`,
                                       customer: { name: lead.name, mobile: lead.number },
-                                      lender: { name: lead.bank_name },
+                                      lender: { name: lead.bank_name, lenderType: lead.lender_type || lead.lenderType },
                                       leadId: lead.lead_id,
                                       loanProduct: lead.loan_type,
                                     });
@@ -4052,7 +3868,7 @@ export default function OperationsRedesign() {
                                   style={{ alignSelf: "flex-start", padding: "1px 6px", fontSize: 10.5 }}
                                   title="Edit assigned Bank"
                                 >
-                                  <Pencil size={10} /> Edit Bank
+                                  <Pencil size={10} /> Edit {lead.lender_type || lead.lenderType || "Bank"}
                                 </button>
                               )}
                             </div>
@@ -4074,7 +3890,7 @@ export default function OperationsRedesign() {
                               style={{ alignSelf: "flex-start", padding: "1px 6px", fontSize: 10.5 }}
                               title="Assign Bank"
                             >
-                              <Building2 size={10} /> Assign Bank
+                              <Building2 size={10} /> Assign Lender
                             </button>
                           ) : (
                             <span style={{ color: "#94a3b8", fontSize: 12, fontStyle: "italic" }}>
@@ -4087,11 +3903,9 @@ export default function OperationsRedesign() {
                         </td>
                         <td>
                           {lead.latest_remark ? (
-                            <div style={{ padding: "4px 8px", background: "#f8fafc", borderRadius: 8, border: "1px solid #e2e8f0", maxWidth: 240 }}>
-                              <div style={{ fontSize: 12, color: "#1e293b", fontWeight: 500, lineHeight: 1.3, wordBreak: "break-word" }}>
-                                "{lead.latest_remark}"
-                              </div>
-                              <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 3, fontSize: 10, color: "#64748b" }}>
+                            <div className="cc-ops-lead-remark" title={lead.latest_remark}>
+                              <div>"{lead.latest_remark}"</div>
+                              <div className="cc-ops-lead-remark-meta">
                                 <Clock size={10} color="#64748b" />
                                 <span>{lead.latest_remark_date ? new Date(lead.latest_remark_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }) : "--"}</span>
                                 {lead.latest_remark_by && <strong style={{ color: "#047857" }}>by {lead.latest_remark_by}</strong>}
@@ -4101,32 +3915,34 @@ export default function OperationsRedesign() {
                             <span style={{ fontSize: 11.5, color: "#94a3b8", fontStyle: "italic" }}>No remark</span>
                           )}
                         </td>
-                        <td onClick={(e) => e.stopPropagation()}>
-                          <div style={{ display: "flex", gap: 6 }}>
+                        <td onClick={(e) => e.stopPropagation()} style={{ whiteSpace: "nowrap" }}>
+                          <div style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 3, flexWrap: "nowrap", whiteSpace: "nowrap" }}>
                             <button
                               type="button"
                               className="cc-ops-convert-btn"
                               onClick={() => openConvertModal(lead)}
                               title="Convert to Loan Application"
+                              style={{ padding: "2px 6px", fontSize: "10px", height: 20, whiteSpace: "nowrap" }}
                             >
-                              <Send size={12} /> Convert
+                              <Send size={10} /> Convert
                             </button>
                             <button
                               type="button"
                               className="cc-ops-action-btn"
                               onClick={() => openReassignModal(lead)}
                               title="Reassign this lead to another staff member"
-                              style={{ color: "#4f46e5", borderColor: "#c7d2fe", background: "#eef2ff", display: "inline-flex", alignItems: "center", gap: 3 }}
+                              style={{ color: "#4f46e5", borderColor: "#c7d2fe", background: "#eef2ff", padding: "2px 5px", fontSize: "10px", height: 20, whiteSpace: "nowrap" }}
                             >
-                              <UserCheck size={12} /> Reassign
+                              <UserCheck size={10} /> Reassign
                             </button>
                             <button
                               type="button"
                               className="cc-ops-action-btn"
                               onClick={() => navigate(`/lead-details/${lead.lead_id}`)}
                               title="View Lead Details"
+                              style={{ padding: "2px 5px", fontSize: "10px", height: 20, whiteSpace: "nowrap" }}
                             >
-                              <Eye size={13} />
+                              <Eye size={10} />
                             </button>
                           </div>
                         </td>
@@ -4141,6 +3957,7 @@ export default function OperationsRedesign() {
               currentPage={leadCurrentPage}
               totalPages={leadTotalPages}
               totalItems={leadTotalItems}
+              pageSize={pageSize}
               onPageChange={setLeadCurrentPage}
               itemLabel="leads"
             />
@@ -4184,10 +4001,10 @@ export default function OperationsRedesign() {
                   type="button"
                   className="cc-drawer-mail-btn"
                   onClick={() => openEditBankModal(verificationApp)}
-                  title="Change or update assigned Bank Institution & RM"
+                  title={`Change or update assigned ${verificationApp.lender?.lenderType || "Bank"} Institution & RM`}
                   style={{ background: "#eef2ff", borderColor: "#c7d2fe", color: "#4338ca" }}
                 >
-                  <Building2 size={13} /> {verificationApp.lender?.shortCode || verificationApp.lender?.name || "Assign Bank"} ✏️
+                  <Building2 size={13} /> {verificationApp.lender?.shortCode || verificationApp.lender?.name || `Assign ${verificationApp.lender?.lenderType || "Bank"}`} ✏️
                 </button>
                 <button
                   type="button"
@@ -4248,7 +4065,7 @@ export default function OperationsRedesign() {
                       </div>
                       <div>
                         <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>
-                          Bank: {verificationApp.lender?.name || "Unassigned"}
+                          {verificationApp.lender?.lenderType || "Bank"}: {verificationApp.lender?.name || "Unassigned"}
                           {verificationApp.lender?.shortCode ? ` (${verificationApp.lender.shortCode})` : ""}
                         </div>
                         <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 2 }}>
@@ -5330,7 +5147,7 @@ export default function OperationsRedesign() {
                   {editBankModalApp.customer?.mobile ? ` (${editBankModalApp.customer.mobile})` : ""}
                 </div>
                 <div style={{ fontSize: 12, color: "#2563eb", marginTop: 2 }}>
-                  Current Bank: <strong>{editBankModalApp.lender?.name || "Unassigned"}</strong>
+                  Current {editBankModalApp.lender?.lenderType || "Bank"}: <strong>{editBankModalApp.lender?.name || "Unassigned"}</strong>
                 </div>
               </div>
 
@@ -5344,7 +5161,7 @@ export default function OperationsRedesign() {
                   <option value="">Select Bank / NBFC Partner</option>
                   {lenders.map((l) => (
                     <option key={l.lender_id || l.id} value={l.lender_id || l.id}>
-                      {l.name} ({l.short_code || l.shortCode || l.lenderType || "Bank"})
+                      {l.name} ({l.short_code || l.shortCode || l.lenderType || "Lender"})
                     </option>
                   ))}
                 </select>
@@ -9116,6 +8933,8 @@ const opsStyles = `
     display: inline-flex;
     align-items: center;
   }
+  .cc-ops-page-size-control { gap: 6px; color: #64748b; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .cc-ops-page-size-control .cc-ops-select { height: 34px; padding: 0 8px; }
   .cc-filter-icon {
     position: absolute;
     left: 10px;
@@ -9329,15 +9148,33 @@ const opsStyles = `
   .cc-kcard-banker { display: inline-flex; align-items: center; gap: 4px; color: #047857; }
 
   /* Table styling */
-  .cc-ops-table-container {
-    overflow: auto;
-    max-height: calc(100vh - 270px);
-    min-height: 420px;
+  .cc-ops-table-container,
+  .cc-report-table-scroll.cc-ops-table-container {
+    overflow-x: auto !important;
+    overflow-y: auto !important;
+    max-height: calc(100vh - 190px) !important;
+    min-height: 400px;
     border: 1px solid #cbd5e1;
-    border-radius: 12px;
+    border-radius: 10px;
     background: #ffffff;
     box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
     position: relative;
+    width: 100%;
+  }
+  .cc-ops-table-container::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .cc-ops-table-container::-webkit-scrollbar-track {
+    background: #f1f5f9;
+    border-radius: 4px;
+  }
+  .cc-ops-table-container::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+  }
+  .cc-ops-table-container::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
   }
   .cc-ops-table-container table {
     width: 100%;
@@ -9357,11 +9194,11 @@ const opsStyles = `
     z-index: 20;
     background: #f1f5f9 !important;
     color: #334155;
-    font-size: 11.5px;
+    font-size: 10px !important;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
-    padding: 12px 14px;
+    letter-spacing: 0.04em;
+    padding: 6px 8px !important;
     border-bottom: 2px solid #cbd5e1;
     border-right: 1px solid #e2e8f0;
     white-space: nowrap;
@@ -9371,13 +9208,15 @@ const opsStyles = `
     border-right: none;
   }
   .cc-ops-table-container tbody td {
-    padding: 12px 14px;
-    font-size: 13px;
+    padding: 3px 6px !important;
+    font-size: 11px !important;
+    height: 36px !important;
+    line-height: 1.2;
     color: #1e293b;
     border-bottom: 1px solid #e2e8f0;
     border-right: 1px solid #edf2f7;
     background: #ffffff;
-    vertical-align: middle;
+    vertical-align: middle !important;
     transition: background-color 0.12s ease;
   }
   .cc-ops-table-container tbody td:last-child {
@@ -9389,6 +9228,113 @@ const opsStyles = `
   .cc-ops-table-container tbody tr:hover td {
     background: #f0fdf4 !important;
   }
+  /* Compact loan pipeline rows. Shared report-table rules use !important padding. */
+  .cc-ops-pipeline-table-container thead th { padding: 6px 7px !important; font-size: 10px !important; }
+  .cc-ops-pipeline-table-container tbody td {
+    padding: 4px 6px !important;
+    font-size: 11px !important;
+    line-height: 1.15;
+  }
+  .cc-ops-pipeline-table-container tbody td:first-child > small {
+    display: inline !important;
+    margin-left: 4px;
+    font-size: 9px !important;
+  }
+  .cc-ops-pipeline-table-container tbody td:first-child > div:nth-of-type(1) {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 0 !important;
+    white-space: nowrap;
+  }
+  .cc-ops-pipeline-table-container tbody td:first-child > div:nth-of-type(1) small {
+    display: inline !important;
+    font-size: 9px !important;
+  }
+  .cc-ops-pipeline-table-container tbody td:first-child > div:nth-of-type(1) strong { font-size: 11px !important; }
+  .cc-ops-pipeline-table-container tbody td:first-child > div:nth-of-type(2) {
+    margin-top: 1px !important;
+    font-size: 10px !important;
+    white-space: nowrap;
+  }
+  .cc-ops-pipeline-table-container tbody td:first-child > div:nth-of-type(2) small {
+    display: inline !important;
+    margin-left: 3px;
+    font-size: 9px !important;
+  }
+  .cc-ops-pipeline-table-container tbody td:first-child > div:nth-of-type(3) { margin-top: 2px !important; gap: 2px !important; }
+  .cc-ops-pipeline-table-container tbody td:first-child .cc-ops-source-tag,
+  .cc-ops-pipeline-table-container tbody td:first-child .cc-ops-dsa-tag {
+    padding: 1px 4px;
+    font-size: 9px;
+  }
+  .cc-ops-pipeline-table-container tbody td:nth-child(2) > div:first-child { margin-bottom: 1px !important; gap: 4px !important; }
+  .cc-ops-pipeline-table-container tbody td:nth-child(2) > div:first-child > div:first-child { width: 20px !important; height: 20px !important; }
+  .cc-ops-pipeline-table-container tbody td:nth-child(2) > div:first-child strong { display: inline !important; font-size: 10px !important; }
+  .cc-ops-pipeline-table-container tbody td:nth-child(2) > div:first-child span { display: inline !important; margin-left: 3px; font-size: 9px !important; }
+  .cc-ops-pipeline-table-container tbody td:nth-child(2) .cc-ops-badge { padding: 1px 4px !important; margin-bottom: 1px !important; font-size: 9px !important; }
+  .cc-ops-pipeline-table-container tbody td:nth-child(2) > div:last-child { margin-top: 2px !important; gap: 3px !important; }
+  .cc-ops-pipeline-table-container tbody td:nth-child(2) .cc-ops-edit-bank-btn { padding: 2px 5px !important; font-size: 9px !important; }
+  .cc-ops-pipeline-table-container .cc-ops-status-cell-inner { gap: 2px; }
+  .cc-ops-pipeline-table-container .cc-ops-clickable-status-td { padding: 4px 5px !important; vertical-align: middle; }
+  .cc-ops-pipeline-table-container .cc-substatus-pill { padding: 2px 5px; font-size: 9px; gap: 2px; }
+  .cc-ops-pipeline-table-container .cc-status-cell-time { display: none !important; }
+  .cc-ops-pipeline-table-container .cc-status-cell-remark-wrap { margin-top: 0 !important; gap: 2px !important; padding: 0 !important; border: 0 !important; background: transparent !important; }
+  .cc-ops-pipeline-table-container .cc-status-cell-remark { padding: 1px 3px; font-size: 9px !important; line-height: 1.1; max-width: 105px; }
+  .cc-ops-pipeline-table-container .cc-stage-stuck-notice {
+    display: block;
+    max-width: 125px;
+    margin-top: 2px;
+    padding: 2px 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 9px;
+    line-height: 1.1;
+  }
+  /* Keep the incoming leads queue dense enough to scan several records at once. */
+  .cc-ops-screen { gap: 8px; }
+  .cc-ops-leads-table-container { max-height: calc(100vh - 175px); min-height: 360px; }
+  .cc-ops-leads-table-container thead th { padding: 5px 7px !important; font-size: 10px !important; }
+  .cc-ops-leads-table-container tbody td {
+    height: 34px;
+    padding: 3px 6px !important;
+    font-size: 11px !important;
+    line-height: 1.15;
+    white-space: nowrap;
+  }
+  .cc-ops-leads-table-container tbody td:nth-child(9) { white-space: normal; }
+  .cc-ops-leads-table-container .cc-ops-action-btn,
+  .cc-ops-leads-table-container .cc-ops-convert-btn { padding: 4px 7px; gap: 3px; font-size: 10.5px; }
+  .cc-ops-lead-remark {
+    max-width: 220px;
+    padding: 3px 6px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+  }
+  .cc-ops-lead-remark > div:first-child {
+    max-width: 205px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+    line-height: 1.15;
+    color: #1e293b;
+    font-weight: 500;
+  }
+  .cc-ops-lead-remark-meta {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    margin-top: 1px;
+    overflow: hidden;
+    white-space: nowrap;
+    font-size: 9px;
+    line-height: 1.1;
+    color: #64748b;
+  }
+  .cc-ops-lead-remark-meta strong { overflow: hidden; text-overflow: ellipsis; }
   .cc-ops-table-row { cursor: pointer; }
   .cc-ops-table-row:hover { background: #f8fafc; }
   .cc-ops-badge {
@@ -9470,15 +9416,19 @@ const opsStyles = `
   .cc-ops-action-btn {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 5px 12px;
-    border-radius: 8px;
+    gap: 3px;
+    padding: 2px 5px !important;
+    border-radius: 5px !important;
     border: 1px solid #cbd5e1;
     background: #fff;
     color: #047857;
-    font-size: 12px;
+    font-size: 10px !important;
     font-weight: 600;
+    height: 20px !important;
+    line-height: 1 !important;
     cursor: pointer;
+    white-space: nowrap !important;
+    flex-shrink: 0;
   }
   .cc-ops-action-btn:hover { background: #047857; color: #fff; border-color: #047857; }
 
@@ -9489,15 +9439,19 @@ const opsStyles = `
   .cc-ops-convert-btn {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px 14px;
-    border-radius: 8px;
+    gap: 3px;
+    padding: 2px 6px !important;
+    border-radius: 5px !important;
     background: #047857;
     color: #fff;
     border: 0;
-    font-size: 12px;
+    font-size: 10px !important;
     font-weight: 600;
+    height: 20px !important;
+    line-height: 1 !important;
     cursor: pointer;
+    white-space: nowrap !important;
+    flex-shrink: 0;
   }
   .cc-ops-convert-btn:hover { background: #065f46; }
 
@@ -10328,19 +10282,20 @@ const opsStyles = `
   .cc-substatus-pill {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 3px 7px;
-    border-radius: 6px;
-    font-size: 11px;
+    gap: 3px;
+    padding: 1.5px 5px !important;
+    border-radius: 4px !important;
+    font-size: 10px !important;
     border: 1px solid #cbd5e1;
     background: #ffffff;
     cursor: pointer;
     transition: all 0.15s ease;
     white-space: nowrap;
+    line-height: 1.25 !important;
   }
   .cc-substatus-pill:hover {
     transform: translateY(-1px);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
   }
   .cc-substatus-pill.resolved {
     background: #ecfdf5;
@@ -10372,8 +10327,8 @@ const opsStyles = `
   .cc-ops-clickable-status-td {
     cursor: pointer;
     transition: background 0.15s ease;
-    vertical-align: top;
-    padding: 10px 10px !important;
+    vertical-align: middle !important;
+    padding: 3px 5px !important;
   }
   .cc-ops-clickable-status-td:hover {
     background: #f8fafc;
@@ -10381,26 +10336,27 @@ const opsStyles = `
   .cc-ops-status-cell-inner {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 1px !important;
     align-items: flex-start;
   }
   .cc-status-cell-time {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    font-size: 10.5px;
+    gap: 3px;
+    font-size: 9.5px;
     color: #64748b;
     font-weight: 500;
+    line-height: 1;
   }
   .cc-status-cell-remark {
-    font-size: 11px;
+    font-size: 9.5px;
     color: #334155;
     background: #f1f5f9;
     border-left: 2px solid #94a3b8;
-    padding: 2px 6px;
-    border-radius: 0 4px 4px 0;
-    line-height: 1.3;
-    max-width: 130px;
+    padding: 1px 4px;
+    border-radius: 0 3px 3px 0;
+    line-height: 1.2;
+    max-width: 110px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
