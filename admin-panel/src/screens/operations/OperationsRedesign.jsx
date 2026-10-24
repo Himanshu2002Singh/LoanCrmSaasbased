@@ -888,6 +888,19 @@ export default function OperationsRedesign() {
   });
   const [convertSubmitting, setConvertSubmitting] = useState(false);
 
+  // Scroll preservation refs
+  const pipelineTableContainerRef = useRef(null);
+  const leadsTableContainerRef = useRef(null);
+
+  // Edit Loan Amount Modal State
+  const [editAmountModalApp, setEditAmountModalApp] = useState(null);
+  const [editAmountForm, setEditAmountForm] = useState({
+    appliedAmount: "",
+    sanctionedAmount: "",
+    loanProduct: "",
+  });
+  const [editAmountSubmitting, setEditAmountSubmitting] = useState(false);
+
   // Edit Bank / Lender Modal State
   const [editBankModalApp, setEditBankModalApp] = useState(null);
   const [editBankForm, setEditBankForm] = useState({
@@ -1149,8 +1162,15 @@ export default function OperationsRedesign() {
   };
 
   // Fetch Applications with all combined filters
-  const fetchApplications = useCallback(async (page = 1) => {
-    setAppsLoading(true);
+  const fetchApplications = useCallback(async (page = 1, isSilent = false) => {
+    const scrollEl = pipelineTableContainerRef.current;
+    const prevScrollTop = scrollEl ? scrollEl.scrollTop : 0;
+    const prevScrollLeft = scrollEl ? scrollEl.scrollLeft : 0;
+    const prevWindowY = typeof window !== "undefined" ? window.scrollY : 0;
+
+    if (!isSilent) {
+      setAppsLoading(true);
+    }
     try {
       const params = {
         page,
@@ -1168,19 +1188,42 @@ export default function OperationsRedesign() {
         financialYear: filterPeriodType === "fy" && selectedFY ? selectedFY : undefined,
       };
       const res = await axios.get(`${API_URL}/applications`, { params });
-      setApplications(res.data?.applications || res.data?.data || []);
+      const fetchedApps = res.data?.applications || res.data?.data || [];
+      setApplications(fetchedApps);
       if (res.data?.summary) {
         setOpsSummary(res.data.summary);
       }
       const pagination = res.data?.pagination || {};
       setAppTotalPages(pagination.totalPages || 1);
       setAppTotalItems(pagination.totalItems || 0);
+
+      // Keep verification drawer synced if open
+      setVerificationApp((curr) => {
+        if (!curr) return null;
+        const matching = fetchedApps.find((a) => a.id === curr.id);
+        return matching ? { ...curr, ...matching } : curr;
+      });
+
+      // Restore scroll position
+      if (prevScrollTop > 0 || prevScrollLeft > 0 || prevWindowY > 0) {
+        requestAnimationFrame(() => {
+          if (pipelineTableContainerRef.current) {
+            pipelineTableContainerRef.current.scrollTop = prevScrollTop;
+            pipelineTableContainerRef.current.scrollLeft = prevScrollLeft;
+          }
+          if (prevWindowY > 0 && typeof window !== "undefined") {
+            window.scrollTo({ top: prevWindowY, behavior: "instant" });
+          }
+        });
+      }
     } catch (error) {
       console.error("Error fetching applications:", error);
       toast.error("Could not load loan applications");
       setApplications([]);
     } finally {
-      setAppsLoading(false);
+      if (!isSilent) {
+        setAppsLoading(false);
+      }
     }
   }, [
     debouncedAppSearch,
@@ -1201,8 +1244,15 @@ export default function OperationsRedesign() {
   ]);
 
   // Fetch Leads Passed to Ops with Date, Month, and FY filters
-  const fetchLeads = useCallback(async (page = 1) => {
-    setLeadsLoading(true);
+  const fetchLeads = useCallback(async (page = 1, isSilent = false) => {
+    const scrollEl = leadsTableContainerRef.current;
+    const prevScrollTop = scrollEl ? scrollEl.scrollTop : 0;
+    const prevScrollLeft = scrollEl ? scrollEl.scrollLeft : 0;
+    const prevWindowY = typeof window !== "undefined" ? window.scrollY : 0;
+
+    if (!isSilent) {
+      setLeadsLoading(true);
+    }
     try {
       const endpoint = `${API_URL}/leads`;
       const params = {
@@ -1223,12 +1273,27 @@ export default function OperationsRedesign() {
       setLeads(list);
       setLeadTotalPages(pagination.totalPages || 1);
       setLeadTotalItems(pagination.totalItems ?? pagination.total ?? list.length);
+
+      // Restore scroll position
+      if (prevScrollTop > 0 || prevScrollLeft > 0 || prevWindowY > 0) {
+        requestAnimationFrame(() => {
+          if (leadsTableContainerRef.current) {
+            leadsTableContainerRef.current.scrollTop = prevScrollTop;
+            leadsTableContainerRef.current.scrollLeft = prevScrollLeft;
+          }
+          if (prevWindowY > 0 && typeof window !== "undefined") {
+            window.scrollTo({ top: prevWindowY, behavior: "instant" });
+          }
+        });
+      }
     } catch (error) {
       console.error("Error fetching leads:", error);
       toast.error("Could not load operations leads");
       setLeads([]);
     } finally {
-      setLeadsLoading(false);
+      if (!isSilent) {
+        setLeadsLoading(false);
+      }
     }
   }, [
     debouncedLeadSearch,
@@ -1742,7 +1807,7 @@ export default function OperationsRedesign() {
         const res = await axios.get(`${API_URL}/applications/${verificationApp.id}`);
         setVerificationApp(res.data?.application);
       }
-      fetchApplications(appCurrentPage);
+      fetchApplications(appCurrentPage, true);
     } catch (error) {
       console.error(error);
       toast.error(error.response?.data?.message || "Failed to verify document");
@@ -1785,7 +1850,7 @@ export default function OperationsRedesign() {
       // Refresh
       const res = await axios.get(`${API_URL}/applications/${verificationApp.id}`);
       setVerificationApp(res.data?.application);
-      fetchApplications(appCurrentPage);
+      fetchApplications(appCurrentPage, true);
     } catch (error) {
       console.error(error);
       toast.error(error.response?.data?.message || "Failed to upload document");
@@ -1851,7 +1916,7 @@ export default function OperationsRedesign() {
           }));
         }
         setDisburseModalApp(null);
-        fetchApplications(appCurrentPage);
+        fetchApplications(appCurrentPage, true);
       } catch (error) {
         console.error("Cancel disburse error:", error);
         toast.error(error.response?.data?.message || "Failed to cancel disbursement");
@@ -1888,7 +1953,7 @@ export default function OperationsRedesign() {
           }));
         }
         setDisburseModalApp(null);
-        fetchApplications(appCurrentPage);
+        fetchApplications(appCurrentPage, true);
       } catch (error) {
         console.error("Disburse pending error:", error);
         toast.error(error.response?.data?.message || "Failed to update disbursement status");
@@ -1928,7 +1993,7 @@ export default function OperationsRedesign() {
         setApplications((prev) => prev.map((a) => (a.id === updated.id ? { ...a, ...updated, status: "DISBURSED", disbursementStatus: "COMPLETED" } : a)));
       }
       setDisburseModalApp(null);
-      fetchApplications(appCurrentPage);
+      fetchApplications(appCurrentPage, true);
 
       if (verificationApp && verificationApp.id === disburseModalApp.id) {
         setVerificationApp((prev) => ({
@@ -1998,7 +2063,7 @@ export default function OperationsRedesign() {
         }));
       }
       setAllProcessModalApp(null);
-      fetchApplications(appCurrentPage);
+      fetchApplications(appCurrentPage, true);
     } catch (error) {
       console.error("All Process Completed error:", error);
       toast.error(error.response?.data?.message || "Failed to mark all process completed");
@@ -2040,7 +2105,7 @@ export default function OperationsRedesign() {
         }));
       }
       setPdModalApp(null);
-      fetchApplications(appCurrentPage);
+      fetchApplications(appCurrentPage, true);
     } catch (err) {
       console.error(err);
       toast.error(err.response?.data?.message || "Failed to update PD status");
@@ -2081,7 +2146,7 @@ export default function OperationsRedesign() {
         }));
       }
       setQueryModalApp(null);
-      fetchApplications(appCurrentPage);
+      fetchApplications(appCurrentPage, true);
     } catch (err) {
       console.error(err);
       toast.error(err.response?.data?.message || "Failed to update Query status");
@@ -2122,7 +2187,7 @@ export default function OperationsRedesign() {
         }));
       }
       setLegalModalApp(null);
-      fetchApplications(appCurrentPage);
+      fetchApplications(appCurrentPage, true);
     } catch (err) {
       console.error(err);
       toast.error(err.response?.data?.message || "Failed to update Legal status");
@@ -2163,7 +2228,7 @@ export default function OperationsRedesign() {
         }));
       }
       setTechnicalModalApp(null);
-      fetchApplications(appCurrentPage);
+      fetchApplications(appCurrentPage, true);
     } catch (err) {
       console.error(err);
       toast.error(err.response?.data?.message || "Failed to update Technical status");
@@ -2205,7 +2270,7 @@ export default function OperationsRedesign() {
         }));
       }
       setPddModalApp(null);
-      fetchApplications(appCurrentPage);
+      fetchApplications(appCurrentPage, true);
     } catch (err) {
       console.error(err);
       toast.error(err.response?.data?.message || "Failed to update PDD status");
@@ -2247,7 +2312,7 @@ export default function OperationsRedesign() {
         }));
       }
       setOtcModalApp(null);
-      fetchApplications(appCurrentPage);
+      fetchApplications(appCurrentPage, true);
     } catch (err) {
       console.error(err);
       toast.error(err.response?.data?.message || "Failed to update OTC status");
@@ -2306,7 +2371,7 @@ export default function OperationsRedesign() {
         }));
       }
       setLoginModalApp(null);
-      fetchApplications(appCurrentPage);
+      fetchApplications(appCurrentPage, true);
     } catch (err) {
       console.error(err);
       toast.error(err.response?.data?.message || "Failed to update Login status");
@@ -2374,7 +2439,7 @@ export default function OperationsRedesign() {
         }));
       }
       setSanctionModalApp(null);
-      fetchApplications(appCurrentPage);
+      fetchApplications(appCurrentPage, true);
     } catch (err) {
       console.error(err);
       toast.error(err.response?.data?.message || "Failed to update Sanction status");
@@ -2446,7 +2511,7 @@ export default function OperationsRedesign() {
         }));
       }
       setDisbursementStageModalApp(null);
-      fetchApplications(appCurrentPage);
+      fetchApplications(appCurrentPage, true);
     } catch (err) {
       console.error(err);
       toast.error(err.response?.data?.message || "Failed to update Disbursement status");
@@ -2488,7 +2553,7 @@ export default function OperationsRedesign() {
         }));
       }
       setStageModalApp(null);
-      fetchApplications(appCurrentPage);
+      fetchApplications(appCurrentPage, true);
     } catch (err) {
       console.error(err);
       toast.error(err.response?.data?.message || "Failed to update stage");
@@ -2817,7 +2882,7 @@ export default function OperationsRedesign() {
 
       toast.success(res.data?.message || "Loan application successfully emailed to Bank RM!");
       setBankMailModalApp(null);
-      fetchApplications(appCurrentPage);
+      fetchApplications(appCurrentPage, true);
       if (verificationApp && verificationApp.id === bankMailModalApp.id) {
         setVerificationApp((prev) => ({
           ...prev,
@@ -2941,13 +3006,117 @@ export default function OperationsRedesign() {
 
       toast.success(`Bank successfully updated to ${selectedLender?.name || "selected Bank"}!`);
       setEditBankModalApp(null);
-      fetchApplications(appCurrentPage);
-      fetchLeads(leadCurrentPage);
+      fetchApplications(appCurrentPage, true);
+      fetchLeads(leadCurrentPage, true);
     } catch (error) {
       console.error("Error updating bank:", error);
       toast.error(error.response?.data?.message || "Failed to update Bank");
     } finally {
       setEditBankSubmitting(false);
+    }
+  };
+
+  // Edit Loan / Applied Amount & Sanction Amount
+  const openEditAmountModal = (app) => {
+    if (!app) return;
+    setEditAmountModalApp(app);
+    setEditAmountForm({
+      appliedAmount: app.appliedAmount ? String(app.appliedAmount) : (app.est_budget ? String(app.est_budget) : ""),
+      sanctionedAmount: app.sanctionedAmount ? String(app.sanctionedAmount) : "",
+      loanProduct: app.loanProduct || app.loan_type || "",
+    });
+  };
+
+  const handleEditAmountSubmit = async (e) => {
+    e.preventDefault();
+    const rawAmt = editAmountForm.appliedAmount.toString().replace(/,/g, "").trim();
+    if (!rawAmt || isNaN(parseFloat(rawAmt))) {
+      toast.warning("Please enter a valid Loan Amount");
+      return;
+    }
+    setEditAmountSubmitting(true);
+    try {
+      const appliedAmt = parseFloat(rawAmt);
+      const rawSanct = editAmountForm.sanctionedAmount ? editAmountForm.sanctionedAmount.toString().replace(/,/g, "").trim() : "";
+      const sanctAmt = rawSanct && !isNaN(parseFloat(rawSanct)) ? parseFloat(rawSanct) : null;
+
+      const appId = editAmountModalApp.id || editAmountModalApp.application_id;
+      const leadId = editAmountModalApp.leadId || editAmountModalApp.lead_id || editAmountModalApp.id;
+
+      if (appId) {
+        const payload = {
+          appliedAmount: appliedAmt,
+        };
+        if (sanctAmt !== null) payload.sanctionedAmount = sanctAmt;
+        if (editAmountForm.loanProduct) payload.loanProduct = editAmountForm.loanProduct;
+
+        const res = await axios.patch(`${API_URL}/applications/${appId}`, payload);
+        const updated = res.data?.application;
+
+        setApplications((prev) =>
+          Array.isArray(prev)
+            ? prev.map((a) =>
+                a.id === appId
+                  ? {
+                      ...a,
+                      ...updated,
+                      appliedAmount: appliedAmt,
+                      sanctionedAmount: sanctAmt !== null ? sanctAmt : a.sanctionedAmount,
+                      loanProduct: editAmountForm.loanProduct || a.loanProduct,
+                    }
+                  : a
+              )
+            : []
+        );
+
+        if (verificationApp && (verificationApp.id === appId || verificationApp.application_id === appId)) {
+          setVerificationApp((prev) => ({
+            ...prev,
+            ...updated,
+            appliedAmount: appliedAmt,
+            sanctionedAmount: sanctAmt !== null ? sanctAmt : prev.sanctionedAmount,
+            loanProduct: editAmountForm.loanProduct || prev.loanProduct,
+          }));
+        }
+
+        setLeads((prev) =>
+          Array.isArray(prev)
+            ? prev.map((ld) =>
+                ld.application_id === appId || ld.lead_id === leadId
+                  ? { ...ld, est_budget: appliedAmt, applied_amount: appliedAmt, sanctioned_amount: sanctAmt }
+                  : ld
+              )
+            : []
+        );
+
+        toast.success(`Loan Amount updated to ${currencyFormatter.format(appliedAmt)}!`);
+      } else if (leadId) {
+        await axios.put(`${API_URL}/leads/${leadId}`, {
+          requiredAmount: appliedAmt,
+          est_budget: appliedAmt,
+          loanType: editAmountForm.loanProduct || undefined,
+        });
+
+        setLeads((prev) =>
+          Array.isArray(prev)
+            ? prev.map((ld) =>
+                (ld.lead_id === leadId || ld.id === leadId)
+                  ? { ...ld, est_budget: appliedAmt, loan_type: editAmountForm.loanProduct || ld.loan_type }
+                  : ld
+              )
+            : []
+        );
+        toast.success(`Required Budget updated to ${currencyFormatter.format(appliedAmt)}!`);
+      }
+
+      setEditAmountModalApp(null);
+      fetchApplications(appCurrentPage, true);
+      fetchLeads(leadCurrentPage, true);
+    } catch (error) {
+      console.error("Error updating loan amount:", error);
+      toast.error(error.response?.data?.message || "Failed to update Loan Amount");
+    } finally {
+      setEditAmountSubmitting(false);
     }
   };
 
@@ -3011,7 +3180,7 @@ export default function OperationsRedesign() {
       setReassignReason("");
 
       // Refresh applications and leads queue
-      fetchApplications(appCurrentPage);
+      fetchApplications(appCurrentPage, true);
       fetchLeads(leadCurrentPage);
 
       if (verificationApp && (verificationApp.leadId === leadId || verificationApp.lead?.id === leadId)) {
@@ -3053,7 +3222,7 @@ export default function OperationsRedesign() {
       setReplyTargetQuery(null);
       setReplyResponseText("");
       fetchOpenQueries();
-      fetchApplications(appCurrentPage);
+      fetchApplications(appCurrentPage, true);
     } catch (error) {
       console.error(error);
       toast.error(error.response?.data?.message || "Failed to resolve query");
@@ -3262,7 +3431,26 @@ export default function OperationsRedesign() {
                                 </div>
                                 <div>
                                   <small>Amount</small>
-                                  <strong>{currencyFormatter.format(app.appliedAmount || 0)}</strong>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                                    <strong>{currencyFormatter.format(app.appliedAmount || 0)}</strong>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        openEditAmountModal(app);
+                                      }}
+                                      style={{
+                                        background: "none",
+                                        border: "none",
+                                        padding: 0,
+                                        cursor: "pointer",
+                                        color: "#4f46e5",
+                                      }}
+                                      title="Edit Loan Amount"
+                                    >
+                                      <Pencil size={9} />
+                                    </button>
+                                  </div>
                                 </div>
                               </div>
 
@@ -3308,7 +3496,7 @@ export default function OperationsRedesign() {
           ) : (
             /* TABLE LIST VIEW */
             <section className="cc-report-panel">
-              <div className="cc-report-table-scroll cc-ops-table-container cc-ops-pipeline-table-container">
+              <div ref={pipelineTableContainerRef} className="cc-report-table-scroll cc-ops-table-container cc-ops-pipeline-table-container">
                 <table>
                   <thead>
                     <tr>
@@ -3330,7 +3518,7 @@ export default function OperationsRedesign() {
                     </tr>
                   </thead>
                   <tbody>
-                    {appsLoading ? (
+                    {appsLoading && displayedApplications.length === 0 ? (
                       <tr>
                         <td colSpan={15} className="cc-report-empty">
                           Loading loan applications...
@@ -3361,6 +3549,30 @@ export default function OperationsRedesign() {
                             <div style={{ display: "flex", alignItems: "center", gap: 3, marginTop: 1, fontSize: 10.5, whiteSpace: "nowrap" }}>
                               <span style={{ color: "#475569" }}>{app.loanProduct}</span>:
                               <strong style={{ color: "#0f172a" }}>{currencyFormatter.format(app.appliedAmount || 0)}</strong>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openEditAmountModal(app);
+                                }}
+                                style={{
+                                  background: "#f1f5f9",
+                                  border: "1px solid #cbd5e1",
+                                  borderRadius: 3,
+                                  padding: "0 3px",
+                                  fontSize: 8.5,
+                                  height: 15,
+                                  lineHeight: "13px",
+                                  cursor: "pointer",
+                                  color: "#0f172a",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: 2,
+                                }}
+                                title="Edit Loan Amount"
+                              >
+                                <Pencil size={8} />
+                              </button>
                               {app.sanctionedAmount ? (
                                 <span style={{ color: "#0284c7", fontWeight: 600 }}>• Sanct: {currencyFormatter.format(app.sanctionedAmount)}</span>
                               ) : null}
@@ -3776,7 +3988,7 @@ export default function OperationsRedesign() {
               </p>
             </div>
 
-            <div className="cc-report-table-scroll cc-ops-table-container cc-ops-leads-table-container">
+            <div ref={leadsTableContainerRef} className="cc-report-table-scroll cc-ops-table-container cc-ops-leads-table-container">
               <table>
                 <thead>
                   <tr>
@@ -3793,7 +4005,7 @@ export default function OperationsRedesign() {
                   </tr>
                 </thead>
                 <tbody>
-                  {leadsLoading ? (
+                  {leadsLoading && leads.length === 0 ? (
                     <tr>
                       <td colSpan={10} className="cc-report-empty">
                         Loading operations leads...
@@ -3837,9 +4049,30 @@ export default function OperationsRedesign() {
                         </td>
                         <td>{lead.loan_type || "Personal Loan"}</td>
                         <td>
-                          <strong>
-                            {lead.est_budget ? `₹${numberFormatter.format(lead.est_budget)}` : "—"}
-                          </strong>
+                          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <strong>
+                              {lead.est_budget ? `₹${numberFormatter.format(lead.est_budget)}` : "—"}
+                            </strong>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openEditAmountModal({
+                                  leadId: lead.lead_id || lead.id,
+                                  application_id: lead.application_id,
+                                  applicationNumber: lead.application_number || `Lead #${formatLeadCode(lead)}`,
+                                  customer: { name: lead.name, mobile: lead.number },
+                                  appliedAmount: lead.est_budget,
+                                  loanProduct: lead.loan_type,
+                                });
+                              }}
+                              className="cc-ops-edit-bank-btn"
+                              style={{ padding: "0 4px", fontSize: 9, height: 16, lineHeight: "14px" }}
+                              title="Edit Loan Budget"
+                            >
+                              <Pencil size={8} />
+                            </button>
+                          </div>
                         </td>
                         <td>
                           {lead.bank_name ? (
@@ -3991,6 +4224,15 @@ export default function OperationsRedesign() {
                 <button
                   type="button"
                   className="cc-drawer-mail-btn"
+                  onClick={() => openEditAmountModal(verificationApp)}
+                  title="Edit Loan / Applied Amount"
+                  style={{ background: "#ecfdf5", borderColor: "#a7f3d0", color: "#047857" }}
+                >
+                  <IndianRupee size={13} /> {currencyFormatter.format(verificationApp.appliedAmount || 0)} ✏️
+                </button>
+                <button
+                  type="button"
+                  className="cc-drawer-mail-btn"
                   onClick={() => openReassignModal(verificationApp)}
                   title="Reassign this lead / application to another employee"
                   style={{ background: "#f0fdf4", borderColor: "#bbf7d0", color: "#166534" }}
@@ -4068,13 +4310,26 @@ export default function OperationsRedesign() {
                           {verificationApp.lender?.lenderType || "Bank"}: {verificationApp.lender?.name || "Unassigned"}
                           {verificationApp.lender?.shortCode ? ` (${verificationApp.lender.shortCode})` : ""}
                         </div>
-                        <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 2 }}>
+                        <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 2, display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
                           {verificationApp.assignedBanker?.name ? (
                             <span>Banker / RM: <strong>{verificationApp.assignedBanker.name}</strong> ({verificationApp.assignedBanker.phone || verificationApp.assignedBanker.email || "RM"})</span>
                           ) : (
                             <span style={{ fontStyle: "italic" }}>No specific Banker RM assigned</span>
                           )}
                           {" • "}Product: <strong>{verificationApp.loanProduct || "Loan"}</strong>
+                          {" • "}Amount: <strong style={{ color: "#047857" }}>{currencyFormatter.format(verificationApp.appliedAmount || 0)}</strong>
+                          {verificationApp.sanctionedAmount ? (
+                            <span style={{ color: "#0284c7" }}> • Sanctioned: <strong>{currencyFormatter.format(verificationApp.sanctionedAmount)}</strong></span>
+                          ) : null}
+                          <button
+                            type="button"
+                            onClick={() => openEditAmountModal(verificationApp)}
+                            className="cc-ops-edit-bank-btn"
+                            style={{ marginLeft: 4, padding: "0 5px", fontSize: 10, height: 18 }}
+                            title="Edit Loan Amount"
+                          >
+                            <Pencil size={8} /> Edit Amount
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -4082,9 +4337,9 @@ export default function OperationsRedesign() {
                       type="button"
                       onClick={() => openEditBankModal(verificationApp)}
                       className="cc-ops-edit-bank-btn"
-                      title="Edit / Update Assigned Bank Institution & Banker"
+                      title={`Edit / Update Assigned ${verificationApp.lender?.lenderType || "Bank"} Institution & Banker`}
                     >
-                      <Pencil size={11} /> Edit Bank
+                      <Pencil size={11} /> Edit {verificationApp.lender?.lenderType || "Bank"}
                     </button>
                   </div>
 
@@ -5211,6 +5466,110 @@ export default function OperationsRedesign() {
                   disabled={editBankSubmitting}
                 >
                   <Building2 size={15} /> {editBankSubmitting ? "Updating..." : "Update Bank"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Loan Amount Modal */}
+      {editAmountModalApp && (
+        <div className="cc-modal-overlay" onClick={() => !editAmountSubmitting && setEditAmountModalApp(null)}>
+          <div className="cc-modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
+            <div className="cc-modal-head">
+              <div>
+                <p>Operations Financials</p>
+                <h3>Edit Loan Amount</h3>
+              </div>
+              <button type="button" onClick={() => !editAmountSubmitting && setEditAmountModalApp(null)}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <form className="cc-modal-form" onSubmit={handleEditAmountSubmit}>
+              <div
+                style={{
+                  background: "#f0fdf4",
+                  border: "1px solid #bbf7d0",
+                  borderRadius: 10,
+                  padding: "10px 14px",
+                  fontSize: 13,
+                  color: "#166534",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 3,
+                }}
+              >
+                <div>
+                  <strong>Record:</strong> {editAmountModalApp.applicationNumber || `Lead #${editAmountModalApp.leadId || editAmountModalApp.id}`}
+                </div>
+                <div>
+                  <strong>Borrower / Customer:</strong> {editAmountModalApp.customer?.name || editAmountModalApp.name || "Customer"}
+                  {(editAmountModalApp.customer?.mobile || editAmountModalApp.number) ? ` (${editAmountModalApp.customer?.mobile || editAmountModalApp.number})` : ""}
+                </div>
+              </div>
+
+              <label className="cc-modal-field">
+                <span>Applied Loan Amount (₹) *</span>
+                <input
+                  type="number"
+                  placeholder="e.g. 5000000"
+                  value={editAmountForm.appliedAmount}
+                  onChange={(e) => setEditAmountForm({ ...editAmountForm, appliedAmount: e.target.value })}
+                  required
+                  autoFocus
+                />
+                {editAmountForm.appliedAmount && !isNaN(parseFloat(editAmountForm.appliedAmount)) ? (
+                  <small style={{ color: "#047857", fontWeight: 600, marginTop: 3 }}>
+                    In words: {currencyFormatter.format(parseFloat(editAmountForm.appliedAmount))}
+                  </small>
+                ) : null}
+              </label>
+
+              {editAmountModalApp.applicationNumber && (
+                <label className="cc-modal-field">
+                  <span>Sanctioned Amount (₹) (Optional)</span>
+                  <input
+                    type="number"
+                    placeholder="e.g. 4500000 (if sanctioned)"
+                    value={editAmountForm.sanctionedAmount}
+                    onChange={(e) => setEditAmountForm({ ...editAmountForm, sanctionedAmount: e.target.value })}
+                  />
+                  {editAmountForm.sanctionedAmount && !isNaN(parseFloat(editAmountForm.sanctionedAmount)) ? (
+                    <small style={{ color: "#0284c7", fontWeight: 600, marginTop: 3 }}>
+                      Sanctioned: {currencyFormatter.format(parseFloat(editAmountForm.sanctionedAmount))}
+                    </small>
+                  ) : null}
+                </label>
+              )}
+
+              <label className="cc-modal-field">
+                <span>Loan Product / Type (Optional)</span>
+                <input
+                  type="text"
+                  placeholder="e.g. Home Loan, Personal Loan, LAP"
+                  value={editAmountForm.loanProduct}
+                  onChange={(e) => setEditAmountForm({ ...editAmountForm, loanProduct: e.target.value })}
+                />
+              </label>
+
+              <div className="cc-modal-actions">
+                <button
+                  type="button"
+                  className="cc-modal-btn ghost"
+                  onClick={() => setEditAmountModalApp(null)}
+                  disabled={editAmountSubmitting}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="cc-modal-btn primary"
+                  disabled={editAmountSubmitting}
+                  style={{ background: "#059669", borderColor: "#059669" }}
+                >
+                  <IndianRupee size={15} /> {editAmountSubmitting ? "Updating..." : "Save Loan Amount"}
                 </button>
               </div>
             </form>
