@@ -15,6 +15,7 @@ class ApiConstants {
   static String get changePassword => '$baseUrl/auth/change-password';
   static String get privacyPolicyUrl => 'https://loancrm.trustingbrains.com/privacy-policy';
   static String get accountDeletionUrl => 'https://loancrm.trustingbrains.com/delete-account';
+  static String get deleteAccount => '$baseUrl/auth/delete-account';
 
   // Dashboard & Reports
   static String get dashboardReport => '$baseUrl/reports/dashboard';

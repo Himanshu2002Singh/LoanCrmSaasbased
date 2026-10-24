@@ -19,32 +19,33 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
   }
 
   Future<void> _checkAuth() async {
-    await Future.delayed(const Duration(milliseconds: 1500));
+    // Show splash animation for at least 1200ms
+    final delayFuture = Future.delayed(const Duration(milliseconds: 1200));
+
+    bool isAuthenticated = false;
+    try {
+      // Check auth state with a maximum timeout of 2.5 seconds so app NEVER hangs on splash
+      await ref.read(currentUserProvider.notifier).checkAuth().timeout(
+        const Duration(milliseconds: 2500),
+        onTimeout: () {
+          debugPrint('Auth check timed out on splash screen. Proceeding to login.');
+        },
+      );
+      final user = ref.read(currentUserProvider).valueOrNull;
+      isAuthenticated = user != null;
+    } catch (e) {
+      debugPrint('Error checking auth on splash: $e');
+      isAuthenticated = false;
+    }
+
+    await delayFuture;
     if (!mounted) return;
 
-    final authState = ref.read(currentUserProvider);
-    authState.when(
-      data: (user) {
-        if (user != null) {
-          context.go('/dashboard');
-        } else {
-          context.go('/login');
-        }
-      },
-      error: (_, __) => context.go('/login'),
-      loading: () {
-        // Listen to state changes
-        ref.listenManual(currentUserProvider, (prev, next) {
-          next.whenData((user) {
-            if (user != null) {
-              context.go('/dashboard');
-            } else {
-              context.go('/login');
-            }
-          });
-        });
-      },
-    );
+    if (isAuthenticated) {
+      context.go('/dashboard');
+    } else {
+      context.go('/login');
+    }
   }
 
   @override

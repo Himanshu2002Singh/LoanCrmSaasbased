@@ -1,7 +1,7 @@
 name: capital_care
 description: "A modernized CRM app built with Flutter and Riverpod."
 publish_to: "none"
-version: 1.0.1+9
+version: 1.0.0+1
 
 environment:
   sdk: ^3.7.2

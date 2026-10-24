@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/constants/api_constants.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../core/utils/provider_reset.dart';
 import '../../../core/widgets/custom_button.dart';
 import '../../../core/widgets/status_badge.dart';
 import '../providers/auth_provider.dart';
@@ -171,20 +172,21 @@ class ProfileScreen extends ConsumerWidget {
                       const Divider(height: 1),
                       ListTile(
                         contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.delete_outline_rounded, color: AppColors.error),
+                        leading: const Icon(Icons.delete_forever_rounded, color: AppColors.error),
                         title: const Text(
-                          'Request Account Deletion',
+                          'Delete Account',
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
                             color: AppColors.error,
                           ),
                         ),
-                        trailing: const Icon(Icons.open_in_new_rounded, size: 16, color: AppColors.textMuted),
-                        onTap: () async {
-                          final uri = Uri.parse(ApiConstants.accountDeletionUrl);
-                          await launchUrl(uri, mode: LaunchMode.externalApplication);
-                        },
+                        subtitle: const Text(
+                          'Permanently delete account & all personal data',
+                          style: TextStyle(fontSize: 11, color: AppColors.textMuted),
+                        ),
+                        trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.error),
+                        onTap: () => _confirmDeleteAccount(context, ref),
                       ),
                     ],
                   ),
@@ -240,12 +242,105 @@ class ProfileScreen extends ConsumerWidget {
     );
   }
 
+  Future<void> _confirmDeleteAccount(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: AppColors.error, size: 24),
+            SizedBox(width: 8),
+            Text('Delete Account?', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18)),
+          ],
+        ),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Are you sure you want to permanently delete your account?',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+            ),
+            SizedBox(height: 10),
+            Text(
+              'This action is irreversible and immediate. All your personal profile data, authentication credentials, GPS attendance logs, and personal notes will be permanently erased without delay in compliance with privacy guidelines.',
+              style: TextStyle(fontSize: 12, color: AppColors.textSecondary, height: 1.4),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.error,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete Permanently', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && context.mounted) {
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => const Center(
+          child: Card(
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(strokeWidth: 3),
+                  SizedBox(width: 16),
+                  Text('Deleting account...', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
+      try {
+        await ref.read(currentUserProvider.notifier).deleteAccount();
+        invalidateAllAppProvidersFromWidget(ref);
+        if (context.mounted) {
+          Navigator.of(context, rootNavigator: true).pop(); // dismiss loading dialog
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Your account and personal data have been permanently deleted.'),
+              backgroundColor: AppColors.success,
+            ),
+          );
+          context.go('/login');
+        }
+      } catch (e) {
+        if (context.mounted) {
+          Navigator.of(context, rootNavigator: true).pop(); // dismiss loading dialog
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to delete account: ${e.toString().replaceAll('ApiException: ', '')}'),
+              backgroundColor: AppColors.error,
+            ),
+          );
+        }
+      }
+    }
+  }
+
   Future<void> _confirmLogout(BuildContext context, WidgetRef ref) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Confirm Logout'),
-        content: const Text('Are you sure you want to log out of Capital Care CRM?'),
+        content: const Text('Are you sure you want to log out of Loan CRM?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -262,6 +357,7 @@ class ProfileScreen extends ConsumerWidget {
 
     if (confirmed == true) {
       await ref.read(currentUserProvider.notifier).logout();
+      invalidateAllAppProvidersFromWidget(ref);
       if (context.mounted) {
         context.go('/login');
       }

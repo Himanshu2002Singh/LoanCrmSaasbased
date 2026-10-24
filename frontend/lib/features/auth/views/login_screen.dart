@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/networking/api_exception.dart';
+import '../../../core/utils/provider_reset.dart';
 import '../../../core/widgets/custom_button.dart';
 import '../../../core/widgets/custom_text_field.dart';
 import '../../../core/widgets/subscription_expired_dialog.dart';
@@ -43,6 +44,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             _identifierController.text.trim(),
             _passwordController.text,
           );
+      invalidateAllAppProvidersFromWidget(ref);
       if (mounted) {
         context.go('/dashboard');
       }
@@ -215,7 +217,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 const SizedBox(height: 24),
                 Center(
                   child: Text(
-                    'Capital Care SaaS CRM v2.0',
+                    'Designed & Developed by Trusting Brains',
                     style: TextStyle(
                       fontSize: 12,
                       color: AppColors.textMuted.withValues(alpha: 0.8),

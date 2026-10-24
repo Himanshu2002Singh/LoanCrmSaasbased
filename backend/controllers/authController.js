@@ -254,5 +254,85 @@ exports.updateProfile = async (req, res) => {
   }
 };
 
+/**
+ * DELETE /api/auth/delete-account
+ * Apple App Store Guideline 5.1.1(v) Compliant
+ * Permanently removes user account, credentials, and personal telemetry without delay.
+ */
+exports.deleteAccount = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const user = await User.findByPk(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (user.role === ROLES.SUPERADMIN) {
+      return res.status(403).json({
+        message: "Platform SuperAdmin accounts cannot be deleted directly from mobile app.",
+      });
+    }
+
+    const {
+      Attendance,
+      Notification,
+      Note,
+      Task,
+      FollowUp,
+      Lead,
+      CallLog,
+    } = require("../models");
+
+    // 1. Permanently delete user personal telemetry & private records
+    if (Attendance) await Attendance.destroy({ where: { userId } }).catch(() => {});
+    if (Notification) await Notification.destroy({ where: { recipientId: userId } }).catch(() => {});
+    if (Note) await Note.destroy({ where: { userId } }).catch(() => {});
+    if (Task) await Task.destroy({ where: { userId } }).catch(() => {});
+    if (FollowUp) await FollowUp.destroy({ where: { userId } }).catch(() => {});
+    if (CallLog) await CallLog.destroy({ where: { userId } }).catch(() => {});
+
+    // 2. Unassign any leads currently assigned to this user
+    if (Lead) {
+      await Lead.update(
+        { assignedEmployeeId: null },
+        { where: { assignedEmployeeId: userId } }
+      ).catch(() => {});
+      await Lead.update(
+        { assignedManagerId: null },
+        { where: { assignedManagerId: userId } }
+      ).catch(() => {});
+    }
+
+    // 3. Clear subordinate manager relationships
+    await User.update(
+      { managerId: null },
+      { where: { managerId: userId } }
+    ).catch(() => {});
+
+    // 4. Log deletion for compliance audit before hard delete
+    await logActivity(req, {
+      recordType: "User",
+      recordId: user.id,
+      action: "DELETED",
+      remarks: `User ${user.name} (${user.email || user.phone}) permanently deleted their account via mobile app in compliance with App Store guidelines.`,
+      companyId: user.companyId,
+    }).catch(() => {});
+
+    // 5. Real hard delete from database
+    await user.destroy();
+
+    return res.status(200).json({
+      success: true,
+      message: "Your account and associated personal data have been permanently deleted.",
+    });
+  } catch (error) {
+    console.error("[auth] deleteAccount error:", error);
+    return res.status(500).json({
+      message: "Failed to delete account. Please try again or contact support.",
+      error: error.message,
+    });
+  }
+};
+
 exports.publicUser = publicUser;
 

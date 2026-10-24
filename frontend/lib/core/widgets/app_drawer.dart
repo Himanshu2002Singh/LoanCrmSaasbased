@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../constants/api_constants.dart';
 import '../constants/app_colors.dart';
+import '../utils/provider_reset.dart';
 import '../widgets/status_badge.dart';
 import '../../features/auth/providers/auth_provider.dart';
 
@@ -62,7 +63,7 @@ class AppDrawer extends ConsumerWidget {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        user?.company?.name ?? 'Capital Care CRM',
+                        user?.company?.name ?? 'Trusting Brains CRM',
                         style: TextStyle(
                           color: Colors.white.withValues(alpha: 0.7),
                           fontSize: 12,
@@ -279,6 +280,7 @@ class AppDrawer extends ConsumerWidget {
         Navigator.pop(context); // close drawer
       }
       await ref.read(currentUserProvider.notifier).logout();
+      invalidateAllAppProvidersFromWidget(ref);
       if (context.mounted) {
         context.go('/login');
       }

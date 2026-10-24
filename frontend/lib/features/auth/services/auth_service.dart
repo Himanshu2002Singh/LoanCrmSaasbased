@@ -34,7 +34,7 @@ class AuthService {
       final token = await ApiClient.getToken();
       if (token == null || token.isEmpty) return null;
 
-      final response = await ApiClient.get(ApiConstants.me);
+      final response = await ApiClient.get(ApiConstants.me).timeout(const Duration(seconds: 4));
       final userData = response['user'] ?? response['data']?['user'] ?? response;
       final user = UserModel.fromJson(userData);
       await _cacheUser(user);
@@ -62,6 +62,11 @@ class AuthService {
     await ApiClient.clearToken();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(userPrefKey);
+  }
+
+  Future<void> deleteAccount() async {
+    await ApiClient.delete(ApiConstants.deleteAccount);
+    await logout();
   }
 
   Future<bool> isAuthenticated() async {

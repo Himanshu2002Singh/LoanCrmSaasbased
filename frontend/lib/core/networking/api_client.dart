@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'api_exception.dart';
 
 class SubscriptionEvent {
@@ -20,7 +22,14 @@ class SubscriptionEvent {
 }
 
 class ApiClient {
-  static const _storage = FlutterSecureStorage();
+  static const _storage = FlutterSecureStorage(
+    iOptions: IOSOptions(
+      accessibility: KeychainAccessibility.first_unlock,
+    ),
+    aOptions: AndroidOptions(
+      encryptedSharedPreferences: true,
+    ),
+  );
   static const String tokenKey = 'auth_token';
 
   static final _subscriptionEventsController = StreamController<SubscriptionEvent>.broadcast();
@@ -38,15 +47,48 @@ class ApiClient {
   }
 
   static Future<String?> getToken() async {
-    return await _storage.read(key: tokenKey);
+    try {
+      final token = await _storage.read(key: tokenKey).timeout(const Duration(seconds: 2));
+      if (token != null && token.isNotEmpty) return token;
+    } catch (e) {
+      debugPrint('SecureStorage getToken error: $e');
+    }
+    // Fallback to SharedPreferences
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString(tokenKey);
+    } catch (e) {
+      debugPrint('SharedPreferences getToken fallback error: $e');
+      return null;
+    }
   }
 
   static Future<void> saveToken(String token) async {
-    await _storage.write(key: tokenKey, value: token);
+    try {
+      await _storage.write(key: tokenKey, value: token).timeout(const Duration(seconds: 2));
+    } catch (e) {
+      debugPrint('SecureStorage saveToken error: $e');
+    }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(tokenKey, token);
+    } catch (e) {
+      debugPrint('SharedPreferences saveToken fallback error: $e');
+    }
   }
 
   static Future<void> clearToken() async {
-    await _storage.delete(key: tokenKey);
+    try {
+      await _storage.delete(key: tokenKey).timeout(const Duration(seconds: 2));
+    } catch (e) {
+      debugPrint('SecureStorage clearToken error: $e');
+    }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(tokenKey);
+    } catch (e) {
+      debugPrint('SharedPreferences clearToken fallback error: $e');
+    }
   }
 
   static Future<Map<String, String>> _getHeaders({bool isJson = true}) async {

@@ -230,10 +230,10 @@ export default function PrivacyPolicyScreen() {
                       </td>
                     </tr>
                     <tr>
-                      <td className="p-3 font-mono font-medium text-blue-600">READ_EXTERNAL_STORAGE / READ_MEDIA</td>
+                      <td className="p-3 font-mono font-medium text-blue-600">Android System Photo / Document Picker (SAF)</td>
                       <td className="p-3 font-semibold text-slate-800">User Initiated</td>
                       <td className="p-3">
-                        Enables the selection of existing PDF files or gallery images for loan application submission.
+                        Utilizes the secure Android System Photo Picker and Storage Access Framework to select PDF documents or images without requiring broad device storage permissions.
                       </td>
                     </tr>
                     <tr>
